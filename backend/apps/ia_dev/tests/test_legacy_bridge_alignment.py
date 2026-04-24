@@ -166,6 +166,23 @@ class LegacyBridgeLexicalHardeningTests(SimpleTestCase):
         self.assertEqual(capability_ids[1], "empleados.count.active.v1")
         self.assertEqual(capability_ids[2], "empleados.count.active.v1")
 
+    def test_employee_turnover_routes_to_empleados_capability_without_count_word(self):
+        classification = {
+            "intent": "knowledge_request",
+            "domain": "empleados",
+            "output_mode": "table",
+            "needs_database": True,
+            "used_tools": [],
+            "needs_personal_join": False,
+        }
+
+        resolved = self.bridge.resolve(
+            message="Rotación de empelados de I&M",
+            classification=classification,
+        )
+
+        self.assertEqual(str(resolved.get("capability_id") or ""), "empleados.count.active.v1")
+
     def test_supervisor_and_jefe_directo_queries_converge(self):
         classification = {
             "intent": "attendance_query",

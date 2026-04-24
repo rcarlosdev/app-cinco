@@ -7,6 +7,7 @@ from typing import Any
 
 from django.db import connections
 
+from apps.ia_dev.application.taxonomia_dominios import normalizar_codigo_dominio
 from apps.ia_dev.services.sql_store import IADevSqlStore
 
 
@@ -215,21 +216,13 @@ class DictionaryToolService:
         except Exception:
             # No bloqueamos lectura semantica si no se puede crear estructura.
             pass
-        domain_key = (domain or "general").strip().lower()
+        domain_key = normalizar_codigo_dominio(domain or "general")
         code_map = {
-            "attendance": "AUSENTISMOS",
             "ausentismo": "AUSENTISMOS",
             "empleados": "EMPLEADOS",
-            "employee": "EMPLEADOS",
-            "employees": "EMPLEADOS",
-            "personal": "EMPLEADOS",
-            "rrhh": "EMPLEADOS",
-            "transport": "TRANSPORTE",
-            "operations": "OPERACIONES",
-            "viatics": "VIATICOS",
-            "payroll": "NOMINA",
-            "audit": "AUDITORIA",
             "general": "GENERAL",
+            "knowledge": "GENERAL",
+            "legacy": "GENERAL",
         }
         domain_code = code_map.get(domain_key, "GENERAL")
 

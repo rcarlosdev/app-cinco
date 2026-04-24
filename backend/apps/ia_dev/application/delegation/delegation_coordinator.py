@@ -13,7 +13,7 @@ from apps.ia_dev.application.delegation.task_aggregator import TaskAggregator
 from apps.ia_dev.application.delegation.task_contracts import DelegationResult, DelegationTask
 from apps.ia_dev.application.delegation.task_planner import TaskPlanner
 from apps.ia_dev.application.policies.policy_guard import PolicyAction, PolicyGuard
-from apps.ia_dev.domains.ausentismo.handler import AusentismoHandler
+from apps.ia_dev.domains.ausentismo.handler_delegacion import AusentismoDelegacionHandler
 from apps.ia_dev.domains.empleados.handler import EmpleadosHandler
 
 
@@ -25,14 +25,14 @@ class DelegationCoordinator:
         planner: TaskPlanner | None = None,
         aggregator: TaskAggregator | None = None,
         policy_guard: PolicyGuard | None = None,
-        ausentismo_handler: AusentismoHandler | None = None,
+        ausentismo_handler: AusentismoDelegacionHandler | None = None,
         empleados_handler: EmpleadosHandler | None = None,
     ):
         self.registry = registry or DomainRegistry()
         self.planner = planner or TaskPlanner(domain_registry=self.registry)
         self.aggregator = aggregator or TaskAggregator()
         self.policy_guard = policy_guard or PolicyGuard()
-        self.ausentismo_handler = ausentismo_handler or AusentismoHandler()
+        self.ausentismo_handler = ausentismo_handler or AusentismoDelegacionHandler()
         self.empleados_handler = empleados_handler or EmpleadosHandler()
 
     @staticmethod

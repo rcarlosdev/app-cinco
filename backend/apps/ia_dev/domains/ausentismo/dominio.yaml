@@ -62,7 +62,7 @@ capacidades:
     nombre: tendencia_mensual
     tipo: analytics
 skills_metadata:
-  - skill_code: attendance_recurrence
+  - skill_code: ausentismo_recurrencia
     skill_type: analysis
 flags:
   delegation_enabled: true

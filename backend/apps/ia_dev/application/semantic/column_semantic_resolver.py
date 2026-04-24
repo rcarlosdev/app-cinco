@@ -7,6 +7,7 @@ from typing import Any
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     ColumnSemanticResolution,
 )
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 
 
 class ColumnSemanticResolver:
@@ -17,11 +18,6 @@ class ColumnSemanticResolver:
     _COUNT_METRIC_TOKENS = ("cantidad", "cuantos", "cuantas", "total", "numero")
     _DATE_HINTS = ("fecha", "periodo", "dia", "mes", "year", "ano")
     _IDENTIFIER_HINTS = ("cedula", "identificacion", "documento", "id_empleado")
-    _DETAIL_IDENTIFIER_PATTERNS = (
-        r"\bmovil(?:\s+(?:de|del|la|el))?\s+([a-z0-9_-]{3,40})\b",
-        r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+([a-z0-9_-]{3,40})\b",
-    )
-
     @staticmethod
     def _normalize_text(value: str | None) -> str:
         lowered = str(value or "").strip().lower()
@@ -209,13 +205,8 @@ class ColumnSemanticResolver:
         if movil_profile is None:
             return None
 
-        for pattern in self._DETAIL_IDENTIFIER_PATTERNS:
-            token_match = re.search(pattern, normalized_message)
-            if not token_match:
-                continue
-            value = str(token_match.group(1) or "").strip()
-            if pattern.endswith(r"de\s+([a-z0-9_-]{3,40})\b") and not self._has_letters_and_digits(value):
-                continue
+        value = EmployeeIdentifierService.extract_movil_identifier(message or normalized_message)
+        if value:
             logical = str(movil_profile.get("logical_name") or movil_profile.get("column_name") or "movil").strip().lower()
             return logical, value
         return None

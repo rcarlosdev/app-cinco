@@ -13,7 +13,9 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     ResolvedQuerySpec,
 )
 from apps.ia_dev.application.delegation.task_contracts import DelegationResult, DelegationTask
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.memory_service import SessionMemoryStore
+from apps.ia_dev.services.organizational_context_service import OrganizationalContextService
 
 
 @dataclass(slots=True)
@@ -27,8 +29,9 @@ class EmpleadosHandleResult:
 class EmpleadosHandler:
     _ALLOWED_TEMPORAL_COLUMNS = {"fecha_ingreso", "fecha_egreso"}
 
-    def __init__(self, *, service: EmpleadoService | None = None):
+    def __init__(self, *, service: EmpleadoService | None = None, org_context: OrganizationalContextService | None = None):
         self.service = service or EmpleadoService()
+        self.org_context = org_context or OrganizationalContextService()
 
     def handle(
         self,
@@ -126,6 +129,9 @@ class EmpleadosHandler:
                     execution_plan=execution_plan,
                     resolved_query=resolved_query,
                 )
+                org_resolution = self._safe_resolve_org_reference(message=message)
+                if org_resolution.get("resolved"):
+                    runtime_filters.update(dict(org_resolution.get("filters") or {}))
                 temporal_scope = self._resolve_temporal_scope(
                     execution_plan=execution_plan,
                 )
@@ -133,8 +139,110 @@ class EmpleadosHandler:
                     execution_plan=execution_plan,
                     resolved_query=resolved_query,
                 )
+                is_turnover_query = self._is_turnover_query(
+                    message=message,
+                    resolved_query=resolved_query,
+                    execution_plan=execution_plan,
+                )
+                if is_turnover_query and not temporal_scope:
+                    temporal_scope = self._resolve_turnover_temporal_scope(
+                        execution_plan=execution_plan,
+                        resolved_query=resolved_query,
+                    )
+                trace_phase = "empleados_count_active"
 
-                if group_dimensions:
+                if is_turnover_query:
+                    trace_phase = "empleados_turnover"
+                    used_tools.append("get_empleados_turnover_rate")
+                    if group_dimensions:
+                        output_mode = "table"
+                        grouped_rows, filtros_aplicados = self.obtener_rotacion_personal_agrupada(
+                            consulta=message,
+                            temporal_scope=temporal_scope,
+                            filters=runtime_filters,
+                            group_dimensions=group_dimensions,
+                        )
+                        group_labels = [
+                            str(item.get("logical_name") or item.get("physical_name") or "grupo").strip().lower()
+                            for item in list(group_dimensions or [])
+                            if isinstance(item, dict)
+                        ]
+                        total_activos = sum(int(item.get("total_egresos") or 0) for item in grouped_rows)
+                        payload["kpis"] = {
+                            "total_egresos": int(total_activos),
+                            "total_grupos": int(len(grouped_rows)),
+                        }
+                        payload["table"] = {
+                            "columns": [
+                                *group_labels,
+                                "total_egresos",
+                                "total_ingresos",
+                                "planta_inicio",
+                                "planta_fin",
+                                "planta_promedio",
+                                "rotacion_porcentaje",
+                            ],
+                            "rows": grouped_rows,
+                            "rowcount": len(grouped_rows),
+                        }
+                        payload["labels"] = [
+                            " | ".join(str(item.get(label) or "SIN_DATO") for label in group_labels)
+                            for item in grouped_rows[:10]
+                        ]
+                        payload["series"] = [
+                            {
+                                "name": "rotacion_porcentaje",
+                                "data": [float(item.get("rotacion_porcentaje") or 0.0) for item in grouped_rows[:10]],
+                            }
+                        ]
+                        reply = self._build_grouped_turnover_reply(
+                            rows=grouped_rows,
+                            group_labels=group_labels,
+                            temporal_scope=temporal_scope,
+                        )
+                    else:
+                        group_dimensions = []
+                        turnover_stats, filtros_aplicados = self.obtener_rotacion_personal(
+                            consulta=message,
+                            temporal_scope=temporal_scope,
+                            filters=runtime_filters,
+                        )
+                        total_activos = int(turnover_stats.get("total_egresos") or 0)
+                        payload["kpis"] = {
+                            "rotacion_porcentaje": float(turnover_stats.get("rotacion_porcentaje") or 0.0),
+                            "total_egresos": int(turnover_stats.get("total_egresos") or 0),
+                            "total_ingresos": int(turnover_stats.get("total_ingresos") or 0),
+                            "planta_promedio": float(turnover_stats.get("planta_promedio") or 0.0),
+                            "planta_inicio": int(turnover_stats.get("planta_inicio") or 0),
+                            "planta_fin": int(turnover_stats.get("planta_fin") or 0),
+                        }
+                        payload["table"] = {
+                            "columns": [
+                                "fecha_inicio",
+                                "fecha_fin",
+                                "total_egresos",
+                                "total_ingresos",
+                                "planta_inicio",
+                                "planta_fin",
+                                "planta_promedio",
+                                "rotacion_porcentaje",
+                                "denominador_fuente",
+                            ],
+                            "rows": [turnover_stats],
+                            "rowcount": 1,
+                        }
+                        reply = self._build_turnover_reply(stats=turnover_stats)
+                    payload["insights"] = [
+                        (
+                            "Rotacion de personal calculada como egresos inactivos del periodo sobre "
+                            "planta promedio estimada."
+                        )
+                    ]
+                    if org_resolution.get("resolved"):
+                        payload["insights"].append(
+                            f"Filtro organizacional aplicado: {dict(org_resolution.get('filters') or {})}."
+                        )
+                elif group_dimensions:
                     output_mode = "table"
                     grouped_rows, filtros_aplicados = self.obtener_cantidad_agrupada_por_estado(
                         consulta=message,
@@ -229,7 +337,7 @@ class EmpleadosHandler:
                     else:
                         reply = f"Cantidad de empleados {target_status.lower()}: {int(total_activos)}."
                 _push_trace(
-                    "empleados_count_active",
+                    trace_phase,
                     "ok",
                     {
                         "capability_id": capability_id,
@@ -337,6 +445,61 @@ class EmpleadosHandler:
         )
         queryset = self.service.listar_runtime(query_params=query_params)
         return int(queryset.count()), query_params
+
+    def obtener_rotacion_personal(
+        self,
+        *,
+        consulta: str = "",
+        temporal_scope: dict[str, Any] | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        query_params = self._build_query_params(
+            consulta=consulta,
+            estado="INACTIVO",
+            temporal_scope=temporal_scope,
+            filters=filters,
+        )
+        stats = self.service.calcular_rotacion_personal(query_params=query_params)
+        return dict(stats or {}), query_params
+
+    def obtener_rotacion_personal_agrupada(
+        self,
+        *,
+        consulta: str = "",
+        temporal_scope: dict[str, Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        group_dimensions: list[dict[str, str]],
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        query_params = self._build_query_params(
+            consulta=consulta,
+            estado="INACTIVO",
+            temporal_scope=temporal_scope,
+            filters=filters,
+        )
+        normalized_dimensions = [
+            {
+                "logical_name": str(item.get("logical_name") or item.get("physical_name") or "grupo").strip().lower(),
+                "physical_name": str(item.get("physical_name") or item.get("logical_name") or "grupo").strip().lower(),
+            }
+            for item in list(group_dimensions or [])
+            if isinstance(item, dict)
+        ]
+        physical_names = [str(item.get("physical_name") or item.get("logical_name") or "grupo") for item in normalized_dimensions]
+        logical_names = [str(item.get("logical_name") or "grupo") for item in normalized_dimensions]
+        rows = self.service.calcular_rotacion_personal_agrupada(
+            query_params=query_params,
+            group_by_field=physical_names,
+            limit=200,
+        )
+        normalized_rows = []
+        for row in list(rows or []):
+            normalized = dict(row or {})
+            for idx, physical in enumerate(physical_names):
+                logical = logical_names[idx]
+                if logical != physical and physical in normalized:
+                    normalized[logical] = normalized.pop(physical)
+            normalized_rows.append(normalized)
+        return normalized_rows, query_params
 
     def obtener_cantidad_agrupada_por_estado(
         self,
@@ -491,7 +654,7 @@ class EmpleadosHandler:
                 value = str(source.get(key) or "").strip()
                 if value:
                     merged.setdefault(key, value)
-        return merged
+        return EmployeeIdentifierService.prune_redundant_search_filter(merged)
 
     @staticmethod
     def _build_employee_detail_reply(
@@ -527,6 +690,83 @@ class EmpleadosHandler:
             )
         preview = ", ".join(str(item.get("nombre_completo") or item.get("cedula") or "N/D") for item in empleados[:3])
         return f"Encontre {len(empleados)} empleados que coinciden. Primeros resultados: {preview}."
+
+    @staticmethod
+    def _build_turnover_reply(*, stats: dict[str, Any]) -> str:
+        return (
+            f"Rotacion de personal entre {stats.get('fecha_inicio')} y {stats.get('fecha_fin')}: "
+            f"{float(stats.get('rotacion_porcentaje') or 0.0):.2f}%. "
+            f"Egresos: {int(stats.get('total_egresos') or 0)}. "
+            f"Ingresos: {int(stats.get('total_ingresos') or 0)}. "
+            f"Planta promedio: {float(stats.get('planta_promedio') or 0.0):.2f} "
+            f"(inicio {int(stats.get('planta_inicio') or 0)}, fin {int(stats.get('planta_fin') or 0)})."
+        )
+
+    @staticmethod
+    def _build_grouped_turnover_reply(
+        *,
+        rows: list[dict[str, Any]],
+        group_labels: list[str],
+        temporal_scope: dict[str, Any],
+    ) -> str:
+        label = " y ".join(group_labels or ["grupo"])
+        start = str((temporal_scope or {}).get("start_date") or "").strip()
+        end = str((temporal_scope or {}).get("end_date") or "").strip()
+        period_text = f" entre {start} y {end}" if start and end else ""
+        if not rows:
+            return f"No encontre rotacion de personal por {label}{period_text}."
+        if len(rows) == 1 and len(group_labels or []) == 1:
+            row = dict(rows[0] or {})
+            group_value = str(row.get(group_labels[0]) or "SIN_DATO")
+            return (
+                f"Rotacion de personal de {group_value}{period_text}: "
+                f"{float(row.get('rotacion_porcentaje') or 0.0):.2f}%. "
+                f"Egresos: {int(row.get('total_egresos') or 0)}. "
+                f"Ingresos: {int(row.get('total_ingresos') or 0)}. "
+                f"Planta promedio: {float(row.get('planta_promedio') or 0.0):.2f} "
+                f"(inicio {int(row.get('planta_inicio') or 0)}, fin {int(row.get('planta_fin') or 0)})."
+            )
+        preview = ", ".join(
+            (
+                f"{' | '.join(str(row.get(item) or 'SIN_DATO') for item in group_labels)}: "
+                f"{float(row.get('rotacion_porcentaje') or 0.0):.2f}% "
+                f"({int(row.get('total_egresos') or 0)} egresos)"
+            )
+            for row in rows[:3]
+        )
+        return (
+            f"Rotacion de personal por {label}{period_text}: {len(rows)} grupos. "
+            f"Principales resultados: {preview}."
+        )
+
+    @staticmethod
+    def _is_turnover_query(
+        *,
+        message: str,
+        resolved_query: ResolvedQuerySpec | None,
+        execution_plan: QueryExecutionPlan | None,
+    ) -> bool:
+        normalized = str(message or "").strip().lower()
+        if "rotacion" in normalized or "rotaci" in normalized:
+            return True
+        if resolved_query is not None:
+            entity_type = str(resolved_query.intent.entity_type or "").strip().lower()
+            entity_value = str(resolved_query.intent.entity_value or "").strip().lower()
+            metrics = [str(item or "").strip().lower() for item in list(resolved_query.intent.metrics or [])]
+            if "rotacion" in entity_type or "rotacion" in entity_value:
+                return True
+            if any(metric in {"rotacion", "rotacion_personal", "turnover", "turnover_rate"} for metric in metrics):
+                return True
+        constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+        metrics = [str(item or "").strip().lower() for item in list(constraints.get("metrics") or [])]
+        return any(metric in {"rotacion", "rotacion_personal", "turnover", "turnover_rate"} for metric in metrics)
+
+    def _safe_resolve_org_reference(self, *, message: str) -> dict[str, Any]:
+        try:
+            resolved = self.org_context.resolve_reference(message=message)
+            return dict(resolved or {})
+        except Exception:
+            return {"resolved": False, "reference": "", "filters": {}, "candidates": []}
 
     def resolver_subtarea(self, *, task: DelegationTask, observability=None) -> DelegationResult:
         consulta = str(task.business_objective or "").strip() or str(
@@ -671,7 +911,9 @@ class EmpleadosHandler:
         if cedula_match:
             filters["cedula"] = cedula_match.group(0)
 
-        movil = EmpleadosHandler._extract_after_keyword(lowered, keyword="movil")
+        movil = EmployeeIdentifierService.extract_movil_identifier(text)
+        if not movil:
+            movil = EmpleadosHandler._extract_after_keyword(lowered, keyword="movil")
         if movil:
             filters["movil"] = movil
 
@@ -777,7 +1019,24 @@ class EmpleadosHandler:
         normalized = str(message or "").strip().lower()
         if any(
             token in normalized
-            for token in ("inactivo", "inactivos", "retirado", "retirados", "egresado", "egresados")
+            for token in (
+                "inactivo",
+                "inactivos",
+                "egreso",
+                "egresos",
+                "retirado",
+                "retirados",
+                "retiro",
+                "retiros",
+                "egresado",
+                "egresados",
+                "desvinculado",
+                "desvinculados",
+                "baja",
+                "bajas",
+                "rotacion",
+                "rotaciones",
+            )
         ):
             return "INACTIVO"
         return "ACTIVO"
@@ -812,6 +1071,32 @@ class EmpleadosHandler:
             "source": str(temporal_scope.get("source") or "query_constraints"),
             "confidence": float(temporal_scope.get("confidence") or 0.0),
             "status_value": str(temporal_scope.get("status_value") or "").strip().upper(),
+            "ambiguous": False,
+        }
+
+    def _resolve_turnover_temporal_scope(
+        self,
+        *,
+        execution_plan: QueryExecutionPlan | None,
+        resolved_query: ResolvedQuerySpec | None,
+    ) -> dict[str, Any]:
+        constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+        period_scope = dict(constraints.get("period_scope") or {})
+        if not period_scope and resolved_query is not None:
+            period_scope = dict(resolved_query.normalized_period or resolved_query.intent.period or {})
+        start_date = str(period_scope.get("start_date") or "").strip()
+        end_date = str(period_scope.get("end_date") or "").strip()
+        if not start_date or not end_date:
+            return {}
+        if self._parse_iso_date(start_date) is None or self._parse_iso_date(end_date) is None:
+            return {}
+        return {
+            "column_hint": "fecha_egreso",
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": str(period_scope.get("source") or "period_scope_turnover_default"),
+            "confidence": float(period_scope.get("confidence") or 0.75),
+            "status_value": "INACTIVO",
             "ambiguous": False,
         }
 

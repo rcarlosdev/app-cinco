@@ -70,6 +70,14 @@ class ChatMemoryRuntimeService:
             ),
             limit=45,
         )
+        business_memory = self._merge_memory_entries(
+            base_entries=business_memory,
+            extra_entries=self._load_collective_reasoning_patterns(
+                domain_code=(domain_code or "").strip().upper() or None,
+                capability_id=(capability_id or "").strip() or None,
+            ),
+            limit=45,
+        )
         used = bool(user_memory or business_memory)
 
         if used and observability is not None and hasattr(observability, "record_event"):
@@ -119,6 +127,26 @@ class ChatMemoryRuntimeService:
             domain_code=None,
             capability_id=None,
             memory_key_prefix="query.pattern.domain.",
+            limit=20,
+        )
+        return self._merge_memory_entries(base_entries=scoped, extra_entries=global_patterns, limit=20)
+
+    def _load_collective_reasoning_patterns(
+        self,
+        *,
+        domain_code: str | None,
+        capability_id: str | None,
+    ) -> list[dict[str, Any]]:
+        scoped = self.router.reader.get_business_hints(
+            domain_code=domain_code,
+            capability_id=capability_id,
+            memory_key_prefix="reasoning.pattern.",
+            limit=20,
+        )
+        global_patterns = self.router.reader.get_business_hints(
+            domain_code=None,
+            capability_id=None,
+            memory_key_prefix="reasoning.pattern.",
             limit=20,
         )
         return self._merge_memory_entries(base_entries=scoped, extra_entries=global_patterns, limit=20)

@@ -32,6 +32,7 @@ import ChatComposer from "./chat/components/ChatComposer";
 import ChatMessageItem from "./chat/components/ChatMessage";
 import ScrollToBottomButton from "./chat/components/ScrollToBottomButton";
 import { type ChatMessageModel } from "./chat/types";
+import { mergeStreamingResponse } from "./chat/utils/mergeStreamingResponse";
 import { normalizeChatPayload } from "./chat/utils/normalizeChatPayload";
 import { usePromptHistory } from "./chat/hooks/usePromptHistory";
 import { useSmartAutoScroll } from "./chat/hooks/useSmartAutoScroll";
@@ -649,6 +650,20 @@ const IADevWorkspace = () => {
         callbacks: {
           onStart: () => {
             notifyContentChanged("stream-start", { behavior: "smooth" });
+          },
+          onProgress: (progress) => {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? {
+                      ...message,
+                      response: mergeStreamingResponse(message.response, progress),
+                      status: "streaming",
+                    }
+                  : message,
+              ),
+            );
+            notifyContentChanged("stream-chunk", { behavior: "auto" });
           },
           onChunk: (chunk) => {
             if (!chunk) return;

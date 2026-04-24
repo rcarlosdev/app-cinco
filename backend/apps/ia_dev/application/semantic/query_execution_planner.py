@@ -296,6 +296,8 @@ class QueryExecutionPlanner:
         if normalized_domain in {"empleados", "rrhh"}:
             filters = dict(resolved_query.normalized_filters or {})
             operation = str(resolved_query.intent.operation or "").strip().lower()
+            raw_query = str(resolved_query.intent.raw_query or "").strip().lower()
+            metrics = [str(item).strip().lower() for item in list(resolved_query.intent.metrics or [])]
             group_by = [str(item).strip().lower() for item in list(resolved_query.intent.group_by or []) if str(item).strip()]
             status_value = self._resolve_status_filter(filters=filters)
             has_employee_identifier = bool(
@@ -311,6 +313,8 @@ class QueryExecutionPlanner:
                 and temporal_scope.get("end_date")
                 and not bool(temporal_scope.get("ambiguous"))
             )
+            if "turnover_rate" in metrics or re.search(r"\b(rotacion|rotaciones|turnover)\b", raw_query):
+                return "empleados.count.active.v1"
             if template_id == "detail_by_entity_and_period" and has_employee_identifier:
                 return "empleados.detail.v1"
             if operation == "count" and status_value in {"ACTIVO", "INACTIVO"}:
@@ -341,6 +345,8 @@ class QueryExecutionPlanner:
             asks_summary_count = bool(
                 re.search(r"\b(cantidad|cuantos|cuantas|total|numero|resumen)\b", raw_query)
             )
+            if re.search(r"\b(reincid\w*|recurrent\w*|recurren\w*)\b", raw_query):
+                return "attendance.recurrence.grouped.v1"
             if has_attendance_reason and has_people_scope and not group_by and not has_explicit_grouping and not asks_summary_count:
                 return "attendance.unjustified.table_with_personal.v1"
             if template_id == "aggregate_by_group_and_period":

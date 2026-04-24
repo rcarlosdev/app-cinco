@@ -34,6 +34,18 @@ CHAT_RESPONSE_SNAPSHOT_V1: dict[str, Any] = {
     "actions": [],
     "memory_candidates": [],
     "pending_proposals": [],
+    "working_updates": [],
+    "reasoning": {
+        "enabled": False,
+        "version": "ia_dev.reasoning.v1",
+        "status": "disabled",
+        "working_goal": "",
+        "current_next_step": "",
+        "hypotheses": [],
+        "diagnostics": [],
+        "memory_summary": {},
+        "duration_ms": 0,
+    },
     "data_sources": {},
     "trace": [],
     "memory": {
@@ -110,6 +122,24 @@ def ensure_chat_response_contract(payload: dict[str, Any] | None) -> dict[str, A
         response["memory_candidates"] = []
     if not isinstance(response.get("pending_proposals"), list):
         response["pending_proposals"] = []
+    if not isinstance(response.get("working_updates"), list):
+        response["working_updates"] = []
+    reasoning = response.get("reasoning")
+    if not isinstance(reasoning, dict):
+        reasoning = {}
+    reasoning.setdefault("enabled", False)
+    reasoning.setdefault("version", "ia_dev.reasoning.v1")
+    reasoning.setdefault("status", "disabled")
+    reasoning.setdefault("working_goal", "")
+    reasoning.setdefault("current_next_step", "")
+    if not isinstance(reasoning.get("hypotheses"), list):
+        reasoning["hypotheses"] = []
+    if not isinstance(reasoning.get("diagnostics"), list):
+        reasoning["diagnostics"] = []
+    if not isinstance(reasoning.get("memory_summary"), dict):
+        reasoning["memory_summary"] = {}
+    reasoning.setdefault("duration_ms", 0)
+    response["reasoning"] = reasoning
     if not isinstance(response.get("data_sources"), dict):
         response["data_sources"] = {}
     if not isinstance(response.get("trace"), list):

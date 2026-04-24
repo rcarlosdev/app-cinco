@@ -17,6 +17,15 @@ from apps.ia_dev.application.orchestration.loop_controller import LoopController
 from apps.ia_dev.application.orchestration.response_assembler import (
     LegacyResponseAssembler,
 )
+from apps.ia_dev.application.reasoning.diagnostic_orchestrator import (
+    DiagnosticOrchestrator,
+)
+from apps.ia_dev.application.reasoning.reasoning_ledger_service import (
+    ReasoningLedgerService,
+)
+from apps.ia_dev.application.reasoning.reasoning_memory_service import (
+    ReasoningMemoryService,
+)
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     QueryExecutionPlan,
     ResolvedQuerySpec,
@@ -46,6 +55,13 @@ from apps.ia_dev.application.semantic.satisfaction_review_gate import (
     SatisfactionReviewGate,
 )
 from apps.ia_dev.application.semantic.semantic_business_resolver import SemanticBusinessResolver
+from apps.ia_dev.application.taxonomia_dominios import (
+    agente_desde_dominio,
+    dominio_desde_capacidad,
+    es_capacidad_de_dominio_operativo,
+    normalizar_codigo_dominio,
+    normalizar_dominio_operativo,
+)
 from apps.ia_dev.services.memory_service import SessionMemoryStore
 
 
@@ -74,6 +90,9 @@ class ChatApplicationService:
         satisfaction_review_gate: SatisfactionReviewGate | None = None,
         loop_controller: LoopController | None = None,
         query_pattern_memory_service: QueryPatternMemoryService | None = None,
+        reasoning_ledger_service: ReasoningLedgerService | None = None,
+        diagnostic_orchestrator: DiagnosticOrchestrator | None = None,
+        reasoning_memory_service: ReasoningMemoryService | None = None,
     ):
         self.catalog = catalog or CapabilityCatalog()
         self.bridge = bridge or IntentToCapabilityBridge()
@@ -99,6 +118,9 @@ class ChatApplicationService:
         self.satisfaction_review_gate = satisfaction_review_gate or SatisfactionReviewGate()
         self.loop_controller = loop_controller or LoopController()
         self.query_pattern_memory_service = query_pattern_memory_service or QueryPatternMemoryService()
+        self.reasoning_ledger_service = reasoning_ledger_service or ReasoningLedgerService()
+        self.diagnostic_orchestrator = diagnostic_orchestrator or DiagnosticOrchestrator()
+        self.reasoning_memory_service = reasoning_memory_service or ReasoningMemoryService()
 
     def run(
         self,
@@ -122,10 +144,29 @@ class ChatApplicationService:
             except Exception:
                 session_context = {}
         user_key = self._resolve_user_key(actor_user_key=actor_user_key, run_context=run_context)
+        self.reasoning_ledger_service.start_run(
+            run_context=run_context,
+            message=message,
+            user_key=user_key,
+            session_context=session_context,
+        )
 
         pre_classification = self._bootstrap_classification(
             message=message,
             session_context=session_context,
+        )
+        self.reasoning_ledger_service.record_progress(
+            run_context=run_context,
+            stage="bootstrap",
+            status="completed",
+            summary="Clasificacion base y dominio inicial resueltos.",
+            details={
+                "intent": str(pre_classification.get("intent") or ""),
+                "domain": str(pre_classification.get("domain") or ""),
+                "selected_agent": str(pre_classification.get("selected_agent") or ""),
+            },
+            next_step="cargar memoria relevante antes de la resolucion semantica",
+            confidence=0.6,
         )
         pre_query_memory_context = self.memory_runtime.load_context_for_chat(
             user_key=user_key,
@@ -136,6 +177,11 @@ class ChatApplicationService:
         )
         pre_query_memory_hints = self._extract_memory_hints(pre_query_memory_context)
         pre_query_workflow_hints = self._load_workflow_hints(user_key=user_key)
+        self.reasoning_ledger_service.attach_memory_hints(
+            run_context=run_context,
+            memory_hints=pre_query_memory_hints,
+            phase="pre_query",
+        )
         run_context.metadata["memory_context"] = {
             "user_key": user_key,
             "session_context": {
@@ -161,6 +207,33 @@ class ChatApplicationService:
             session_context=session_context,
             run_context=run_context,
             observability=observability,
+        )
+        resolved_query_payload = dict(query_intelligence.get("resolved_query") or {})
+        resolved_query_intent = dict(resolved_query_payload.get("intent") or {})
+        resolved_query_filters = dict(resolved_query_payload.get("normalized_filters") or {})
+        resolved_query_period = dict(resolved_query_payload.get("normalized_period") or {})
+        resolved_query_semantic = dict(resolved_query_payload.get("semantic_context") or {})
+        resolved_temporal_scope = dict((resolved_query_semantic.get("resolved_semantic") or {}).get("temporal_scope") or {})
+        self.reasoning_ledger_service.record_progress(
+            run_context=run_context,
+            stage="query_intelligence",
+            status="completed",
+            summary="La consulta fue resuelta a un plan estructurado.",
+            details={
+                "mode": str(query_intelligence.get("mode") or "off"),
+                "strategy": str((query_intelligence.get("execution_plan") or {}).get("strategy") or ""),
+                "domain_code": str(resolved_query_intent.get("domain_code") or ""),
+                "template_id": str(resolved_query_intent.get("template_id") or ""),
+                "status_value": str(
+                    resolved_query_filters.get("estado")
+                    or resolved_query_filters.get("estado_empleado")
+                    or ""
+                ),
+                "period_label": str(resolved_query_period.get("label") or ""),
+                "temporal_column_hint": str(resolved_temporal_scope.get("column_hint") or ""),
+            },
+            next_step="elegir la mejor capacidad y ejecutar la respuesta",
+            confidence=float((resolved_query_intent.get("confidence") or 0.0) or 0.0),
         )
         query_intelligence_mode = str(query_intelligence.get("mode") or "off")
         classification_override = dict(query_intelligence.get("classification_override") or {})
@@ -208,6 +281,11 @@ class ChatApplicationService:
             "hints": memory_hints,
             "workflow_hints": workflow_hints,
         }
+        self.reasoning_ledger_service.attach_memory_hints(
+            run_context=run_context,
+            memory_hints=memory_hints,
+            phase="execution",
+        )
 
         candidate_plans = self._plan_candidates(
             message=message,
@@ -254,6 +332,19 @@ class ChatApplicationService:
             }
             for item in candidate_plans
         ]
+        self.reasoning_ledger_service.record_progress(
+            run_context=run_context,
+            stage="planning",
+            status="completed",
+            summary="Se generaron candidatos de capacidad para resolver la consulta.",
+            details={
+                "candidate_count": len(candidate_plans),
+                "top_capability_id": str((candidate_plans[0] if candidate_plans else {}).get("capability_id") or ""),
+                "top_reason": str((candidate_plans[0] if candidate_plans else {}).get("reason") or ""),
+            },
+            next_step="ejecutar la ruta principal y validar el resultado",
+            confidence=0.72,
+        )
 
         precomputed_response = dict(query_intelligence.get("precomputed_response") or {})
 
@@ -402,6 +493,13 @@ class ChatApplicationService:
             "domain_code": self._domain_code_from_capability(planned_capability),
             "capability_id": planned_capability.get("capability_id"),
         }
+        resolved_memory_hints = self._extract_memory_hints(resolved_memory_context)
+        run_context.metadata["memory_context"]["resolved_hints"] = resolved_memory_hints
+        self.reasoning_ledger_service.attach_memory_hints(
+            run_context=run_context,
+            memory_hints=resolved_memory_hints,
+            phase="resolved",
+        )
 
         candidates = self.memory_runtime.detect_candidates(
             message=message,
@@ -424,6 +522,39 @@ class ChatApplicationService:
             response=primary_response,
             memory_effects=memory_effects,
             observability=observability,
+        )
+        execution_meta = dict((execution or {}) if "execution" in locals() else {})
+        diagnostics = self._record_reasoning_diagnostics(
+            user_key=user_key,
+            run_context=run_context,
+            response=primary_response,
+            planned_capability=planned_capability,
+            route=route,
+            execution_meta=execution_meta,
+            memory_effects=memory_effects,
+        )
+        self.reasoning_ledger_service.record_progress(
+            run_context=run_context,
+            stage="response",
+            status="completed",
+            summary="La respuesta final fue ensamblada con diagnosticos y memoria de aprendizaje.",
+            details={
+                "reply_present": bool(str(primary_response.get("reply") or "").strip()),
+                "diagnostics_activated": bool(diagnostics.get("activated")),
+                "memory_candidates": len(list(memory_effects.get("memory_candidates") or [])),
+                "pending_proposals": len(list(memory_effects.get("pending_proposals") or [])),
+            },
+            next_step="respuesta lista",
+            confidence=0.85,
+        )
+        self.reasoning_ledger_service.finalize(
+            run_context=run_context,
+            status="completed",
+            outcome={
+                "diagnostics_activated": bool(diagnostics.get("activated")),
+                "top_signature": str(((diagnostics.get("items") or [{}])[0] or {}).get("signature") or ""),
+                "pending_proposals": len(list(memory_effects.get("pending_proposals") or [])),
+            },
         )
 
         self._record_shadow_observability(
@@ -576,8 +707,18 @@ class ChatApplicationService:
                 semantic_context=semantic_context,
                 memory_hints=memory_hints,
             )
+            if not isinstance(fastpath_intent, StructuredQueryIntent):
+                fastpath_intent = None
+            canonical_resolution_enabled = self._canonical_resolution_enabled()
+            canonical_resolution_shadow_enabled = self._canonical_resolution_shadow_enabled()
+            should_compute_semantic_normalization = bool(
+                semantic_normalization_enabled or semantic_normalization_shadow_enabled
+            )
+            should_compute_canonical_resolution = bool(
+                canonical_resolution_enabled or canonical_resolution_shadow_enabled
+            )
 
-            if fastpath_intent is None and (semantic_normalization_enabled or semantic_normalization_shadow_enabled):
+            if should_compute_semantic_normalization:
                 semantic_normalization_output = self.semantic_normalization_service.normalize(
                     raw_query=message,
                     semantic_context=semantic_context,
@@ -606,8 +747,6 @@ class ChatApplicationService:
                 "active": bool(semantic_normalization_enabled),
                 "shadow": bool(semantic_normalization_shadow_enabled and not semantic_normalization_enabled),
             }
-            canonical_resolution_enabled = self._canonical_resolution_enabled()
-            canonical_resolution_shadow_enabled = self._canonical_resolution_shadow_enabled()
             canonical_resolution_payload: dict[str, Any] = {}
             legacy_hints = {
                 "last_domain": str((session_context or {}).get("last_domain") or ""),
@@ -617,7 +756,7 @@ class ChatApplicationService:
                 "last_group_dimension_key": str(classification_for_qi.get("last_group_dimension_key") or ""),
                 "last_group_dimension_label": str(classification_for_qi.get("last_group_dimension_label") or ""),
             }
-            if fastpath_intent is None and (canonical_resolution_enabled or canonical_resolution_shadow_enabled):
+            if should_compute_canonical_resolution:
                 canonical_output = self.canonical_resolution_service.resolve(
                     raw_query=message,
                     semantic_normalization_output=semantic_normalization_payload,
@@ -642,16 +781,14 @@ class ChatApplicationService:
             }
             if fastpath_intent is not None:
                 intent = fastpath_intent
-                semantic_normalization_payload = {
-                    **dict(semantic_normalization_payload or {}),
-                    "query_pattern_fastpath": True,
-                    "skipped_by": "query_pattern_fastpath",
-                }
-                canonical_resolution_payload = {
-                    **dict(canonical_resolution_payload or {}),
-                    "query_pattern_fastpath": True,
-                    "skipped_by": "query_pattern_fastpath",
-                }
+                semantic_normalization_payload = dict(semantic_normalization_payload or {})
+                canonical_resolution_payload = dict(canonical_resolution_payload or {})
+                semantic_normalization_payload["query_pattern_fastpath"] = True
+                canonical_resolution_payload["query_pattern_fastpath"] = True
+                if not should_compute_semantic_normalization:
+                    semantic_normalization_payload["skipped_by"] = "query_pattern_fastpath"
+                if not should_compute_canonical_resolution:
+                    canonical_resolution_payload["skipped_by"] = "query_pattern_fastpath"
                 run_context.metadata["semantic_normalization"] = {
                     **dict(run_context.metadata.get("semantic_normalization") or {}),
                     **dict(semantic_normalization_payload or {}),
@@ -942,9 +1079,9 @@ class ChatApplicationService:
             query_intelligence=query_intelligence,
             threshold=self._legacy_bridge_alignment_confidence_threshold(),
         )
-        legacy_domain = str(base.get("domain") or "").strip().lower()
+        legacy_domain = normalizar_codigo_dominio(base.get("domain"))
         legacy_intent = str(base.get("intent") or "").strip().lower()
-        aligned_domain = str(target.get("domain_code") or "").strip().lower()
+        aligned_domain = normalizar_codigo_dominio(target.get("domain_code"))
         aligned_intent = str(target.get("intent_code") or "").strip().lower()
         aligned_capability = str(target.get("capability_code") or "").strip()
         confidence = float(target.get("confidence") or 0.0)
@@ -964,12 +1101,10 @@ class ChatApplicationService:
                 operation=aligned_intent,
             )
             updated["needs_database"] = aligned_domain not in {"", "general", "legacy"}
-            if aligned_domain in {"empleados", "rrhh"}:
-                updated["selected_agent"] = "empleados_agent"
-            elif aligned_domain == "attendance":
-                updated["selected_agent"] = "attendance_agent"
-            elif aligned_domain == "transport":
-                updated["selected_agent"] = "transport_agent"
+            updated["selected_agent"] = agente_desde_dominio(
+                aligned_domain,
+                fallback=str(updated.get("selected_agent") or "analista_agent"),
+            )
             updated["classifier_source"] = "legacy_bridge_alignment_canonical"
 
         updated["canonical_alignment"] = {
@@ -1144,7 +1279,7 @@ class ChatApplicationService:
                 "source": "dictionary_alias_rules",
                 "safe": True,
                 "safety_reason": "safe_alias_match",
-                "domain_code": "attendance",
+                "domain_code": "ausentismo",
                 "intent_code": "aggregate",
                 "capability_code": "attendance.summary.by_supervisor.v1",
                 "confidence": max(0.8, float(threshold)),
@@ -1511,9 +1646,9 @@ class ChatApplicationService:
         canonical_intent: str,
         fallback_classification: dict[str, Any],
     ) -> dict[str, Any]:
-        domain = str(canonical_domain or "").strip().lower() or str(
+        domain = normalizar_codigo_dominio(canonical_domain) or normalizar_codigo_dominio(
             fallback_classification.get("domain") or "general"
-        ).strip().lower()
+        )
         operation = str(canonical_intent or "").strip().lower()
         intent = ChatApplicationService._canonical_intent_to_legacy_intent(
             domain=domain,
@@ -1525,7 +1660,10 @@ class ChatApplicationService:
         return {
             "intent": intent,
             "domain": domain or "general",
-            "selected_agent": str(fallback_classification.get("selected_agent") or "analista_agent"),
+            "selected_agent": agente_desde_dominio(
+                domain,
+                fallback=str(fallback_classification.get("selected_agent") or "analista_agent"),
+            ),
             "classifier_source": "canonical_routing_classification",
             "needs_database": domain not in {"", "general", "legacy"},
             "output_mode": output_mode,
@@ -1536,11 +1674,11 @@ class ChatApplicationService:
 
     @staticmethod
     def _canonical_default_capability(*, canonical_domain: str, canonical_intent: str) -> str:
-        domain = str(canonical_domain or "").strip().lower()
+        domain = normalizar_codigo_dominio(canonical_domain)
         operation = str(canonical_intent or "").strip().lower()
         if domain in {"empleados", "rrhh"}:
             return "empleados.count.active.v1"
-        if domain == "attendance":
+        if domain == "ausentismo":
             if operation in {"detail", "list", "table"}:
                 return "attendance.unjustified.table_with_personal.v1"
             if operation in {"trend", "timeseries"}:
@@ -1548,8 +1686,6 @@ class ChatApplicationService:
             if operation in {"aggregate", "group"}:
                 return "attendance.summary.by_attribute.v1"
             return "attendance.unjustified.summary.v1"
-        if domain == "transport":
-            return "transport.departures.summary.v1"
         if domain == "knowledge":
             return "knowledge.proposal.create.v1"
         if domain == "general":
@@ -1558,16 +1694,14 @@ class ChatApplicationService:
 
     @staticmethod
     def _canonical_intent_to_legacy_intent(*, domain: str, operation: str) -> str:
-        normalized_domain = str(domain or "").strip().lower()
+        normalized_domain = normalizar_codigo_dominio(domain)
         normalized_operation = str(operation or "").strip().lower()
         if normalized_domain in {"empleados", "rrhh"}:
             return "empleados_query"
-        if normalized_domain == "transport":
-            return "transport_query"
-        if normalized_domain == "attendance":
+        if normalized_domain == "ausentismo":
             if normalized_operation in {"recurrence", "recurrent"}:
-                return "attendance_recurrence"
-            return "attendance_query"
+                return "ausentismo_recurrencia"
+            return "ausentismo_query"
         if normalized_domain == "knowledge":
             return "knowledge_change_request"
         if normalized_operation in {"general_question", "summary"}:
@@ -1589,12 +1723,7 @@ class ChatApplicationService:
 
     @staticmethod
     def _capability_domain(capability_id: str) -> str:
-        capability = str(capability_id or "").strip().lower()
-        if not capability:
-            return ""
-        if "." in capability:
-            return capability.split(".", 1)[0]
-        return capability
+        return dominio_desde_capacidad(capability_id)
 
     @staticmethod
     def _is_general_or_legacy_capability(capability_id: str) -> bool:
@@ -1666,7 +1795,7 @@ class ChatApplicationService:
         *,
         resolved_query: ResolvedQuerySpec,
     ) -> dict[str, Any]:
-        domain = str(resolved_query.intent.domain_code or "").strip().lower()
+        domain = normalizar_codigo_dominio(resolved_query.intent.domain_code)
         company_scope = dict((resolved_query.semantic_context or {}).get("company_operational_scope") or {})
         if (
             bool(company_scope.get("domain_known"))
@@ -1684,29 +1813,16 @@ class ChatApplicationService:
                 "contextual_domain": domain,
                 "supported_domains": list(company_scope.get("supported_domains") or []),
             }
-        routing_domain = domain
-        if domain == "ausentismo":
-            routing_domain = "attendance"
-        elif domain == "transporte":
-            routing_domain = "transport"
-        elif domain == "rrhh":
-            routing_domain = "empleados"
+        routing_domain = normalizar_dominio_operativo(domain, fallback="general")
         output_mode = "summary"
         if resolved_query.intent.operation in {"detail", "aggregate", "trend"}:
             output_mode = "table"
         if resolved_query.intent.operation == "count":
             output_mode = "summary"
-        agent = "analista_agent"
-        if routing_domain in {"ausentismo", "attendance"}:
-            agent = "attendance_agent"
-        elif routing_domain in {"empleados", "rrhh"}:
-            agent = "empleados_agent"
-        elif routing_domain in {"transporte", "transport"}:
-            agent = "transport_agent"
         return {
             "intent": str(resolved_query.intent.operation or "query"),
             "domain": routing_domain,
-            "selected_agent": agent,
+            "selected_agent": agente_desde_dominio(routing_domain),
             "classifier_source": f"query_intelligence_{resolved_query.intent.source}",
             "needs_database": routing_domain not in {"general", ""},
             "output_mode": output_mode,
@@ -2249,6 +2365,80 @@ class ChatApplicationService:
                 effects["pending_proposals"] = pending
         return effects
 
+    def _record_reasoning_diagnostics(
+        self,
+        *,
+        user_key: str | None,
+        run_context: RunContext,
+        response: dict[str, Any],
+        planned_capability: dict[str, Any],
+        route: dict[str, Any],
+        execution_meta: dict[str, Any],
+        memory_effects: dict[str, Any],
+    ) -> dict[str, Any]:
+        effects = memory_effects if isinstance(memory_effects, dict) else {}
+        metadata = dict(run_context.metadata.get("query_intelligence") or {})
+        hydrated = self._hydrate_query_intelligence_contracts(metadata=metadata)
+        diagnostics = self.diagnostic_orchestrator.analyze(
+            message=str(run_context.message or ""),
+            resolved_query=hydrated.get("resolved_query"),
+            execution_plan=hydrated.get("execution_plan"),
+            response=response,
+            planned_capability=planned_capability,
+            route=route,
+            execution_meta=execution_meta,
+            memory_hints=dict(((run_context.metadata.get("memory_context") or {}).get("resolved_hints") or ((run_context.metadata.get("memory_context") or {}).get("hints") or {}))),
+            query_intelligence=metadata,
+        )
+        metadata["diagnostics"] = diagnostics
+        run_context.metadata["query_intelligence"] = metadata
+        self.reasoning_ledger_service.record_diagnostics(
+            run_context=run_context,
+            diagnostics=diagnostics,
+        )
+        if not bool(diagnostics.get("activated")):
+            return diagnostics
+
+        try:
+            learning = self.reasoning_memory_service.record_patterns(
+                user_key=user_key,
+                diagnostics=diagnostics,
+                run_context=run_context,
+                response=response,
+            )
+        except Exception:
+            learning = {"enabled": True, "saved": False, "reason": "reasoning_memory_error"}
+        metadata = dict(run_context.metadata.get("query_intelligence") or {})
+        metadata["reasoning_memory"] = learning
+        run_context.metadata["query_intelligence"] = metadata
+
+        for result in list(learning.get("user_results") or []) + list(learning.get("business_results") or []):
+            if not isinstance(result, dict) or not bool(result.get("ok")):
+                continue
+            proposal = dict(result.get("proposal") or {})
+            if not proposal:
+                continue
+            pending = list(effects.get("pending_proposals") or [])
+            if not any(str(item.get("proposal_id") or "") == str(proposal.get("proposal_id") or "") for item in pending if isinstance(item, dict)):
+                pending.append(proposal)
+            effects["pending_proposals"] = pending
+            candidates = list(effects.get("memory_candidates") or [])
+            candidate_key = str(proposal.get("candidate_key") or "")
+            if candidate_key:
+                candidates.append(
+                    {
+                        "scope": str(proposal.get("scope") or ""),
+                        "candidate_key": candidate_key,
+                        "candidate_value": proposal.get("candidate_value"),
+                        "reason": "reasoning_learning_pattern",
+                        "decision": "propose",
+                        "proposal_id": str(proposal.get("proposal_id") or ""),
+                        "result_ok": True,
+                    }
+                )
+                effects["memory_candidates"] = candidates
+        return diagnostics
+
     def _hydrate_query_intelligence_contracts(self, *, metadata: dict[str, Any]) -> dict[str, Any]:
         resolved_query_payload = metadata.get("resolved_query")
         execution_plan_payload = metadata.get("execution_plan")
@@ -2752,8 +2942,8 @@ class ChatApplicationService:
             )
         elif runtime_execution_plan is not None and plan_constraints and not dict(runtime_execution_plan.constraints or {}):
             runtime_execution_plan.constraints = plan_constraints
-        capability_domain = capability_id.split(".", 1)[0] if "." in capability_id else ""
-        is_domain_capability = capability_domain in {"attendance", "transport", "empleados"}
+        capability_domain = dominio_desde_capacidad(capability_id)
+        is_domain_capability = es_capacidad_de_dominio_operativo(capability_id)
         selected_event_type = f"{capability_domain}_capability_selected"
         executed_event_type = f"{capability_domain}_handler_executed"
         fallback_event_type = f"{capability_domain}_fallback_legacy"
@@ -3000,6 +3190,14 @@ class ChatApplicationService:
                 )
                 if pattern:
                     hints.setdefault("query_patterns", []).append(pattern)
+            elif key.startswith("reasoning.pattern."):
+                pattern = ChatApplicationService._extract_reasoning_pattern_hint(
+                    scope="user",
+                    memory_key=key,
+                    memory_value=row.get("memory_value"),
+                )
+                if pattern:
+                    hints.setdefault("reasoning_patterns", []).append(pattern)
 
         for row in business_memory:
             key = str(row.get("memory_key") or "").strip().lower()
@@ -3018,6 +3216,14 @@ class ChatApplicationService:
                 )
                 if pattern:
                     hints.setdefault("query_patterns", []).append(pattern)
+            elif key.startswith("reasoning.pattern."):
+                pattern = ChatApplicationService._extract_reasoning_pattern_hint(
+                    scope="business",
+                    memory_key=key,
+                    memory_value=row.get("memory_value"),
+                )
+                if pattern:
+                    hints.setdefault("reasoning_patterns", []).append(pattern)
 
         if list(hints.get("query_patterns") or []):
             hints["query_patterns"] = sorted(
@@ -3029,6 +3235,15 @@ class ChatApplicationService:
                 ),
             )[:5]
             hints["query_pattern_ranking"] = ChatApplicationService._rank_query_patterns(memory_hints=hints)
+        if list(hints.get("reasoning_patterns") or []):
+            hints["reasoning_patterns"] = sorted(
+                list(hints.get("reasoning_patterns") or []),
+                key=lambda item: (
+                    -float(item.get("pattern_strength") or 0.0),
+                    str(item.get("domain_code") or ""),
+                    str(item.get("signature") or ""),
+                ),
+            )[:5]
 
         return hints
 
@@ -3071,6 +3286,28 @@ class ChatApplicationService:
             "query_shape_key": query_shape_key,
             "normalized_query": str(surface_pattern.get("normalized_query") or "").strip().lower(),
             "score": float(satisfaction.get("score") or 0.0),
+        }
+
+    @staticmethod
+    def _extract_reasoning_pattern_hint(*, scope: str, memory_key: str, memory_value: Any) -> dict[str, Any] | None:
+        payload = dict(memory_value or {}) if isinstance(memory_value, dict) else {}
+        if not payload:
+            return None
+        signature = str(payload.get("signature") or "").strip().lower()
+        if not signature:
+            return None
+        return {
+            "scope": str(scope or "").strip().lower(),
+            "memory_key": str(memory_key or "").strip().lower(),
+            "signature": signature,
+            "family": str(payload.get("family") or "").strip().lower(),
+            "severity": str(payload.get("severity") or "").strip().lower(),
+            "stage": str(payload.get("stage") or "").strip().lower(),
+            "domain_code": str(payload.get("domain_code") or "").strip().lower(),
+            "capability_id": str(payload.get("capability_id") or "").strip(),
+            "summary": str(payload.get("summary") or "").strip(),
+            "recommended_action": str(payload.get("recommended_action") or "").strip(),
+            "pattern_strength": float(payload.get("pattern_strength") or 0.0),
         }
 
     @staticmethod
@@ -3135,17 +3372,17 @@ class ChatApplicationService:
     ) -> dict[str, Any]:
         normalized = ChatApplicationService._normalize_text(message)
         context = dict(session_context or {})
-        last_domain = str(context.get("last_domain") or "").strip().lower()
+        last_domain = normalizar_codigo_dominio(context.get("last_domain"))
         last_needs_db = bool(context.get("last_needs_database"))
         if (
-            last_domain == "attendance"
+            last_domain == "ausentismo"
             and last_needs_db
             and ChatApplicationService._is_chart_request(normalized)
         ):
             return {
-                "intent": "attendance_query",
-                "domain": "attendance",
-                "selected_agent": "attendance_agent",
+                "intent": "ausentismo_query",
+                "domain": "ausentismo",
+                "selected_agent": "ausentismo_agent",
                 "classifier_source": "bootstrap_context_followup",
                 "needs_database": True,
                 "output_mode": "summary",
@@ -3159,7 +3396,7 @@ class ChatApplicationService:
                 "dictionary_context": {},
             }
         if any(token in normalized for token in ("ausent", "asistenc", "injustificad")):
-            intent = "attendance_recurrence" if "reincid" in normalized else "attendance_query"
+            intent = "ausentismo_recurrencia" if "reincid" in normalized else "ausentismo_query"
             wants_table = any(token in normalized for token in ("tabla", "detalle", "lista", "mostrar"))
             wants_count = any(token in normalized for token in ("cantidad", "cuantos", "cuantas", "total", "resumen"))
             wants_group = any(
@@ -3179,11 +3416,11 @@ class ChatApplicationService:
             needs_personal_join = any(
                 token in normalized
                 for token in ("empleado", "personal", "supervisor", "area", "cargo", "nombre", "apellido")
-            ) or intent == "attendance_recurrence"
+            ) or intent == "ausentismo_recurrencia"
             return {
                 "intent": intent,
-                "domain": "attendance",
-                "selected_agent": "attendance_agent",
+                "domain": "ausentismo",
+                "selected_agent": "ausentismo_agent",
                 "classifier_source": "bootstrap_rules",
                 "needs_database": True,
                 "output_mode": output_mode,
@@ -3201,18 +3438,6 @@ class ChatApplicationService:
                 "output_mode": "summary" if any(
                     token in normalized for token in ("cantidad", "cuantos", "cuantas", "total", "numero")
                 ) else "table",
-                "needs_personal_join": False,
-                "used_tools": [],
-                "dictionary_context": {},
-            }
-        if any(token in normalized for token in ("transporte", "ruta", "movilidad", "vehicul", "salieron", "salidas")):
-            return {
-                "intent": "transport_query",
-                "domain": "transport",
-                "selected_agent": "transport_agent",
-                "classifier_source": "bootstrap_rules",
-                "needs_database": True,
-                "output_mode": "summary",
                 "needs_personal_join": False,
                 "used_tools": [],
                 "dictionary_context": {},
@@ -3311,7 +3536,8 @@ class ChatApplicationService:
         capability_id = str(planned_capability.get("capability_id") or "").strip()
         if not capability_id:
             return None
-        return capability_id.split(".", 1)[0].upper()
+        domain = dominio_desde_capacidad(capability_id)
+        return str(domain or "").upper() or None
 
     @staticmethod
     def _extract_classification(response: dict[str, Any]) -> dict[str, Any]:

@@ -10,6 +10,11 @@ from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     SemanticNormalizationOutput,
 )
+from apps.ia_dev.application.taxonomia_dominios import (
+    dominio_desde_capacidad,
+    normalizar_codigo_dominio,
+)
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 
 
 class SemanticNormalizationService:
@@ -17,6 +22,25 @@ class SemanticNormalizationService:
     Normalizacion semantica incremental.
     Esta capa no decide estrategia final ni altera el runtime por defecto.
     """
+
+    _EMPLOYEE_INACTIVE_SIGNAL_RE = re.compile(
+        r"\b("
+        r"inactivo|inactivos|"
+        r"egreso|egresos|egresado|egresados|"
+        r"retiro|retiros|retirado|retirados|"
+        r"desvinculacion|desvinculaciones|desvinculado|desvinculados|"
+        r"baja|bajas|rotacion|rotaciones"
+        r")\b"
+    )
+    _EMPLOYEE_ACTIVE_SIGNAL_RE = re.compile(
+        r"\b(activo|activa|activos|activas|vigente|vigentes|habilitado|habilitados|vinculado|vinculados)\b"
+    )
+    _TEMPORAL_REFERENCE_RE = re.compile(
+        r"\b(hoy|ayer|esta\s+semana|semana\s+actual|semana\s+pasad[ao]|semana\s+anterior|"
+        r"ultima\s+semana|ultim[oa]s?\s+\d+\s+(?:dias|semanas|meses)|rolling(?:\s+de)?\s+\d+\s+"
+        r"(?:dias|semanas|meses)|este\s+mes|mes\s+actual|mes\s+pasado|mes\s+anterior|"
+        r"este\s+ano|ano\s+actual|ano\s+pasado|\d{4}-\d{2}-\d{2})\b"
+    )
 
     _LOCAL_EQUIVALENCES = {
         "personal": "empleados",
@@ -54,8 +78,10 @@ class SemanticNormalizationService:
     _DOMAIN_ALIASES = {
         "rrhh": "empleados",
         "human_resources": "empleados",
-        "ausentismo": "attendance",
-        "transporte": "transport",
+        "attendance": "ausentismo",
+        "ausentismo": "ausentismo",
+        "transport": "transporte",
+        "transporte": "transporte",
     }
 
     _IMPLICIT_FILTER_SIGNALS = {
@@ -69,6 +95,22 @@ class SemanticNormalizationService:
         "vigentes": ("estado", "ACTIVO"),
         "inactivo": ("estado", "INACTIVO"),
         "inactivos": ("estado", "INACTIVO"),
+        "egreso": ("estado", "INACTIVO"),
+        "egresos": ("estado", "INACTIVO"),
+        "egresado": ("estado", "INACTIVO"),
+        "egresados": ("estado", "INACTIVO"),
+        "retiro": ("estado", "INACTIVO"),
+        "retiros": ("estado", "INACTIVO"),
+        "retirado": ("estado", "INACTIVO"),
+        "retirados": ("estado", "INACTIVO"),
+        "desvinculacion": ("estado", "INACTIVO"),
+        "desvinculaciones": ("estado", "INACTIVO"),
+        "desvinculado": ("estado", "INACTIVO"),
+        "desvinculados": ("estado", "INACTIVO"),
+        "baja": ("estado", "INACTIVO"),
+        "bajas": ("estado", "INACTIVO"),
+        "rotacion": ("estado", "INACTIVO"),
+        "rotaciones": ("estado", "INACTIVO"),
     }
 
     def __init__(
@@ -425,7 +467,8 @@ class SemanticNormalizationService:
         classification: dict[str, Any],
         capability_hints: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        score = {"empleados": 0.0, "attendance": 0.0, "transport": 0.0, "general": 0.1}
+        score = {"empleados": 0.0, "ausentismo": 0.0, "general": 0.1}
+        has_employee_inactive_signal = cls._has_employee_inactive_signal(query)
         if any(
             token in query
             for token in (
@@ -440,10 +483,14 @@ class SemanticNormalizationService:
                 "cedula",
                 "habilitad",
                 "vigent",
+                "rotacion",
+                "rotaciones",
             )
         ):
             score["empleados"] += 0.65
-        if re.search(r"\bmovil(?:\s+(?:de|del|la|el))?\s+[a-z0-9_-]{3,40}\b", query):
+        if has_employee_inactive_signal:
+            score["empleados"] += 0.65
+        if EmployeeIdentifierService.has_movil_identifier(query):
             score["empleados"] += 0.65
         if re.search(
             r"\b(tipo_labor|tipo\s+labor|tipo\s+de\s+labor|labor(?:es)?|area(?:s)?|cargo(?:s)?|supervisor(?:es)?|jefe(?:s)?|lider(?:es)?|carpeta(?:s)?|sede(?:s)?)\b",
@@ -465,13 +512,11 @@ class SemanticNormalizationService:
             token in query for token in ("vacacion", "vacaciones", "incapacidad", "licencia", "permiso", "calamidad")
         )
         if any(token in query for token in ("ausent", "asistencia", "injustific", "supervisor", "jefe")):
-            score["attendance"] += 0.45
+            score["ausentismo"] += 0.45
         if has_attendance_reason:
-            score["attendance"] += 0.55
+            score["ausentismo"] += 0.55
         if has_people_scope and has_attendance_reason:
-            score["attendance"] += 0.35
-        if any(token in query for token in ("transporte", "ruta", "movilidad", "vehiculo")):
-            score["transport"] += 0.55
+            score["ausentismo"] += 0.35
         base_domain = cls._normalize_domain_code(classification.get("domain"))
         if base_domain in score:
             score[base_domain] += 0.2
@@ -480,9 +525,7 @@ class SemanticNormalizationService:
             if capability_id.startswith("empleados."):
                 score["empleados"] += 0.25
             elif capability_id.startswith("attendance."):
-                score["attendance"] += 0.2
-            elif capability_id.startswith("transport."):
-                score["transport"] += 0.2
+                score["ausentismo"] += 0.2
         ranked = sorted(score.items(), key=lambda item: item[1], reverse=True)
         return [
             {
@@ -494,8 +537,9 @@ class SemanticNormalizationService:
             if conf > 0
         ]
 
-    @staticmethod
+    @classmethod
     def _candidate_intents(
+        cls,
         *,
         query: str,
         classification: dict[str, Any],
@@ -505,8 +549,12 @@ class SemanticNormalizationService:
             re.search(r"\bcantid[a-z]*\b", query)
         ):
             intent_scores["count"] += 0.7
+        if cls._has_employee_status_metric_signal(query):
+            intent_scores["count"] += 0.62
         if any(token in query for token in ("detalle", "tabla", "listar", "lista", "informacion", "info", "ficha", "datos")):
             intent_scores["detail"] += 0.6
+        if EmployeeIdentifierService.has_movil_identifier(query) or bool(re.search(r"\b\d{6,13}\b", query)):
+            intent_scores["detail"] += 0.55
         if any(token in query for token in ("vacacion", "vacaciones", "incapacidad", "licencia", "permiso", "calamidad")) and any(
             token in query for token in ("empleado", "empleados", "colaborador", "colaboradores", "personal", "persona", "personas")
         ):
@@ -541,28 +589,15 @@ class SemanticNormalizationService:
                     "confidence": 0.95,
                 }
             )
-        movil_match = re.search(r"\bmovil(?:\s+(?:de|del|la|el))?\s+([a-z0-9_-]{3,40})\b", query)
+        movil_match = EmployeeIdentifierService.extract_movil_identifier(query)
         if movil_match:
             entities.append(
                 {
                     "entity_type": "movil",
-                    "entity_value": str(movil_match.group(1) or "").strip(),
+                    "entity_value": movil_match,
                     "confidence": 0.93,
                 }
             )
-        generic_lookup = re.search(r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+([a-z0-9_-]{3,40})\b", query)
-        if not generic_lookup:
-            generic_lookup = re.search(r"^\s*(?:info|informacion|detalle|datos|ficha)\s+([a-z0-9_-]{3,40})\s*$", query)
-        if generic_lookup:
-            token = str(generic_lookup.group(1) or "").strip()
-            if re.search(r"[a-z]", token) and re.search(r"\d", token):
-                entities.append(
-                    {
-                        "entity_type": "movil",
-                        "entity_value": token,
-                        "confidence": 0.81,
-                    }
-                )
         if any(token in query for token in ("empleado", "empleados", "colaborador", "colaboradores", "personal", "persona", "personas")):
             entities.append(
                 {
@@ -585,7 +620,7 @@ class SemanticNormalizationService:
         canonical_aliases = {str(item.get("alias") or ""): str(item.get("canonical") or "") for item in list(semantic_aliases or [])}
         if any(token in query for token in ("activo", "activa", "activos", "activas", "habilitado", "habilitados", "vigente", "vigentes")):
             filters.append({"filter": "estado", "value": "ACTIVO", "confidence": 0.9, "source": "deterministic"})
-        elif any(token in query for token in ("inactivo", "inactivos")):
+        elif cls._has_employee_inactive_signal(query):
             filters.append({"filter": "estado", "value": "INACTIVO", "confidence": 0.9, "source": "deterministic"})
         elif (
             canonical_aliases.get("habilitado") == "activo"
@@ -662,13 +697,13 @@ class SemanticNormalizationService:
         candidate_domains: list[dict[str, Any]],
         normalized_capability_hints: list[dict[str, Any]],
     ) -> bool:
-        legacy_domain = str(classification.get("domain") or "").strip().lower()
-        top_domain = str((candidate_domains[0] if candidate_domains else {}).get("domain") or "").strip().lower()
+        legacy_domain = normalizar_codigo_dominio(classification.get("domain"))
+        top_domain = normalizar_codigo_dominio((candidate_domains[0] if candidate_domains else {}).get("domain"))
         if legacy_domain and top_domain and legacy_domain != top_domain:
             return True
         if normalized_capability_hints:
             first_capability = str(normalized_capability_hints[0].get("capability_id") or "")
-            capability_domain = first_capability.split(".", 1)[0] if "." in first_capability else ""
+            capability_domain = dominio_desde_capacidad(first_capability)
             if capability_domain and top_domain and capability_domain != top_domain:
                 return True
         return False
@@ -870,6 +905,8 @@ class SemanticNormalizationService:
                     "colaborador=empleado",
                     "vigente=activo",
                     "habilitado=activo",
+                    "egresos=inactivo",
+                    "retiros=inactivo",
                 ]
             )
         frequent_capabilities: list[str] = []
@@ -917,6 +954,8 @@ class SemanticNormalizationService:
                 [
                     "si consulta de cantidad + estado activo, priorizar intent_code=count",
                     "si aparece vigente/habilitado, normalizar filter estado=ACTIVO",
+                    "si aparece egreso/retiro/desvinculacion, normalizar filter estado=INACTIVO",
+                    "si hay periodo y estado=INACTIVO, priorizar fecha_egreso como columna temporal",
                 ]
             )
 
@@ -1088,7 +1127,7 @@ class SemanticNormalizationService:
         )
         if domain_candidate == "empleados":
             dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede"])
-        if domain_candidate in {"attendance", "ausentismo"}:
+        if domain_candidate == "ausentismo":
             dimensions.extend(["justificacion", "estado_justificacion"])
             if has_personal_join:
                 dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede"])
@@ -1141,7 +1180,7 @@ class SemanticNormalizationService:
         rules = ["si la consulta usa 'por <dimension>', interpretar aggregate/group_by"]
         if domain_candidate == "empleados":
             rules.append("si no se especifica estado en empleados, usar estado=ACTIVO")
-        if domain_candidate in {"attendance", "ausentismo"} and any(
+        if domain_candidate == "ausentismo" and any(
             str(item.get("table_name") or "").strip().lower() == "cinco_base_de_personal"
             for item in list(candidate_tables or [])
             if isinstance(item, dict)
@@ -1375,7 +1414,7 @@ class SemanticNormalizationService:
 
     @staticmethod
     def _top_domain_code(*, candidate_domains: list[dict[str, Any]]) -> str:
-        return str((candidate_domains[0] if candidate_domains else {}).get("domain") or "").strip().lower()
+        return normalizar_codigo_dominio((candidate_domains[0] if candidate_domains else {}).get("domain"))
 
     @staticmethod
     def _top_intent_code(*, candidate_intents: list[dict[str, Any]]) -> str:
@@ -1393,10 +1432,7 @@ class SemanticNormalizationService:
 
     @classmethod
     def _normalize_domain_code(cls, value: Any) -> str:
-        normalized = str(value or "").strip().lower()
-        if not normalized:
-            return ""
-        return str(cls._DOMAIN_ALIASES.get(normalized) or normalized)
+        return normalizar_codigo_dominio(value)
 
     @staticmethod
     def _merge_ranked(
@@ -1486,6 +1522,29 @@ class SemanticNormalizationService:
         except Exception:
             pass
         return {}
+
+    @classmethod
+    def _has_employee_inactive_signal(cls, query: str) -> bool:
+        return bool(cls._EMPLOYEE_INACTIVE_SIGNAL_RE.search(str(query or "")))
+
+    @classmethod
+    def _has_employee_active_signal(cls, query: str) -> bool:
+        return bool(cls._EMPLOYEE_ACTIVE_SIGNAL_RE.search(str(query or "")))
+
+    @classmethod
+    def _has_temporal_reference(cls, query: str) -> bool:
+        return bool(cls._TEMPORAL_REFERENCE_RE.search(str(query or "")))
+
+    @classmethod
+    def _has_employee_status_metric_signal(cls, query: str) -> bool:
+        text = str(query or "")
+        if re.search(r"\b(egresos|retiros|desvinculaciones|bajas|rotacion|rotaciones)\b", text):
+            return True
+        if cls._has_employee_inactive_signal(text) and cls._has_temporal_reference(text):
+            return True
+        if cls._has_employee_active_signal(text) and cls._has_temporal_reference(text):
+            return True
+        return False
 
     @staticmethod
     def _normalize_text(value: Any) -> str:

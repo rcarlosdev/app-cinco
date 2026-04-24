@@ -34,6 +34,9 @@ type WebSocketEventPayload = {
   chunk?: string;
   delta?: string;
   content?: string;
+  working_updates?: IADevChatResponse["working_updates"];
+  reasoning?: IADevChatResponse["reasoning"];
+  status_text?: string;
   response?: IADevChatResponse;
   data?: IADevChatResponse;
   error?: string;
@@ -94,6 +97,159 @@ const buildFallbackResponseFromEvent = (
     saturated: false,
   },
 });
+
+const buildProgressResponseFromEvent = (
+  payload: WebSocketEventPayload,
+): Partial<IADevChatResponse> => ({
+  session_id: payload.session_id || "",
+  reply: "",
+  orchestrator: {},
+  data: {},
+  trace: [],
+  memory: {
+    used_messages: 0,
+    capacity_messages: 0,
+    usage_ratio: 0,
+    trim_events: 0,
+    saturated: false,
+  },
+  working_updates: Array.isArray(payload.working_updates)
+    ? payload.working_updates
+    : payload.status_text
+      ? [
+          {
+            stage: "progress",
+            stage_label: "Proceso",
+            status: "in_progress",
+            summary: payload.status_text,
+            display_text: payload.status_text,
+            at: new Date().toISOString(),
+          },
+        ]
+      : [],
+  reasoning: payload.reasoning || {
+    enabled: true,
+    status: "running",
+    current_next_step: payload.status_text || "",
+  },
+});
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
+const buildPendingProgressFrames = (): Partial<IADevChatResponse>[] => {
+  const now = () => new Date().toISOString();
+  return [
+    {
+      working_updates: [
+        {
+          stage: "intake",
+          stage_label: "Consulta",
+          status: "in_progress",
+          summary: "Leyendo la consulta y ubicando el contexto.",
+          display_text: "Leyendo la consulta y ubicando el contexto.",
+          at: now(),
+        },
+      ],
+      reasoning: {
+        enabled: true,
+        status: "running",
+        current_next_step: "clasificar dominio e intencion",
+      },
+    },
+    {
+      working_updates: [
+        {
+          stage: "bootstrap",
+          stage_label: "Lectura",
+          status: "in_progress",
+          summary: "Buscando señales de dominio, entidad y filtros utiles.",
+          display_text: "Buscando señales de dominio, entidad y filtros utiles.",
+          at: now(),
+        },
+      ],
+      reasoning: {
+        enabled: true,
+        status: "running",
+        current_next_step: "contrastar memoria y rutas posibles",
+      },
+    },
+    {
+      working_updates: [
+        {
+          stage: "planning",
+          stage_label: "Ruta",
+          status: "in_progress",
+          summary: "Comparando la mejor ruta antes de responder.",
+          display_text: "Comparando la mejor ruta antes de responder.",
+          at: now(),
+        },
+      ],
+      reasoning: {
+        enabled: true,
+        status: "running",
+        current_next_step: "armar la respuesta final con evidencia",
+      },
+    },
+  ];
+};
+
+const startPendingProgressPlayback = (
+  onProgress?: (response: Partial<IADevChatResponse>) => void,
+) => {
+  if (!onProgress) return () => {};
+  const frames = buildPendingProgressFrames();
+  let cancelled = false;
+  const timers: number[] = [];
+  frames.forEach((frame, index) => {
+    const timer = window.setTimeout(() => {
+      if (!cancelled) {
+        onProgress(frame);
+      }
+    }, index * 850);
+    timers.push(timer);
+  });
+  return () => {
+    cancelled = true;
+    timers.forEach((timer) => window.clearTimeout(timer));
+  };
+};
+
+const playbackResolvedProgress = async (
+  response: IADevChatResponse,
+  onProgress?: (response: Partial<IADevChatResponse>) => void,
+) => {
+  if (!onProgress) return;
+  const updates = Array.isArray(response.working_updates)
+    ? response.working_updates
+    : [];
+  if (updates.length === 0) {
+    if (response.reasoning) {
+      onProgress({
+        working_updates: [],
+        reasoning: response.reasoning,
+      });
+    }
+    return;
+  }
+
+  const accumulated: IADevChatResponse["working_updates"] = [];
+  for (const update of updates.slice(-4)) {
+    accumulated.push(update);
+    onProgress({
+      working_updates: [...accumulated],
+      reasoning: {
+        enabled: response.reasoning?.enabled ?? true,
+        ...(response.reasoning || {}),
+        current_next_step:
+          response.reasoning?.current_next_step || update.next_step || "",
+      },
+    });
+    await wait(170);
+  }
+};
 
 export const useIADevChatTransport = () => {
   const webSocketUrl = useMemo(() => buildDefaultWsUrl(), []);
@@ -214,6 +370,20 @@ export const useIADevChatTransport = () => {
         return;
       }
 
+      if (
+        eventType === "assistant_progress" ||
+        eventType === "progress" ||
+        eventType === "reasoning_update" ||
+        eventType === "working_update"
+      ) {
+        pending.callbacks?.onProgress?.(
+          payload.response ||
+            payload.data ||
+            buildProgressResponseFromEvent(payload),
+        );
+        return;
+      }
+
       if (eventType === "assistant_error" || eventType === "error") {
         const errorMessage =
           payload.error || payload.detail || "Error de transporte websocket.";
@@ -273,10 +443,15 @@ export const useIADevChatTransport = () => {
       callbacks,
     }: SendMessageParams): Promise<IADevChatResponse> => {
       callbacks?.onStart?.();
+      const stopPendingPlayback = startPendingProgressPlayback(
+        callbacks?.onProgress,
+      );
       const response = await sendIADevMessage({
         message,
         session_id: sessionId || undefined,
       });
+      stopPendingPlayback();
+      await playbackResolvedProgress(response, callbacks?.onProgress);
       await streamChunks(response.reply, callbacks?.onChunk);
       return response;
     },

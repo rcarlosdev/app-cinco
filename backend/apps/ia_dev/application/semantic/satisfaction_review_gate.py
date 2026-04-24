@@ -8,6 +8,12 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     SatisfactionReviewGateResult,
     StructuredQueryIntent,
 )
+from apps.ia_dev.application.taxonomia_dominios import (
+    dominio_desde_capacidad,
+    intenciones_son_compatibles,
+    normalizar_codigo_dominio,
+    normalizar_intencion_comparable,
+)
 
 
 class SatisfactionReviewGate:
@@ -49,25 +55,45 @@ class SatisfactionReviewGate:
         flags = dict(runtime_flags or {})
         loop_meta = dict(loop_metadata or {})
 
-        canonical_domain = str(canonical.get("domain_code") or "").strip().lower()
-        canonical_intent = str(canonical.get("intent_code") or "").strip().lower()
+        canonical_domain = normalizar_codigo_dominio(canonical.get("domain_code"))
         canonical_capability = str(canonical.get("capability_code") or "").strip()
         canonical_confidence = float(canonical.get("confidence") or 0.0)
+        canonical_intent = normalizar_intencion_comparable(
+            canonical.get("intent_code"),
+            domain=canonical_domain,
+            capability_id=canonical_capability,
+        )
 
         runtime_capability = str(planned.get("capability_id") or "").strip()
         runtime_domain = self._capability_domain(runtime_capability)
         if not runtime_domain:
-            runtime_domain = str((resolved_query.intent.domain_code if resolved_query else "") or "").strip().lower()
-        runtime_intent_code = str((runtime_intent.operation if runtime_intent else "") or "").strip().lower()
+            runtime_domain = normalizar_codigo_dominio(
+                resolved_query.intent.domain_code if resolved_query else ""
+            )
+        runtime_intent_code = normalizar_intencion_comparable(
+            runtime_intent.operation if runtime_intent else "",
+            domain=runtime_domain,
+            capability_id=runtime_capability,
+        )
         if not runtime_intent_code:
-            runtime_intent_code = str((resolved_query.intent.operation if resolved_query else "") or "").strip().lower()
+            runtime_intent_code = normalizar_intencion_comparable(
+                resolved_query.intent.operation if resolved_query else "",
+                domain=runtime_domain,
+                capability_id=runtime_capability,
+            )
 
         domain_alignment = bool(
             not canonical_domain
             or canonical_domain in {"general", "legacy"}
             or canonical_domain == runtime_domain
         )
-        intent_alignment = bool(not canonical_intent or canonical_intent == runtime_intent_code)
+        intent_alignment = intenciones_son_compatibles(
+            canonical_intent,
+            runtime_intent_code,
+            expected_capability_id=canonical_capability,
+            actual_capability_id=runtime_capability,
+            domain=canonical_domain or runtime_domain,
+        )
         capability_alignment = bool(not canonical_capability or canonical_capability == runtime_capability)
 
         data = dict(response.get("data") or {})
@@ -237,10 +263,7 @@ class SatisfactionReviewGate:
 
     @staticmethod
     def _capability_domain(capability_id: str) -> str:
-        capability = str(capability_id or "").strip().lower()
-        if not capability:
-            return ""
-        return capability.split(".", 1)[0] if "." in capability else capability
+        return dominio_desde_capacidad(capability_id)
 
     @staticmethod
     def _compute_score(

@@ -13,7 +13,10 @@ reglas_negocio:
     descripcion: "Si la consulta habla de personal o empleados en un tipo de ausentismo, priorizar detalle de personas."
   - codigo: ausentismo_dimensiones_empleados
     prioridad: alta
-    descripcion: "Area, cargo, supervisor, carpeta y tipo_labor se resuelven por join con cinco_base_de_personal."
+    descripcion: "Area, cargo, supervisor, carpeta, centro_costo y tipo_labor se resuelven por join/enriquecimiento con cinco_base_de_personal e infraestructura_parametros."
   - codigo: ausentismo_por_dimension
     prioridad: media
     descripcion: "Si el usuario usa 'por <dimension>', interpretar aggregate/group_by."
+  - codigo: ausentismo_contexto_organizacional
+    prioridad: alta
+    descripcion: "Validar areas/carpetas activas contra infraestructura_parametros; typos como Implementacio deben poder mapear a IMPLEMENTACION FO, y CC debe salir de datos."

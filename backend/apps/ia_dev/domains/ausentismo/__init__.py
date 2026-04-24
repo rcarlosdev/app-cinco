@@ -1,3 +1,8 @@
-from .handler import AusentismoHandler
+from .handler import AusentismoHandleResult, AusentismoHandler
+from .handler_delegacion import AusentismoDelegacionHandler
 
-__all__ = ["AusentismoHandler"]
+__all__ = [
+    "AusentismoHandleResult",
+    "AusentismoHandler",
+    "AusentismoDelegacionHandler",
+]

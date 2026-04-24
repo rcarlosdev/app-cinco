@@ -127,7 +127,7 @@ class CanonicalResolutionServiceTests(SimpleTestCase):
             semantic_normalization_output={
                 "canonical_query": "resumen por supervisor",
                 "candidate_domains": [
-                    {"domain": "attendance", "confidence": 0.74},
+                    {"domain": "ausentismo", "confidence": 0.74},
                     {"domain": "empleados", "confidence": 0.68},
                 ],
                 "candidate_intents": [{"intent": "aggregate", "confidence": 0.7}],
@@ -136,7 +136,7 @@ class CanonicalResolutionServiceTests(SimpleTestCase):
             semantic_context=self.semantic_context,
             memory_hints={},
             session_context={},
-            base_classification={"domain": "attendance", "intent": "attendance_query"},
+            base_classification={"domain": "ausentismo", "intent": "attendance_query"},
             capability_hints=[],
             legacy_hints={},
         )

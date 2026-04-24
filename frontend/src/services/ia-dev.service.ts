@@ -66,6 +66,38 @@ export type IADevMemoryCandidate = {
   error?: string;
 };
 
+export type IADevWorkingUpdate = {
+  stage: string;
+  stage_label?: string;
+  status: string;
+  summary: string;
+  display_text?: string;
+  next_step?: string;
+  confidence?: number | null;
+  at: string;
+};
+
+export type IADevReasoningHypothesis = {
+  key: string;
+  text: string;
+  status?: string;
+  confidence?: number | null;
+  evidence_refs?: string[];
+};
+
+export type IADevReasoningDiagnostic = {
+  signature: string;
+  family?: string;
+  severity?: string;
+  stage?: string;
+  summary: string;
+  recommended_action?: string;
+  confidence?: number | null;
+  domain_code?: string;
+  capability_id?: string;
+  matched_memory_patterns?: Array<Record<string, unknown>>;
+};
+
 export type IADevChatResponse = {
   session_id: string;
   reply: string;
@@ -119,6 +151,18 @@ export type IADevChatResponse = {
   actions?: IADevAction[];
   memory_candidates?: IADevMemoryCandidate[];
   pending_proposals?: IADevMemoryProposal[];
+  working_updates?: IADevWorkingUpdate[];
+  reasoning?: {
+    enabled: boolean;
+    version?: string;
+    status?: string;
+    working_goal?: string;
+    current_next_step?: string;
+    hypotheses?: IADevReasoningHypothesis[];
+    diagnostics?: IADevReasoningDiagnostic[];
+    memory_summary?: Record<string, unknown>;
+    duration_ms?: number;
+  };
   trace: Array<{
     phase: string;
     status: string;

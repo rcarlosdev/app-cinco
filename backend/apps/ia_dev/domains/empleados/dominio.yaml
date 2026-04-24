@@ -58,6 +58,8 @@ group_by_soportados:
   - tipo_labor
 metricas_soportadas:
   - total_empleados
+  - rotacion_personal
+  - tasa_rotacion
 sensitividades:
   - medium
   - high

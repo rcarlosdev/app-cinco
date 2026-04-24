@@ -516,6 +516,52 @@ class QuerySemanticResolversTests(SimpleTestCase):
         self.assertEqual(str(resolved.normalized_filters.get("estado") or ""), "ACTIVO")
         self.assertEqual(str(resolved.intent.template_id or ""), "count_entities_by_status")
 
+    def test_semantic_business_resolver_binds_egresos_this_month_to_fecha_egreso(self):
+        fake_domain = _FakeDomain(
+            raw_context={
+                "tables": [
+                    {
+                        "schema_name": "cincosas_cincosas",
+                        "table_name": "cinco_base_de_personal",
+                        "table_fqn": "cincosas_cincosas.cinco_base_de_personal",
+                        "rol": "dimension",
+                        "es_principal": True,
+                    }
+                ],
+                "columns": [
+                    {"table_name": "cinco_base_de_personal", "column_name": "estado", "nombre_columna_logico": "estado_empleado"},
+                    {"table_name": "cinco_base_de_personal", "column_name": "fecha_egreso", "nombre_columna_logico": "fecha_egreso"},
+                ],
+                "relationships": [],
+                "flags": {"sql_asistido_permitido": False},
+            }
+        )
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(fake_domain),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+        intent = StructuredQueryIntent(
+            raw_query="Egresos de este mes?",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_records_by_period",
+            filters={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.9,
+        )
+        resolved = resolver.resolve_query(
+            message=intent.raw_query,
+            intent=intent,
+            base_classification={"domain": "general"},
+        )
+        self.assertEqual(str(resolved.normalized_filters.get("estado") or ""), "INACTIVO")
+        self.assertEqual(str(resolved.intent.template_id or ""), "count_entities_by_status")
+        temporal_scope = dict(((resolved.semantic_context or {}).get("resolved_semantic") or {}).get("temporal_scope") or {})
+        self.assertEqual(str(temporal_scope.get("column_hint") or ""), "fecha_egreso")
+        self.assertEqual(str(temporal_scope.get("status_value") or ""), "INACTIVO")
+        self.assertFalse(bool(temporal_scope.get("ambiguous")))
+
     def test_semantic_business_resolver_defaults_employee_queries_to_active_status(self):
         fake_domain = _FakeDomain(
             raw_context={

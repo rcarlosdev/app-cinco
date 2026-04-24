@@ -8,6 +8,12 @@ from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     CanonicalResolvedQuery,
 )
+from apps.ia_dev.application.taxonomia_dominios import (
+    normalizar_codigo_dominio,
+    normalizar_intencion_comparable,
+    normalizar_dominio_operativo,
+    dominio_desde_capacidad,
+)
 
 
 class CanonicalResolutionService:
@@ -15,14 +21,6 @@ class CanonicalResolutionService:
     Servicio de reconciliacion canonica de señales semanticas.
     No altera el resultado final del runtime en esta fase.
     """
-
-    _CAPABILITY_DOMAIN_MAP = {
-        "attendance": "attendance",
-        "transport": "transport",
-        "empleados": "empleados",
-        "general": "general",
-        "legacy": "general",
-    }
 
     def resolve(
         self,
@@ -72,7 +70,7 @@ class CanonicalResolutionService:
         conflicts: list[dict[str, Any]] = []
 
         selected_domain = "general"
-        selected_intent = "summary"
+        selected_intent = ""
         selected_capability = ""
 
         # 1) capability exact match
@@ -127,8 +125,14 @@ class CanonicalResolutionService:
                 selected_domain = memory_domain
 
         # 4) semantic normalization
-        semantic_domain = str((candidate_domains[0] if candidate_domains else {}).get("domain") or "").strip().lower()
-        semantic_intent = str((candidate_intents[0] if candidate_intents else {}).get("intent") or "").strip().lower()
+        semantic_domain = normalizar_codigo_dominio(
+            (candidate_domains[0] if candidate_domains else {}).get("domain")
+        )
+        semantic_intent = normalizar_intencion_comparable(
+            (candidate_intents[0] if candidate_intents else {}).get("intent"),
+            domain=semantic_domain,
+            capability_id=selected_capability,
+        )
         semantic_confidence = float(semantic_norm.get("confidence") or 0.0)
         if semantic_domain:
             resolution_evidence.append(
@@ -147,8 +151,12 @@ class CanonicalResolutionService:
             selected_intent = semantic_intent
 
         # 5) legacy hints
-        base_domain = str(base.get("domain") or "").strip().lower()
-        base_intent = str(base.get("intent") or "").strip().lower()
+        base_domain = normalizar_codigo_dominio(base.get("domain"))
+        base_intent = normalizar_intencion_comparable(
+            base.get("intent"),
+            domain=base_domain,
+            capability_id=selected_capability,
+        )
         if base_domain:
             resolution_evidence.append(
                 {
@@ -161,10 +169,10 @@ class CanonicalResolutionService:
             )
             if selected_domain == "general":
                 selected_domain = base_domain
-        if selected_intent in {"", "summary"} and base_intent:
+        if not selected_intent and base_intent:
             selected_intent = base_intent
 
-        legacy_last_domain = str(legacy.get("last_domain") or "").strip().lower()
+        legacy_last_domain = normalizar_codigo_dominio(legacy.get("last_domain"))
         if legacy_last_domain and selected_domain == "general":
             selected_domain = legacy_last_domain
 
@@ -172,7 +180,11 @@ class CanonicalResolutionService:
         if not selected_domain:
             selected_domain = "general"
         if not selected_intent:
-            selected_intent = "summary"
+            selected_intent = normalizar_intencion_comparable(
+                "summary",
+                domain=selected_domain,
+                capability_id=selected_capability,
+            ) or "summary"
 
         # Critical rule: do not allow general with strong specific evidence.
         strong_specific_evidence = [
@@ -183,7 +195,10 @@ class CanonicalResolutionService:
         ]
         if selected_domain == "general" and strong_specific_evidence:
             best = sorted(strong_specific_evidence, key=lambda item: float(item.get("confidence") or 0.0), reverse=True)[0]
-            selected_domain = str(best.get("domain") or "general").strip().lower() or "general"
+            selected_domain = normalizar_dominio_operativo(
+                best.get("domain"),
+                fallback="general",
+            )
             conflicts.append(
                 {
                     "type": "general_blocked_by_strong_evidence",
@@ -282,11 +297,7 @@ class CanonicalResolutionService:
 
     @classmethod
     def _domain_from_capability(cls, capability_id: str) -> str:
-        clean = str(capability_id or "").strip().lower()
-        if not clean:
-            return ""
-        prefix = clean.split(".", 1)[0] if "." in clean else clean
-        return str(cls._CAPABILITY_DOMAIN_MAP.get(prefix) or "")
+        return dominio_desde_capacidad(capability_id)
 
     @classmethod
     def _dictionary_domain_signal(
@@ -297,7 +308,7 @@ class CanonicalResolutionService:
         semantic_aliases: list[dict[str, Any]],
     ) -> tuple[str, float]:
         tokens = cls._domain_token_scores()
-        scores = {"empleados": 0.0, "attendance": 0.0, "transport": 0.0}
+        scores = {"empleados": 0.0, "ausentismo": 0.0}
 
         for term, domain in tokens.items():
             if term in query:
@@ -336,14 +347,12 @@ class CanonicalResolutionService:
     def _memory_domain_signal(*, memory_hints: dict[str, Any], session_context: dict[str, Any]) -> str:
         hints = dict(memory_hints or {})
         session = dict(session_context or {})
-        if any(str(key).startswith("transport") for key in hints.keys()):
-            return "transport"
-        if any(str(key).startswith("attendance") for key in hints.keys()):
-            return "attendance"
+        if any(str(key).startswith(("attendance", "ausentismo")) for key in hints.keys()):
+            return "ausentismo"
         if any("personal_status" in str(key) for key in hints.keys()):
             return "empleados"
-        last_domain = str(session.get("last_domain") or "").strip().lower()
-        if last_domain in {"attendance", "transport", "empleados"}:
+        last_domain = normalizar_dominio_operativo(session.get("last_domain"), fallback="")
+        if last_domain in {"ausentismo", "empleados"}:
             return last_domain
         return ""
 
@@ -417,15 +426,11 @@ class CanonicalResolutionService:
             "colaboradores": "empleados",
             "personal": "empleados",
             "rrhh": "empleados",
-            "ausent": "attendance",
-            "asistenc": "attendance",
-            "injustific": "attendance",
-            "supervisor": "attendance",
-            "jefe": "attendance",
-            "transporte": "transport",
-            "ruta": "transport",
-            "movilidad": "transport",
-            "vehicul": "transport",
+            "ausent": "ausentismo",
+            "asistenc": "ausentismo",
+            "injustific": "ausentismo",
+            "supervisor": "ausentismo",
+            "jefe": "ausentismo",
         }
 
     @staticmethod

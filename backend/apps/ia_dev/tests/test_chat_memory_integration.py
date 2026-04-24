@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from django.test import SimpleTestCase
 
 from apps.ia_dev.application.orchestration.chat_application_service import (
@@ -109,7 +111,15 @@ def _legacy_response() -> dict:
 class ChatMemoryIntegrationTests(SimpleTestCase):
     def test_chat_includes_memory_candidates_and_pending_proposals(self):
         fake_runtime = _FakeMemoryRuntime()
-        service = ChatApplicationService(memory_runtime=fake_runtime)
+        fake_router = MagicMock()
+        fake_router.route.return_value = {
+            "execute_capability": False,
+            "use_legacy": True,
+            "selected_capability_id": "attendance.summary.by_attribute.v1",
+            "reason": "test_forces_legacy_path",
+            "shadow_enabled": False,
+        }
+        service = ChatApplicationService(memory_runtime=fake_runtime, router=fake_router)
 
         response = service.run(
             message="dame asistencia agrupada",
@@ -121,14 +131,26 @@ class ChatMemoryIntegrationTests(SimpleTestCase):
 
         self.assertIn("memory_candidates", response)
         self.assertIn("pending_proposals", response)
+        self.assertIn("working_updates", response)
+        self.assertIn("reasoning", response)
         self.assertEqual(len(response.get("memory_candidates") or []), 1)
         self.assertEqual(len(response.get("pending_proposals") or []), 1)
         self.assertEqual((response.get("pending_proposals") or [])[0].get("proposal_id"), "MPRO-001")
         self.assertTrue(any(action.get("type") == "memory_review" for action in (response.get("actions") or [])))
+        self.assertIsInstance(response.get("working_updates"), list)
+        self.assertIsInstance(response.get("reasoning"), dict)
 
     def test_chat_uses_session_user_key_fallback_when_actor_not_provided(self):
         fake_runtime = _FakeMemoryRuntime()
-        service = ChatApplicationService(memory_runtime=fake_runtime)
+        fake_router = MagicMock()
+        fake_router.route.return_value = {
+            "execute_capability": False,
+            "use_legacy": True,
+            "selected_capability_id": "general.answer.v1",
+            "reason": "test_forces_legacy_path",
+            "shadow_enabled": False,
+        }
+        service = ChatApplicationService(memory_runtime=fake_runtime, router=fake_router)
 
         service.run(
             message="consulta general",

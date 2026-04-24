@@ -53,6 +53,80 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         # El estado se resuelve en la capa semantica (dd_campos/dd_sinonimos), no en intent resolver.
         self.assertEqual(str(intent.filters.get("estado") or ""), "")
 
+    def test_query_intent_resolver_inferrs_employee_egresos_this_month_as_inactive_count(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="Egresos de este mes?",
+                base_classification={
+                    "domain": "general",
+                    "intent": "general_question",
+                    "needs_database": False,
+                },
+                semantic_context={},
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "count")
+        self.assertEqual(intent.template_id, "count_entities_by_status")
+        self.assertEqual(str(intent.filters.get("estado") or ""), "INACTIVO")
+        self.assertEqual(str((intent.period or {}).get("label") or ""), "mes_actual")
+        self.assertTrue(bool((intent.period or {}).get("start_date")))
+        self.assertTrue(bool((intent.period or {}).get("end_date")))
+
+    def test_query_intent_resolver_infers_employee_turnover_last_month_as_inactive_count(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="rotacion de personal ultimo mes?",
+                base_classification={
+                    "domain": "general",
+                    "intent": "general_question",
+                    "needs_database": False,
+                },
+                semantic_context={},
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "count")
+        self.assertEqual(intent.template_id, "count_entities_by_status")
+        self.assertEqual(str(intent.filters.get("estado") or ""), "INACTIVO")
+        self.assertIn("turnover_rate", list(intent.metrics or []))
+        self.assertEqual(str((intent.period or {}).get("label") or ""), "ultimo_mes_30_dias")
+
+    def test_query_intent_resolver_preserves_turnover_when_openai_marks_trend(self):
+        resolver = QueryIntentResolver()
+        fallback = StructuredQueryIntent(
+            raw_query="Rotación de empelados de I&M",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={"estado": "INACTIVO", "area": "I&M"},
+            period={"label": "ultimo_mes_30_dias", "start_date": "2026-03-26", "end_date": "2026-04-24"},
+            group_by=[],
+            metrics=["turnover_rate", "count"],
+            confidence=0.8,
+            source="rules",
+        )
+        llm = StructuredQueryIntent(
+            raw_query="Rotación de empelados de I&M",
+            domain_code="empleados",
+            operation="trend",
+            template_id="trend_by_period",
+            filters={"estado": "INACTIVO", "area": "I&M"},
+            period={"label": "ultimo_mes_30_dias", "start_date": "2026-03-26", "end_date": "2026-04-24"},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.6,
+            source="openai",
+        )
+
+        merged = resolver._merge_intents(fallback=fallback, llm=llm)
+
+        self.assertEqual(merged.domain_code, "empleados")
+        self.assertEqual(merged.operation, "count")
+        self.assertEqual(merged.template_id, "count_entities_by_status")
+        self.assertIn("turnover_rate", list(merged.metrics or []))
+        self.assertEqual(str(merged.filters.get("area") or ""), "I&M")
+
     def test_query_intent_resolver_treats_por_area_as_grouped_employee_aggregate(self):
         resolver = QueryIntentResolver()
         with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
@@ -157,6 +231,63 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(intent.operation, "detail")
         self.assertEqual(str(intent.filters.get("movil") or ""), "TIRAN462")
 
+    def test_query_intent_resolver_detects_employee_detail_by_movil_identifier_with_space(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="informacion tiran 462",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "empleados_query",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "detail")
+        self.assertEqual(str(intent.filters.get("movil") or ""), "TIRAN462")
+
+    def test_query_intent_resolver_detects_employee_detail_by_movil_numeric_suffix(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="462",
+                base_classification={
+                    "domain": "general",
+                    "intent": "general_question",
+                    "needs_database": False,
+                },
+                semantic_context={},
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "detail")
+        self.assertEqual(str(intent.filters.get("movil") or ""), "462")
+
+    def test_query_intent_resolver_merge_discards_search_when_identifier_is_present(self):
+        fallback = StructuredQueryIntent(
+            raw_query="informacion TIRAN462",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            entity_type="movil",
+            entity_value="TIRAN462",
+            filters={"movil": "TIRAN462"},
+            source="rules",
+        )
+        llm = StructuredQueryIntent(
+            raw_query="informacion TIRAN462",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            entity_type="entity_code",
+            entity_value="TIRAN462",
+            filters={"search": "informacion tiran462"},
+            source="openai",
+        )
+        merged = QueryIntentResolver._merge_intents(fallback=fallback, llm=llm)
+        self.assertEqual(str(merged.filters.get("movil") or ""), "TIRAN462")
+        self.assertNotIn("search", dict(merged.filters or {}))
+
     def test_query_intent_resolver_merge_keeps_employee_domain_when_llm_falls_back_to_general(self):
         fallback = StructuredQueryIntent(
             raw_query="informacion de TIRAN462",
@@ -185,7 +316,7 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         resolver = QueryIntentResolver()
         with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
             intent = resolver.resolve(
-                message="¿Qué áreas concentran más ausentismos en rolling 90 días y qué causas probables sugieres?",
+                message="que areas concentran mas ausentismos en rolling 90 dias y que causas probables sugieres?",
                 base_classification={
                     "domain": "attendance",
                     "intent": "attendance_query",
@@ -193,7 +324,7 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
                 },
                 semantic_context={},
             )
-        self.assertEqual(intent.domain_code, "attendance")
+        self.assertEqual(intent.domain_code, "ausentismo")
         self.assertEqual(intent.template_id, "aggregate_by_group_and_period")
         self.assertIn("area", list(intent.group_by or []))
         self.assertEqual(str((intent.period or {}).get("label") or ""), "rolling_90_dias")
@@ -365,6 +496,100 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
                 run_context=run_context,
                 resolved_query=resolved_query,
             )
+        self.assertEqual(plan.strategy, "capability")
+        self.assertEqual(plan.capability_id, "empleados.count.active.v1")
+
+    def test_query_execution_planner_selects_employee_capability_for_egresos_this_month(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Egresos de este mes?",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={"estado": "INACTIVO"},
+            period={"label": "mes_actual", "start_date": "2026-04-01", "end_date": "2026-04-23"},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.9,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={
+                "domain_status": "active",
+                "supports_sql_assisted": False,
+                "tables": [{"table_fqn": "bd_c3nc4s1s.cinco_base_de_personal", "table_name": "cinco_base_de_personal"}],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["estado", "cedula", "fecha_egreso"],
+                "resolved_semantic": {
+                    "temporal_scope": {
+                        "column_hint": "fecha_egreso",
+                        "start_date": "2026-04-01",
+                        "end_date": "2026-04-23",
+                        "status_value": "INACTIVO",
+                        "ambiguous": False,
+                    }
+                },
+            },
+            normalized_filters={"estado": "INACTIVO"},
+            normalized_period={"label": "mes_actual", "start_date": "2026-04-01", "end_date": "2026-04-23"},
+            mapped_columns={"estado": "estado"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+                "IA_DEV_CAP_EMPLEADOS_COUNT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            run_context = RunContext.create(message=intent.raw_query)
+            plan = planner.plan(
+                run_context=run_context,
+                resolved_query=resolved_query,
+            )
+        self.assertEqual(plan.strategy, "capability")
+        self.assertEqual(plan.capability_id, "empleados.count.active.v1")
+        temporal_scope = dict((plan.constraints or {}).get("temporal_scope") or {})
+        self.assertEqual(str(temporal_scope.get("column_hint") or ""), "fecha_egreso")
+
+    def test_query_execution_planner_rescues_employee_turnover_even_if_operation_is_trend(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Rotación de empelados de I&M",
+            domain_code="empleados",
+            operation="trend",
+            template_id="trend_by_period",
+            filters={"estado": "INACTIVO", "area": "I&M"},
+            period={"label": "ultimo_mes_30_dias", "start_date": "2026-03-26", "end_date": "2026-04-24"},
+            group_by=[],
+            metrics=["turnover_rate", "count"],
+            confidence=0.6,
+            source="openai",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={
+                "domain_status": "active",
+                "supports_sql_assisted": False,
+                "tables": [{"table_fqn": "bd_c3nc4s1s.cinco_base_de_personal", "table_name": "cinco_base_de_personal"}],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["estado", "area", "fecha_ingreso", "fecha_egreso"],
+            },
+            normalized_filters={"estado": "INACTIVO", "area": "I&M"},
+            normalized_period={"label": "ultimo_mes_30_dias", "start_date": "2026-03-26", "end_date": "2026-04-24"},
+            mapped_columns={"estado": "estado", "area": "area"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+                "IA_DEV_CAP_EMPLEADOS_COUNT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            run_context = RunContext.create(message=intent.raw_query)
+            plan = planner.plan(run_context=run_context, resolved_query=resolved_query)
         self.assertEqual(plan.strategy, "capability")
         self.assertEqual(plan.capability_id, "empleados.count.active.v1")
 
@@ -630,6 +855,47 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(plan.strategy, "capability")
         self.assertEqual(plan.capability_id, "empleados.count.active.v1")
         self.assertEqual(list((plan.constraints or {}).get("group_by") or []), ["cargo"])
+
+    def test_query_execution_planner_routes_recurrent_attendance_to_recurrence_capability(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Reincidentes del ultimo mes de Implementacio",
+            domain_code="ausentismo",
+            operation="aggregate",
+            template_id="aggregate_by_group_and_period",
+            filters={"indicador_ausentismo": "SI", "estado": "ACTIVO"},
+            period={"label": "ultimo_mes_30_dias", "start_date": "2026-03-26", "end_date": "2026-04-24"},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.75,
+            source="openai",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={
+                "domain_status": "active",
+                "tables": [{"table_name": "gestionh_ausentismo"}],
+                "allowed_tables": ["gestionh_ausentismo"],
+                "allowed_columns": ["ausentismo", "fecha_edit", "cedula"],
+            },
+            normalized_filters={"indicador_ausentismo": "SI", "estado": "ACTIVO"},
+            normalized_period={"label": "ultimo_mes_30_dias", "start_date": "2026-03-26", "end_date": "2026-04-24"},
+            mapped_columns={"indicador_ausentismo": "ausentismo"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_ATTENDANCE_ENABLED": "1",
+                "IA_DEV_CAP_ATTENDANCE_RECURRENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=intent.raw_query),
+                resolved_query=resolved_query,
+            )
+        self.assertEqual(plan.strategy, "capability")
+        self.assertEqual(plan.capability_id, "attendance.recurrence.grouped.v1")
 
     def test_query_execution_planner_general_domain_uses_fallback_not_ask_context(self):
         planner = QueryExecutionPlanner()

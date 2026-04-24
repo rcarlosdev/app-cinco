@@ -7,6 +7,7 @@ import KPISection from "@/modules/programacion/ia-dev/chat/components/KPISection
 import InsightList from "@/modules/programacion/ia-dev/chat/components/InsightList";
 import SmartChartRenderer from "@/modules/programacion/ia-dev/chat/components/SmartChartRenderer";
 import DataTableRenderer from "@/modules/programacion/ia-dev/chat/components/DataTableRenderer";
+import ReasoningPanel from "@/modules/programacion/ia-dev/chat/components/ReasoningPanel";
 
 type ResponseRendererProps = {
   message: ChatMessageModel;
@@ -16,18 +17,20 @@ const formatOrchestratorMeta = (message: ChatMessageModel) => {
   const response = message.response;
   if (!response) return [];
   const usedTools =
-    response.orchestrator.used_tools &&
+    response.orchestrator?.used_tools &&
     response.orchestrator.used_tools.length > 0
       ? response.orchestrator.used_tools.join(", ")
       : "sin tools";
+  const memoryUsed = response.memory?.used_messages ?? 0;
+  const memoryCapacity = response.memory?.capacity_messages ?? 0;
   return [
     {
       label: "Agente",
-      value: response.orchestrator.selected_agent || "analista_agent",
+      value: response.orchestrator?.selected_agent || "analista_agent",
     },
     {
       label: "Dominio",
-      value: response.orchestrator.domain || "general",
+      value: response.orchestrator?.domain || "general",
     },
     {
       label: "Tools",
@@ -35,7 +38,7 @@ const formatOrchestratorMeta = (message: ChatMessageModel) => {
     },
     {
       label: "Memoria",
-      value: `${response.memory.used_messages}/${response.memory.capacity_messages}`,
+      value: `${memoryUsed}/${memoryCapacity}`,
     },
   ];
 };
@@ -78,11 +81,24 @@ const ResponseRenderer = ({ message }: ResponseRendererProps) => {
   };
 
   if (!payload || !payload.hasStructuredContent) {
-    return <p className="whitespace-pre-wrap">{message.content}</p>;
+    return (
+      <div className="space-y-4">
+        <ReasoningPanel
+          response={message.response}
+          isStreaming={message.status === "streaming"}
+        />
+        <p className="whitespace-pre-wrap">{message.content}</p>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-4">
+      <ReasoningPanel
+        response={message.response}
+        isStreaming={message.status === "streaming"}
+      />
+
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm leading-6 whitespace-pre-wrap text-gray-800 dark:text-gray-200">
           {payload.summary || message.content}

@@ -7,6 +7,7 @@ import ChatComposer from "@/modules/programacion/ia-dev/chat/components/ChatComp
 import ChatMessageItem from "@/modules/programacion/ia-dev/chat/components/ChatMessage";
 import ScrollToBottomButton from "@/modules/programacion/ia-dev/chat/components/ScrollToBottomButton";
 import { type ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
+import { mergeStreamingResponse } from "@/modules/programacion/ia-dev/chat/utils/mergeStreamingResponse";
 import { normalizeChatPayload } from "@/modules/programacion/ia-dev/chat/utils/normalizeChatPayload";
 import { usePromptHistory } from "@/modules/programacion/ia-dev/chat/hooks/usePromptHistory";
 import { useSmartAutoScroll } from "@/modules/programacion/ia-dev/chat/hooks/useSmartAutoScroll";
@@ -410,6 +411,22 @@ const AgenteIAModule = () => {
           onStart: () => {
             notifyContentChanged("stream-start", { behavior: "smooth" });
           },
+          onProgress: (progress) => {
+            updateActiveChat((chat) => ({
+              ...chat,
+              messages: chat.messages.map((message) =>
+                message.id === assistantMessageId
+                  ? {
+                      ...message,
+                      response: mergeStreamingResponse(message.response, progress),
+                      status: "streaming",
+                    }
+                  : message,
+              ),
+              updatedAt: new Date().toISOString(),
+            }));
+            notifyContentChanged("stream-chunk", { behavior: "auto" });
+          },
           onChunk: (chunk) => {
             if (!chunk) return;
 
@@ -441,8 +458,11 @@ const AgenteIAModule = () => {
                 ...message,
                 content: result.reply || message.content,
                 status: "final" as const,
+                response: result,
                 normalized: normalizedPayload,
                 actions: visibleActions,
+                memoryCandidates: result.memory_candidates ?? [],
+                pendingProposals: result.pending_proposals ?? [],
               }
             : message,
         );

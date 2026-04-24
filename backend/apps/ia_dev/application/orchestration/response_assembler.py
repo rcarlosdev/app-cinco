@@ -8,9 +8,15 @@ from typing import Any
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.chat_contracts import ensure_chat_response_contract
 from apps.ia_dev.application.policies.policy_guard import PolicyDecision
+from apps.ia_dev.application.reasoning.reasoning_ledger_service import (
+    ReasoningLedgerService,
+)
 
 
 class LegacyResponseAssembler:
+    def __init__(self, *, reasoning_ledger: ReasoningLedgerService | None = None):
+        self.reasoning_ledger = reasoning_ledger or ReasoningLedgerService()
+
     def assemble(
         self,
         *,
@@ -36,6 +42,10 @@ class LegacyResponseAssembler:
         response["actions"] = existing_actions
         response["memory_candidates"] = list(effects.get("memory_candidates") or [])
         response["pending_proposals"] = list(effects.get("pending_proposals") or [])
+        self._inject_reasoning_payload(
+            response=response,
+            run_context=run_context,
+        )
         self._inject_frontend_presentation(response=response)
         self._inject_query_intelligence_semantic_diagnostics(
             response=response,
@@ -139,6 +149,41 @@ class LegacyResponseAssembler:
             )
         response["trace"] = trace
         return response
+
+    def _inject_reasoning_payload(
+        self,
+        *,
+        response: dict[str, Any],
+        run_context: RunContext,
+    ) -> None:
+        response["working_updates"] = self.reasoning_ledger.build_working_updates(
+            run_context=run_context
+        )
+        response["reasoning"] = self.reasoning_ledger.build_public_payload(
+            run_context=run_context
+        )
+        diagnostics = list((response.get("reasoning") or {}).get("diagnostics") or [])
+        if not diagnostics:
+            return
+        trace = copy.deepcopy(response.get("trace") or [])
+        if not any(str(item.get("phase") or "") == "reasoning_diagnostics" for item in trace if isinstance(item, dict)):
+            trace.append(
+                self._trace_event(
+                    phase="reasoning_diagnostics",
+                    status="warning",
+                    detail={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        "diagnostic_count": len(diagnostics),
+                        "signatures": [
+                            str(item.get("signature") or "")
+                            for item in diagnostics[:5]
+                            if isinstance(item, dict)
+                        ],
+                    },
+                )
+            )
+            response["trace"] = trace
 
     def _inject_cause_diagnostics_trace(
         self,

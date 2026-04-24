@@ -15,6 +15,9 @@ contexto_agente:
     - "Se considera reincidente cuando un empleado acumula mas de 2 ausentismos injustificados en el periodo solicitado."
     - "Vacaciones, incapacidad, licencia, permiso, calamidad, suspension o examenes se interpretan como filtro sobre justificacion."
     - "Para incapacidad, causa_aus, ini_inca, tipo_inca, codigo_inca y desc_inca se consideran atributos de referencia, filtro o agrupacion; ini_incapa y fin_incapa representan la vigencia del periodo reportado."
+    - "Las areas y carpetas oficiales se validan contra infraestructura_parametros: tipo AREA/CARPETA y estado ACTIVO; luego se aplican como filtros sobre cinco_base_de_personal.area o cinco_base_de_personal.carpeta."
+    - "Si el usuario escribe un area parcial o con typo, por ejemplo Implementacio, compararla contra areas activas como IMPLEMENTACION FO antes de responder."
+    - "Centro de costo o CC se resuelve desde infraestructura_parametros.datos y puede usarse como agrupacion de ausentismos enriquecidos con datos del empleado."
     - "Si usa 'por area', 'por cargo', 'por supervisor', 'por carpeta', 'por labor', 'por causa' o 'por tipo de incapacidad', interpretar aggregate/group_by."
     - "Si la consulta dice ausentismos sin mas detalle, devolver totales del rango solicitado; si habla de personal o empleados en un tipo de ausentismo, priorizar detalle de personas."
 
@@ -56,6 +59,8 @@ vocabulario_negocio:
   - area
   - cargo
   - carpeta
+  - centro de costo
+  - cc
   - labor
   - tipo_labor
   - tipo de labor
@@ -83,4 +88,5 @@ columnas_prioritarias:
   - cargo
   - supervisor
   - carpeta
+  - centro_costo
   - tipo_labor

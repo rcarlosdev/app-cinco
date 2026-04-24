@@ -8,7 +8,11 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     ResolvedQuerySpec,
 )
 from apps.ia_dev.application.policies.policy_guard import PolicyAction, PolicyDecision
-from apps.ia_dev.domains.attendance.handler import AttendanceHandler
+from apps.ia_dev.application.taxonomia_dominios import (
+    dominio_desde_capacidad,
+    es_dominio_operativo,
+)
+from apps.ia_dev.domains.ausentismo.handler import AusentismoHandler
 from apps.ia_dev.domains.empleados.handler import EmpleadosHandler
 from apps.ia_dev.domains.transport.handler import TransportHandler
 
@@ -24,7 +28,7 @@ class CapabilityRouter:
     def __init__(
         self,
         *,
-        attendance_handler: AttendanceHandler | None = None,
+        attendance_handler: AusentismoHandler | None = None,
         empleados_handler: EmpleadosHandler | None = None,
         transport_handler: TransportHandler | None = None,
     ):
@@ -43,7 +47,7 @@ class CapabilityRouter:
         routing_mode = run_context.routing_mode
         capability_exists = bool(planned_capability.get("capability_exists"))
         rollout_enabled = bool(planned_capability.get("rollout_enabled", True))
-        capability_domain = capability_id.split(".", 1)[0] if "." in capability_id else "legacy"
+        capability_domain = dominio_desde_capacidad(capability_id) or "legacy"
         policy_allows = policy_decision.action == PolicyAction.ALLOW
 
         if routing_mode == "intent":
@@ -121,7 +125,7 @@ class CapabilityRouter:
                 "rollout_enabled": False,
             }
 
-        if capability_domain in {"attendance", "transport", "empleados"}:
+        if es_dominio_operativo(capability_domain):
             return {
                 "routing_mode": routing_mode,
                 "selected_capability_id": capability_id,
@@ -247,9 +251,9 @@ class CapabilityRouter:
             "meta": {"capability_id": capability_id},
         }
 
-    def _get_attendance_handler(self) -> AttendanceHandler:
+    def _get_attendance_handler(self) -> AusentismoHandler:
         if self._attendance_handler is None:
-            self._attendance_handler = AttendanceHandler()
+            self._attendance_handler = AusentismoHandler()
         return self._attendance_handler
 
     def _get_transport_handler(self) -> TransportHandler:

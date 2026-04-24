@@ -4,7 +4,7 @@ import copy
 import os
 import re
 import unicodedata
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
@@ -17,6 +17,7 @@ from apps.ia_dev.application.semantic.relation_semantic_resolver import Relation
 from apps.ia_dev.application.semantic.rule_semantic_resolver import RuleSemanticResolver
 from apps.ia_dev.application.semantic.synonym_semantic_resolver import SynonymSemanticResolver
 from apps.ia_dev.services.dictionary_tool_service import DictionaryToolService
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.period_service import resolve_period_from_text
 
 
@@ -27,8 +28,8 @@ class SemanticBusinessResolver:
     """
 
     DOMAIN_TO_DICTIONARY_CODE = {
-        "ausentismo": "attendance",
-        "attendance": "attendance",
+        "ausentismo": "ausentismo",
+        "attendance": "ausentismo",
         "empleados": "empleados",
         "rrhh": "empleados",
         "transporte": "transport",
@@ -354,12 +355,17 @@ class SemanticBusinessResolver:
         elif domain_code in {"empleados", "rrhh"}:
             status_from_message = self._resolve_status_from_message(message=message)
             if status_from_message:
-                normalized_filters.setdefault("estado", status_from_message)
+                normalized_filters["estado"] = status_from_message
+                normalized_filters["estado_empleado"] = status_from_message
+        if domain_code in {"empleados", "rrhh"} and self._is_turnover_query(message):
+            normalized_filters["estado"] = "INACTIVO"
+            normalized_filters["estado_empleado"] = "INACTIVO"
         if domain_code in {"empleados", "rrhh"}:
             self._apply_default_employee_status(
                 semantic_context=semantic_context,
                 normalized_filters=normalized_filters,
             )
+        normalized_filters = EmployeeIdentifierService.prune_redundant_search_filter(normalized_filters)
         resolved_group_by, group_resolutions = self.column_resolver.resolve_group_by(
             requested_group_by=list(intent.group_by or []),
             message=message,
@@ -912,6 +918,7 @@ class SemanticBusinessResolver:
             "carpeta": ("carpeta", "carpetas"),
             "justificacion": ("justificacion", "motivo", "causa"),
             "estado_justificacion": ("estado", "estado de justificacion", "tipo de ausentismo", "tipo de ausencia"),
+            "centro_costo": ("centro costo", "centro de costo", "centros de costo", "cc"),
         }
         resolved: list[str] = []
         for canonical in candidate_dimensions:
@@ -959,16 +966,16 @@ class SemanticBusinessResolver:
 
         default_dimensions: list[str] = []
         if normalized_domain in {"empleados", "rrhh"}:
-            default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede"])
+            default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede", "centro_costo"])
         if normalized_domain in {"ausentismo", "attendance"}:
             default_dimensions.extend(["justificacion", "estado_justificacion"])
             if has_personal_join:
-                default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede"])
+                default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede", "centro_costo"])
 
         return list(dict.fromkeys([item for item in [*dimensions, *default_dimensions] if item]))
 
-    @staticmethod
-    def _normalize_period(*, message: str, intent: StructuredQueryIntent) -> dict[str, Any]:
+    @classmethod
+    def _normalize_period(cls, *, message: str, intent: StructuredQueryIntent) -> dict[str, Any]:
         period = dict(intent.period or {})
         if not period.get("start_date") or not period.get("end_date"):
             resolved = resolve_period_from_text(message)
@@ -978,6 +985,14 @@ class SemanticBusinessResolver:
                 "label": str(resolved.get("label") or ""),
                 "start_date": start.isoformat() if hasattr(start, "isoformat") else None,
                 "end_date": end.isoformat() if hasattr(end, "isoformat") else None,
+            }
+        if cls._is_turnover_query(message) and str(period.get("label") or "") == "hoy" and not cls._has_explicit_period(message):
+            end = date.today()
+            start = end - timedelta(days=29)
+            period = {
+                "label": "ultimo_mes_30_dias",
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
             }
         return {
             "label": str(period.get("label") or ""),
@@ -1199,12 +1214,22 @@ class SemanticBusinessResolver:
         inactive_tokens = (
             "inactivo",
             "inactivos",
+            "egreso",
+            "egresos",
             "retirado",
             "retirados",
+            "retiro",
+            "retiros",
             "egresado",
             "egresados",
+            "desvinculacion",
+            "desvinculaciones",
             "desvinculado",
             "desvinculados",
+            "baja",
+            "bajas",
+            "rotacion",
+            "rotaciones",
         )
         if any(token in normalized for token in inactive_tokens):
             return "INACTIVO"
@@ -1243,6 +1268,11 @@ class SemanticBusinessResolver:
                 "rango",
             )
         )
+
+    @classmethod
+    def _is_turnover_query(cls, message: str) -> bool:
+        normalized = cls._normalize_text(message)
+        return bool(re.search(r"\b(rotacion|rotaciones|turnover)\b", normalized))
 
     def _resolve_status_from_dictionary(
         self,

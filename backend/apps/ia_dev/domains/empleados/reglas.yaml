@@ -10,4 +10,10 @@ reglas_negocio:
     descripcion: "Labor, tipo labor o tipo de labor se normalizan a tipo_labor."
   - codigo: empleados_por_dimension
     prioridad: media
-    descripcion: "Si el usuario usa 'por area', 'por cargo', 'por supervisor' o dimension equivalente, interpretar aggregate/group_by."
+    descripcion: "Si el usuario usa 'por area', 'por cargo', 'por supervisor', 'por carpeta', 'por centro de costo' o dimension equivalente, interpretar aggregate/group_by."
+  - codigo: empleados_rotacion_personal
+    prioridad: alta
+    descripcion: "Si el usuario pregunta por rotacion de personal, calcular egresos inactivos del periodo sobre planta promedio estimada; usar estado ACTIVO como planta fin y fecha_ingreso/fecha_egreso para los flujos del periodo."
+  - codigo: empleados_contexto_organizacional
+    prioridad: alta
+    descripcion: "Validar areas y carpetas contra infraestructura_parametros tipo AREA/CARPETA en estado ACTIVO. Si una sigla como I&M no especifica carpeta, tratarla como area raiz; si se solicita CC, resolverlo desde la columna datos."

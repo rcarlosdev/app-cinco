@@ -38,6 +38,15 @@ class _FakeMemoryWriter:
             },
         }
 
+    def approve_proposal(self, *, proposal_id: str, actor_user_key: str, actor_role: str, comment: str = "") -> dict:
+        return {
+            "ok": True,
+            "proposal": {
+                "proposal_id": proposal_id,
+                "status": "applied",
+            },
+        }
+
 
 class QueryPatternMemoryServiceTests(SimpleTestCase):
     @staticmethod

@@ -4,6 +4,8 @@ import os
 import re
 import unicodedata
 
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
+
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +90,7 @@ class IntentClassifierService:
             return False
         if any(token in msg for token in ("transporte", "ruta", "movilidad", "vehicul")):
             return False
-        if re.search(r"\bmovil(?:\s+(?:de|del|la|el))?\s+[a-z0-9_-]{3,40}\b", msg):
+        if EmployeeIdentifierService.has_movil_identifier(msg):
             return True
         match = re.search(
             r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+([a-z0-9_-]{3,40})\b",
@@ -152,9 +154,9 @@ class IntentClassifierService:
         if self._contains_attendance_domain(message) and self._contains_count_request(message) and self._contains_group_dimension_request(message):
             result.update(
                 {
-                    "domain": "attendance",
-                    "intent": "attendance_query",
-                    "selected_agent": "attendance_agent",
+                    "domain": "ausentismo",
+                    "intent": "ausentismo_query",
+                    "selected_agent": "ausentismo_agent",
                     "needs_database": True,
                     "output_mode": "summary",
                     "needs_personal_join": True,
@@ -165,7 +167,7 @@ class IntentClassifierService:
             result.update(
                 {
                     "domain": "empleados",
-                    "intent": "employee_query",
+                    "intent": "empleados_query",
                     "selected_agent": "empleados_agent",
                     "needs_database": True,
                     "output_mode": "summary",
@@ -176,7 +178,7 @@ class IntentClassifierService:
             result.update(
                 {
                     "domain": "empleados",
-                    "intent": "employee_query",
+                    "intent": "empleados_query",
                     "selected_agent": "empleados_agent",
                     "needs_database": True,
                     "output_mode": "table",
@@ -186,9 +188,9 @@ class IntentClassifierService:
         if self._contains_missing_personal_focus(message):
             result.update(
                 {
-                    "domain": "attendance",
-                    "intent": "attendance_query",
-                    "selected_agent": "attendance_agent",
+                    "domain": "ausentismo",
+                    "intent": "ausentismo_query",
+                    "selected_agent": "ausentismo_agent",
                     "needs_database": True,
                     "focus": "missing_personal",
                     "output_mode": "table",
@@ -198,9 +200,9 @@ class IntentClassifierService:
         if self._contains_unjustified_focus(message):
             result.update(
                 {
-                    "domain": "attendance",
-                    "intent": "attendance_query",
-                    "selected_agent": "attendance_agent",
+                    "domain": "ausentismo",
+                    "intent": "ausentismo_query",
+                    "selected_agent": "ausentismo_agent",
                     "needs_database": True,
                     "focus": "unjustified",
                 }
@@ -269,9 +271,8 @@ class IntentClassifierService:
                         "intent can also be knowledge_change_request when user asks to create/update business rules. "
                         "output_mode must be one of: summary, table, list. "
                         "focus must be one of: all, unjustified, missing_personal. "
-                        "Domains: empleados, attendance, transport, operations, viatics, payroll, audit, general. "
-                        "Agents: empleados_agent, attendance_agent, transport_agent, operations_agent, "
-                        "viatics_agent, payroll_agent, audit_agent, analista_agent."
+                        "Domains: empleados, ausentismo, general, knowledge. "
+                        "Agents: empleados_agent, ausentismo_agent, analista_agent."
                     ),
                 },
                 {"role": "user", "content": message},
@@ -346,9 +347,9 @@ class IntentClassifierService:
 
         if self._is_recurrence_request(msg):
             return {
-                "intent": "attendance_recurrence",
-                "domain": "attendance",
-                "selected_agent": "attendance_agent",
+                "intent": "ausentismo_recurrencia",
+                "domain": "ausentismo",
+                "selected_agent": "ausentismo_agent",
                 "needs_database": True,
                 "output_mode": "table" if output_mode == "summary" else output_mode,
                 "needs_personal_join": True,
@@ -357,8 +358,8 @@ class IntentClassifierService:
             }
 
         if any(token in msg for token in ("ausent", "asistencia", "injustific", "justific")):
-            domain = "attendance"
-            intent = "attendance_query"
+            domain = "ausentismo"
+            intent = "ausentismo_query"
             needs_database = True
             if output_mode == "summary" and any(token in msg for token in ("tabla", "lista", "detalle", "mostrar")):
                 output_mode = "table"
@@ -366,12 +367,12 @@ class IntentClassifierService:
             self._is_employee_status_count_request(message)
         ) or self._looks_like_employee_lookup_request(message):
             domain = "empleados"
-            intent = "employee_query"
+            intent = "empleados_query"
             needs_database = True
         elif any(token in msg for token in ("transporte", "ruta", "movilidad", "vehicul", "salieron")):
-            domain = "transport"
-            intent = "transport_query"
-            needs_database = True
+            domain = "general"
+            intent = "general_question"
+            needs_database = False
         elif any(token in msg for token in ("viatic", "gasto", "reembolso")):
             domain = "viatics"
             intent = "viatics_query"
@@ -425,9 +426,9 @@ class IntentClassifierService:
 
         if self._is_recurrence_request(msg):
             return {
-                "intent": "attendance_recurrence",
-                "domain": "attendance",
-                "selected_agent": "attendance_agent",
+                "intent": "ausentismo_recurrencia",
+                "domain": "ausentismo",
+                "selected_agent": "ausentismo_agent",
                 "needs_database": True,
                 "output_mode": "table",
                 "needs_personal_join": True,
@@ -440,8 +441,10 @@ class IntentClassifierService:
         mapping = {
             "rrhh": "empleados_agent",
             "empleados": "empleados_agent",
-            "attendance": "attendance_agent",
-            "transport": "transport_agent",
+            "attendance": "ausentismo_agent",
+            "ausentismo": "ausentismo_agent",
+            "transport": "analista_agent",
+            "transporte": "analista_agent",
             "operations": "operations_agent",
             "viatics": "viatics_agent",
             "payroll": "payroll_agent",

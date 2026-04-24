@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from apps.ia_dev.application.taxonomia_dominios import (
+    DOMINIOS_OPERATIVOS_CANONICOS,
+    normalizar_codigo_dominio,
+)
 from apps.ia_dev.application.delegation.domain_context_loader import DomainContextLoader
 from apps.ia_dev.services.sql_store import IADevSqlStore
 
@@ -112,6 +116,8 @@ class DomainRegistry:
 
     def is_domain_enabled(self, domain: DomainDescriptor | None) -> bool:
         if domain is None:
+            return False
+        if domain.domain_code not in DOMINIOS_OPERATIVOS_CANONICOS:
             return False
         flags = dict(domain.raw_context.get("flags") or {})
         if flags.get("delegation_enabled") is False:
@@ -222,7 +228,7 @@ class DomainRegistry:
 
     @classmethod
     def normalize_domain_code(cls, domain_code: str | None) -> str:
-        raw = str(domain_code or "").strip().lower()
+        raw = normalizar_codigo_dominio(domain_code)
         if not raw:
             return ""
         return str(cls.DOMAIN_ALIASES.get(raw, raw))

@@ -247,6 +247,15 @@ class IADevSqlStore:
             return "agenda"
         return normalized
 
+    @staticmethod
+    def _canonical_business_domain_name(domain_code: str) -> str:
+        normalized = str(domain_code or "").strip().lower()
+        if normalized == "ausentismo":
+            return "Ausentismos"
+        if normalized == "empleados":
+            return "Empleados"
+        return normalized.title() if normalized else ""
+
     def get_contexto_compania(self, *, codigo_compania: str = "CINCO") -> dict[str, Any]:
         schema = str(self.system_schema or "ai_dictionary")
         table_name = "dd_contexto_compania"
@@ -1500,8 +1509,10 @@ class IADevSqlStore:
         synced_tables = 0
         for row in domain_rows:
             dd_domain_id = int(row[0] or 0)
-            codigo = str(row[1] or "").strip().lower()
-            nombre = str(row[2] or codigo)
+            codigo = self._normalize_company_domain_code(row[1])
+            if codigo not in {"empleados", "ausentismo"}:
+                continue
+            nombre = self._canonical_business_domain_name(codigo)
             descripcion = str(row[3] or "")
             if not codigo:
                 continue

@@ -164,3 +164,32 @@ class SatisfactionReviewGateTests(SimpleTestCase):
         issues = [str(item.get("code") or "") for item in list(result.issues or [])]
         self.assertIn("low_evidence", issues)
 
+    def test_ausentismo_alias_aligns_legacy_capability_domain(self):
+        resolved = self._resolved_intent(domain="ausentismo", operation="aggregate")
+        result = self.gate.evaluate(
+            raw_query="ausentismos por jefe directo",
+            canonical_resolution={
+                "domain_code": "ausentismo",
+                "intent_code": "aggregate",
+                "capability_code": "attendance.summary.by_supervisor.v1",
+                "confidence": 0.93,
+            },
+            runtime_intent=resolved.intent,
+            resolved_query=resolved,
+            execution_result={"ok": True, "used_legacy": False, "fallback_reason": ""},
+            candidate_response={
+                "reply": "Resumen de ausentismos por supervisor.",
+                "data": {"table": {"rows": [{"supervisor": "A", "total": 3}], "rowcount": 1}},
+            },
+            strategy="capability",
+            planned_capability={"capability_id": "attendance.summary.by_supervisor.v1"},
+            loop_metadata={},
+            legacy_validation={"satisfied": True, "reason": "ok", "checks": {}},
+            runtime_flags={},
+        )
+        self.assertTrue(bool(result.domain_alignment))
+        self.assertTrue(bool(result.intent_alignment))
+        issues = [str(item.get("code") or "") for item in list(result.issues or [])]
+        self.assertNotIn("wrong_domain", issues)
+        self.assertNotIn("semantic_mismatch", issues)
+

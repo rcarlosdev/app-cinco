@@ -11,3 +11,6 @@ ejemplos_consulta:
   - consulta: "empleados por labor"
     interpretacion: "Conteo agrupado por tipo_labor."
     capacidad_esperada: "empleados.count.active.v1"
+  - consulta: "rotacion de personal ultimo mes"
+    interpretacion: "Tasa de rotacion calculada como egresos inactivos del periodo sobre planta promedio estimada."
+    capacidad_esperada: "empleados.count.active.v1"

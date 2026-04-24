@@ -20,7 +20,7 @@ from .intent_service import IntentClassifierService
 from .knowledge_governance_service import KnowledgeGovernanceService
 from .memory_service import SessionMemoryStore
 from .period_service import resolve_period_from_text
-from .tool_attendance_service import AttendanceToolService
+from .tool_ausentismo_service import AusentismoToolService
 from .tool_transport_service import TransportToolService
 
 
@@ -35,7 +35,7 @@ class IADevOrchestratorService:
     def __init__(self):
         self.runtime_bootstrap = apply_service_runtime_bootstrap()
         self.intent_classifier = IntentClassifierService()
-        self.attendance_tool = AttendanceToolService()
+        self.attendance_tool = AusentismoToolService()
         self.dictionary_tool = DictionaryToolService()
         self.knowledge_governance = KnowledgeGovernanceService()
         self.observability = ObservabilityService()
@@ -262,7 +262,7 @@ class IADevOrchestratorService:
                 SessionMemoryStore.update_context(
                     sid,
                     {
-                        "last_domain": "attendance",
+                        "last_domain": "ausentismo",
                         "last_intent": "attendance_period_probe",
                         "last_focus": "unjustified",
                         "last_output_mode": "table",
@@ -271,7 +271,7 @@ class IADevOrchestratorService:
                             message=probe_message,
                             session_context=session_context,
                         ),
-                        "last_selected_agent": "attendance_agent",
+                        "last_selected_agent": "ausentismo_agent",
                         "last_period_start": start_date,
                         "last_period_end": end_date,
                     },
@@ -305,7 +305,7 @@ class IADevOrchestratorService:
                 meta={
                     "session_id": sid,
                     "intent": "attendance_period_probe",
-                    "domain": "attendance",
+                    "domain": "ausentismo",
                     "output_mode": "summary",
                     "used_tools": used_tools,
                 },
@@ -315,8 +315,8 @@ class IADevOrchestratorService:
                 "reply": reply,
                 "orchestrator": {
                     "intent": "attendance_period_probe",
-                    "domain": "attendance",
-                    "selected_agent": "attendance_agent",
+                    "domain": "ausentismo",
+                    "selected_agent": "ausentismo_agent",
                     "classifier_source": "period_probe",
                     "needs_database": False,
                     "output_mode": "summary",
@@ -329,8 +329,8 @@ class IADevOrchestratorService:
                 "memory": memory_status,
                 "observability": observability_payload,
                 "active_nodes": self._resolve_active_nodes(
-                    domain="attendance",
-                    selected_agent="attendance_agent",
+                    domain="ausentismo",
+                    selected_agent="ausentismo_agent",
                     used_tools=used_tools,
                     has_actions=bool(actions),
                     needs_database=False,
@@ -828,7 +828,7 @@ class IADevOrchestratorService:
                     last_metric_key = str(metric_key or "").strip().lower()
 
                 elif output_mode in ("table", "list"):
-                    if intent == "attendance_recurrence":
+                    if intent in {"attendance_recurrence", "ausentismo_recurrencia"}:
                         wants_itemized = self._wants_itemized_absence_view(message)
                         recurrence = _measure_tool(
                             "get_attendance_recurrent_unjustified_with_supervisor",
@@ -2233,15 +2233,15 @@ class IADevOrchestratorService:
         last_needs_db = bool(session_context.get("last_needs_database"))
         if (
             _YES_FOLLOW_UP_RE.match(normalized)
-            and last_domain == "attendance"
+            and last_domain in {"attendance", "ausentismo"}
             and last_needs_db
         ):
             merged = dict(classification)
             merged.update(
                 {
-                    "domain": "attendance",
-                    "intent": "attendance_query",
-                    "selected_agent": "attendance_agent",
+                    "domain": "ausentismo",
+                    "intent": "ausentismo_query",
+                    "selected_agent": "ausentismo_agent",
                     "needs_database": True,
                     "output_mode": "table",
                     "needs_personal_join": True,
@@ -2252,16 +2252,16 @@ class IADevOrchestratorService:
             return merged
 
         if (
-            last_domain == "attendance"
+            last_domain in {"attendance", "ausentismo"}
             and last_needs_db
             and self._is_chart_request(normalized)
         ):
             merged = dict(classification)
             merged.update(
                 {
-                    "domain": "attendance",
-                    "intent": "attendance_query",
-                    "selected_agent": "attendance_agent",
+                    "domain": "ausentismo",
+                    "intent": "ausentismo_query",
+                    "selected_agent": "ausentismo_agent",
                     "needs_database": True,
                     "output_mode": "summary",
                     "needs_personal_join": bool(session_context.get("last_output_mode") == "table"),
@@ -2534,7 +2534,7 @@ class IADevOrchestratorService:
 
         if "empleados_agent" == agent_key:
             active.add("personal")
-        if "attendance_agent" == agent_key:
+        if agent_key in {"attendance_agent", "ausentismo_agent"}:
             active.add("aus")
 
         if "get_attendance_summary" in used_tools:

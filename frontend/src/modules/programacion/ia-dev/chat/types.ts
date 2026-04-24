@@ -49,7 +49,7 @@ export type ChatMessageModel = {
   content: string;
   createdAt: number;
   status: ChatMessageStatus;
-  response?: IADevChatResponse;
+  response?: Partial<IADevChatResponse>;
   normalized?: NormalizedAssistantPayload | null;
   actions?: IADevAction[];
   memoryCandidates?: IADevMemoryCandidate[];
@@ -69,4 +69,5 @@ export type ChartSourcePayload = {
 export type ChatSubmitStreamCallbacks = {
   onStart?: () => void;
   onChunk?: (chunk: string) => void;
+  onProgress?: (response: Partial<IADevChatResponse>) => void;
 };

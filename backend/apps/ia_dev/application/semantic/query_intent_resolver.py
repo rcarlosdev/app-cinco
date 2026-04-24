@@ -8,6 +8,11 @@ from datetime import date
 from typing import Any
 
 from apps.ia_dev.application.contracts.query_intelligence_contracts import StructuredQueryIntent
+from apps.ia_dev.application.taxonomia_dominios import (
+    normalizar_codigo_dominio,
+    normalizar_dominio_operativo,
+)
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.period_service import resolve_period_from_text
 
 
@@ -16,6 +21,25 @@ class QueryIntentResolver:
     Traduce lenguaje natural a intencion estructurada.
     Prioriza reglas; opcionalmente refina con OpenAI usando contexto semantico.
     """
+
+    _EMPLOYEE_INACTIVE_SIGNAL_RE = re.compile(
+        r"\b("
+        r"inactivo|inactivos|"
+        r"egreso|egresos|egresado|egresados|"
+        r"retiro|retiros|retirado|retirados|"
+        r"desvinculacion|desvinculaciones|desvinculado|desvinculados|"
+        r"baja|bajas|rotacion|rotaciones"
+        r")\b"
+    )
+    _EMPLOYEE_ACTIVE_SIGNAL_RE = re.compile(
+        r"\b(activo|activa|activos|activas|vigente|vigentes|habilitado|habilitados|vinculado|vinculados)\b"
+    )
+    _TEMPORAL_REFERENCE_RE = re.compile(
+        r"\b(hoy|ayer|esta\s+semana|semana\s+actual|semana\s+pasad[ao]|semana\s+anterior|"
+        r"ultima\s+semana|ultim[oa]s?\s+\d+\s+(?:dias|semanas|meses)|rolling(?:\s+de)?\s+\d+\s+"
+        r"(?:dias|semanas|meses)|este\s+mes|mes\s+actual|mes\s+pasado|mes\s+anterior|"
+        r"este\s+ano|ano\s+actual|ano\s+pasado|\d{4}-\d{2}-\d{2})\b"
+    )
 
     def __init__(self):
         self.model = str(os.getenv("IA_DEV_QUERY_INTENT_MODEL", os.getenv("IA_DEV_MODEL", "gpt-5-nano")) or "gpt-5-nano")
@@ -109,7 +133,10 @@ class QueryIntentResolver:
         )
 
         operation = "summary"
+        has_grouping_signal = self._has_explicit_grouping_phrase(normalized) or self._has_aggregate_signal(normalized)
         if any(token in normalized for token in ("cantidad", "cuantos", "cuantas", "total", "numero")):
+            operation = "count"
+        elif self._has_employee_status_metric_signal(normalized) and not has_grouping_signal:
             operation = "count"
         elif any(token in normalized for token in ("compar", "vs", "versus")):
             operation = "compare"
@@ -119,6 +146,8 @@ class QueryIntentResolver:
             operation = "aggregate"
         elif any(token in normalized for token in ("tendencia", "historico", "evolucion", "trend")):
             operation = "trend"
+        elif domain in {"empleados", "rrhh"} and self._has_identifier_signal(normalized):
+            operation = "detail"
         elif self._looks_like_attendance_person_detail(normalized=normalized, domain=domain):
             operation = "detail"
         elif any(token in normalized for token in ("detalle", "tabla", "mostrar", "lista", "informacion", "info", "ficha", "datos")):
@@ -137,6 +166,16 @@ class QueryIntentResolver:
             filters.setdefault("movil", entity_value)
 
         period = self._resolve_period_payload(message=message)
+        if self._is_turnover_query(normalized) and str(period.get("label") or "") == "hoy" and not self._has_temporal_reference(normalized):
+            from datetime import timedelta
+
+            end = date.today()
+            start = end - timedelta(days=29)
+            period = {
+                "label": "ultimo_mes_30_dias",
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+            }
         group_by = self._extract_group_by(normalized=normalized)
         metrics = self._extract_metrics(normalized=normalized, operation=operation)
 
@@ -227,20 +266,26 @@ class QueryIntentResolver:
     def _merge_intents(*, fallback: StructuredQueryIntent, llm: StructuredQueryIntent) -> StructuredQueryIntent:
         llm_filters = dict(llm.filters or {})
         fallback_filters = dict(fallback.filters or {})
+        merged_filters = dict(fallback_filters)
+        for key, value in llm_filters.items():
+            if value in (None, ""):
+                continue
+            merged_filters[str(key)] = value
+        merged_filters = EmployeeIdentifierService.prune_redundant_search_filter(merged_filters)
         llm_period = dict(llm.period or {})
         fallback_period = dict(fallback.period or {})
         llm_group_by = [str(item).strip().lower() for item in list(llm.group_by or []) if str(item).strip()]
         fallback_group_by = [str(item).strip().lower() for item in list(fallback.group_by or []) if str(item).strip()]
         merged_group_by = list(dict.fromkeys([*llm_group_by, *fallback_group_by]))
-        llm_domain = str(llm.domain_code or "").strip().lower()
-        fallback_domain = str(fallback.domain_code or "").strip().lower()
+        llm_domain = normalizar_codigo_dominio(llm.domain_code)
+        fallback_domain = normalizar_codigo_dominio(fallback.domain_code)
         normalized_raw_query = QueryIntentResolver._normalize_text(fallback.raw_query)
 
         operation = str(llm.operation or fallback.operation or "summary").strip().lower()
         template_id = str(llm.template_id or fallback.template_id or "").strip().lower()
         has_entity = bool(str(llm.entity_value or fallback.entity_value or "").strip()) or bool(
-            str(llm_filters.get("cedula") or fallback_filters.get("cedula") or "").strip()
-            or str(llm_filters.get("movil") or fallback_filters.get("movil") or "").strip()
+            str(merged_filters.get("cedula") or "").strip()
+            or str(merged_filters.get("movil") or "").strip()
         )
         resolved_domain = llm_domain or fallback_domain
         if llm_domain in {"", "general"} and fallback_domain not in {"", "general"} and has_entity:
@@ -250,7 +295,7 @@ class QueryIntentResolver:
         if template_id == "detail_by_entity_and_period" and not has_entity and str(fallback.template_id or "").strip():
             template_id = str(fallback.template_id or "").strip().lower()
         if (
-            fallback_domain in {"ausentismo", "attendance"}
+            fallback_domain == "ausentismo"
             and str(fallback.operation or "").strip().lower() == "detail"
             and QueryIntentResolver._looks_like_attendance_person_detail(
                 normalized=normalized_raw_query,
@@ -280,6 +325,16 @@ class QueryIntentResolver:
         ):
             llm_period = fallback_period
 
+        merged_metrics = list(dict.fromkeys([*list(llm.metrics or []), *list(fallback.metrics or [])]))
+        if QueryIntentResolver._is_turnover_query(normalized_raw_query):
+            operation = "aggregate" if merged_group_by else "count"
+            template_id = "aggregate_by_group_and_period" if merged_group_by else "count_entities_by_status"
+            resolved_domain = "empleados"
+            merged_filters["estado"] = "INACTIVO"
+            merged_filters["estado_empleado"] = "INACTIVO"
+            if "turnover_rate" not in merged_metrics:
+                merged_metrics.insert(0, "turnover_rate")
+
         return StructuredQueryIntent(
             raw_query=fallback.raw_query,
             domain_code=resolved_domain,
@@ -287,10 +342,10 @@ class QueryIntentResolver:
             template_id=template_id,
             entity_type=str(llm.entity_type or fallback.entity_type or "").strip().lower(),
             entity_value=str(llm.entity_value or fallback.entity_value or "").strip(),
-            filters=llm_filters or fallback_filters,
+            filters=merged_filters or fallback_filters,
             period=llm_period or fallback_period,
             group_by=merged_group_by,
-            metrics=list(llm.metrics or fallback.metrics or []),
+            metrics=merged_metrics,
             confidence=float(llm.confidence or fallback.confidence or 0.0),
             source=str(llm.source or "openai"),
             warnings=list(llm.warnings or []),
@@ -298,9 +353,17 @@ class QueryIntentResolver:
 
     @staticmethod
     def _resolve_template_id(*, normalized: str, domain_code: str, operation: str) -> str:
-        if domain_code in {"empleados", "rrhh"} and operation == "count" and "activo" in normalized:
+        if (
+            domain_code in {"empleados", "rrhh"}
+            and operation == "count"
+            and (
+                "activo" in normalized
+                or QueryIntentResolver._has_employee_inactive_signal(normalized)
+                or QueryIntentResolver._has_employee_active_signal(normalized)
+            )
+        ):
             return "count_entities_by_status"
-        if domain_code in {"ausentismo", "attendance"} and operation == "detail":
+        if normalizar_codigo_dominio(domain_code) == "ausentismo" and operation == "detail":
             return "detail_by_entity_and_period"
         if operation == "trend":
             return "trend_by_period"
@@ -318,41 +381,13 @@ class QueryIntentResolver:
 
     @staticmethod
     def _extract_entity(*, message: str, normalized: str) -> tuple[str, str]:
-        raw_message = str(message or "").strip()
         match = re.search(r"\b\d{6,13}\b", normalized)
-        if not match:
-            movil_match = re.search(
-                r"\bmovil(?:\s+(?:de|del|la|el))?\s+([a-z0-9_-]{3,40})\b",
-                normalized,
-            )
-            if movil_match:
-                raw_token = QueryIntentResolver._extract_raw_identifier_token(
-                    message=raw_message,
-                    normalized_token=str(movil_match.group(1) or "").strip(),
-                )
-                return "movil", raw_token or str(movil_match.group(1) or "").strip()
-            generic_match = re.search(
-                r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+([a-z0-9_-]{3,40})\b",
-                normalized,
-            )
-            if not generic_match:
-                generic_match = re.search(
-                    r"^\s*(?:info|informacion|detalle|datos|ficha)\s+([a-z0-9_-]{3,40})\s*$",
-                    normalized,
-                )
-            if not generic_match:
-                return "", ""
-            token = str(generic_match.group(1) or "").strip()
-            raw_token = QueryIntentResolver._extract_raw_identifier_token(
-                message=raw_message,
-                normalized_token=token,
-            ) or token
-            if re.fullmatch(r"\d{6,13}", token):
-                return "cedula", "".join(ch for ch in raw_token if ch.isdigit())
-            if re.search(r"[a-z]", token) and re.search(r"\d", token):
-                return "movil", raw_token
-            return "", ""
-        return "cedula", "".join(ch for ch in match.group(0) if ch.isdigit())
+        if match:
+            return "cedula", "".join(ch for ch in match.group(0) if ch.isdigit())
+        movil = EmployeeIdentifierService.extract_movil_identifier(message or normalized)
+        if movil:
+            return "movil", movil
+        return "", ""
 
     @staticmethod
     def _extract_filters(*, normalized: str) -> dict[str, Any]:
@@ -363,6 +398,8 @@ class QueryIntentResolver:
         )
         if estado_match:
             filters["estado"] = str(estado_match.group(1) or "").strip().upper()
+        elif QueryIntentResolver._has_employee_inactive_signal(normalized):
+            filters["estado"] = "INACTIVO"
         attendance_reason = QueryIntentResolver._extract_attendance_reason_filter(normalized=normalized)
         if attendance_reason:
             filters["justificacion"] = attendance_reason
@@ -377,6 +414,7 @@ class QueryIntentResolver:
             "cargo": ("cargo", "cargos"),
             "carpeta": ("carpeta", "carpetas"),
             "tipo_labor": ("labor", "labores", "tipo_labor", "tipo labor", "tipo de labor"),
+            "centro_costo": ("centro costo", "centro de costo", "centros de costo", "cc"),
         }
         for canonical, tokens in variants.items():
             first_pos = None
@@ -397,6 +435,8 @@ class QueryIntentResolver:
     @staticmethod
     def _extract_metrics(*, normalized: str, operation: str) -> list[str]:
         metrics: list[str] = []
+        if any(token in normalized for token in ("rotacion", "rotaciones", "turnover")):
+            metrics.append("turnover_rate")
         if operation == "count" or any(token in normalized for token in ("cantidad", "total", "cuantos", "cuantas")):
             metrics.append("count")
         if any(token in normalized for token in ("porcentaje", "participacion")):
@@ -658,24 +698,26 @@ class QueryIntentResolver:
 
     @staticmethod
     def _resolve_domain(*, normalized: str, base_domain: str, semantic_context: dict[str, Any] | None = None) -> str:
-        domain = str(base_domain or "").strip().lower()
+        domain = normalizar_codigo_dominio(base_domain)
         rrhh_match = bool(
             re.search(
-                r"\b(colaborador(?:es)?|personal|emplead\w*|cedula|rrhh|movil|tipo_labor|tipo\s+labor|tipo\s+de\s+labor|labor(?:es)?|area(?:s)?|cargo(?:s)?|supervisor(?:es)?|jefe(?:s)?|lider(?:es)?|carpeta(?:s)?|sede(?:s)?)\b",
+                r"\b(colaborador(?:es)?|personal|emplead\w*|cedula|rrhh|movil|tipo_labor|tipo\s+labor|tipo\s+de\s+labor|labor(?:es)?|area(?:s)?|cargo(?:s)?|supervisor(?:es)?|jefe(?:s)?|lider(?:es)?|carpeta(?:s)?|sede(?:s)?|egreso(?:s)?|retiro(?:s)?|retirad\w*|desvinculad\w*|baja(?:s)?|rotacion(?:es)?)\b",
                 str(normalized or ""),
             )
         )
         generic_employee_lookup = bool(
+            EmployeeIdentifierService.has_movil_identifier(normalized)
+            or
             re.search(r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+[a-z0-9_-]{3,40}\b", str(normalized or ""))
             or re.search(r"^\s*(?:info|informacion|detalle|datos|ficha)\s+[a-z0-9_-]{3,40}\s*$", str(normalized or ""))
         )
         attendance_reason_match = bool(QueryIntentResolver._extract_attendance_reason_filter(normalized=normalized))
         attendance_match = any(token in normalized for token in ("ausent", "asistencia", "injustific")) or attendance_reason_match
-        if domain in {"ausentismo", "attendance"}:
+        if domain == "ausentismo":
             return domain
         if domain in {"empleados", "rrhh"} and attendance_match:
             return "ausentismo"
-        if domain in {"empleados", "rrhh", "transporte", "transport"}:
+        if domain == "empleados":
             return domain
         if attendance_match and (rrhh_match or generic_employee_lookup) and domain in {"", "general"}:
             return "ausentismo"
@@ -690,7 +732,7 @@ class QueryIntentResolver:
             for item in list(semantic_query_hints.get("candidate_group_dimensions") or [])
             if str(item or "").strip()
         }
-        employee_dimensions.update({"area", "cargo", "supervisor", "carpeta", "tipo_labor", "labor", "sede"})
+        employee_dimensions.update({"area", "cargo", "supervisor", "carpeta", "tipo_labor", "labor", "sede", "centro_costo"})
         if not attendance_match and QueryIntentResolver._has_employee_dimension_signal(
             normalized=normalized,
             employee_dimensions=employee_dimensions,
@@ -699,8 +741,35 @@ class QueryIntentResolver:
         if rrhh_match or generic_employee_lookup:
             return "empleados"
         if any(token in normalized for token in ("transporte", "ruta", "movilidad", "vehicul")):
-            return "transport"
-        return domain or "general"
+            return "general"
+        return normalizar_dominio_operativo(domain, fallback="general")
+
+    @classmethod
+    def _has_employee_inactive_signal(cls, normalized: str) -> bool:
+        return bool(cls._EMPLOYEE_INACTIVE_SIGNAL_RE.search(str(normalized or "")))
+
+    @classmethod
+    def _has_employee_active_signal(cls, normalized: str) -> bool:
+        return bool(cls._EMPLOYEE_ACTIVE_SIGNAL_RE.search(str(normalized or "")))
+
+    @classmethod
+    def _has_temporal_reference(cls, normalized: str) -> bool:
+        return bool(cls._TEMPORAL_REFERENCE_RE.search(str(normalized or "")))
+
+    @classmethod
+    def _has_employee_status_metric_signal(cls, normalized: str) -> bool:
+        text = str(normalized or "")
+        if re.search(r"\b(egresos|retiros|desvinculaciones|bajas|rotacion|rotaciones)\b", text):
+            return True
+        if cls._has_employee_inactive_signal(text) and cls._has_temporal_reference(text):
+            return True
+        if cls._has_employee_active_signal(text) and cls._has_temporal_reference(text):
+            return True
+        return False
+
+    @classmethod
+    def _is_turnover_query(cls, normalized: str) -> bool:
+        return bool(re.search(r"\b(rotacion|rotaciones|turnover)\b", str(normalized or "")))
 
     @classmethod
     def _extract_attendance_reason_filter(cls, *, normalized: str) -> str:
@@ -712,7 +781,7 @@ class QueryIntentResolver:
 
     @classmethod
     def _looks_like_attendance_person_detail(cls, *, normalized: str, domain: str) -> bool:
-        if domain not in {"ausentismo", "attendance"}:
+        if normalizar_codigo_dominio(domain) != "ausentismo":
             return False
         if cls._has_explicit_grouping_phrase(normalized) or cls._has_aggregate_signal(normalized):
             return False
@@ -728,7 +797,7 @@ class QueryIntentResolver:
     def _has_group_dimension_signal(normalized: str) -> bool:
         return bool(
             re.search(
-                r"\b(supervisor(?:es)?|jefe(?:s)?|lider(?:es)?|area|areas|cargo|cargos|carpeta|carpetas|labor(?:es)?|tipo_labor|tipo\s+labor|tipo\s+de\s+labor)\b",
+                r"\b(supervisor(?:es)?|jefe(?:s)?|lider(?:es)?|area|areas|cargo|cargos|carpeta|carpetas|labor(?:es)?|tipo_labor|tipo\s+labor|tipo\s+de\s+labor|centro\s+de\s+costo|centro\s+costo|cc)\b",
                 str(normalized or ""),
             )
         )
@@ -774,7 +843,7 @@ class QueryIntentResolver:
         text = str(normalized or "")
         if re.search(r"\b\d{6,13}\b", text):
             return True
-        if re.search(r"\bmovil(?:\s+(?:de|del|la|el))?\s+[a-z0-9_-]{3,40}\b", text):
+        if EmployeeIdentifierService.has_movil_identifier(text):
             return True
         return bool(
             re.search(r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+[a-z0-9_-]{3,40}\b", text)
