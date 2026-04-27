@@ -650,7 +650,7 @@ class Command(BaseCommand):
                 codigo_dominio = "transport"
             elif orchestrator_domain and orchestrator_domain not in {"general", "legacy"}:
                 codigo_dominio = orchestrator_domain
-        if codigo_intencion in {"", "general_question"} and capability_resolved == "empleados.detail.v1":
+        if capability_resolved == "empleados.detail.v1":
             codigo_intencion = "detail"
         execution_filters = dict((execution_plan.get("constraints") or {}).get("filters") or {})
         if capability_resolved.startswith("attendance.") and execution_filters:

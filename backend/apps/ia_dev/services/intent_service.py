@@ -5,6 +5,7 @@ import re
 import unicodedata
 
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
+from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ class IntentClassifierService:
             "yes",
             "on",
         )
-        self.model = os.getenv("IA_DEV_INTENT_MODEL", os.getenv("IA_DEV_MODEL", "gpt-5-nano"))
+        self.model = resolve_model_name("intent_classifier")
 
     @staticmethod
     def _get_openai_api_key() -> str:

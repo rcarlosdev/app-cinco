@@ -7,8 +7,11 @@ from unittest.mock import Mock, patch
 from django.test import SimpleTestCase
 
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
+    ResolvedQuerySpec,
     StructuredQueryIntent,
 )
+from apps.ia_dev.application.context.run_context import RunContext
+from apps.ia_dev.application.semantic.query_execution_planner import QueryExecutionPlanner
 from apps.ia_dev.application.semantic.column_semantic_resolver import (
     ColumnSemanticResolver,
 )
@@ -198,6 +201,62 @@ class QuerySemanticResolversTests(SimpleTestCase):
         )
         self.assertEqual(str(normalized.get("estado") or ""), "INACTIVO")
 
+    def test_column_semantic_resolver_binds_explicit_schema_value(self):
+        resolver = ColumnSemanticResolver()
+        profiles = resolver.build_column_profiles(
+            runtime_columns=[],
+            dictionary_fields=[
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "campo_logico": "cedula_empleado",
+                    "column_name": "cedula",
+                    "is_identifier": True,
+                    "es_filtro": True,
+                },
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "campo_logico": "movil",
+                    "column_name": "movil",
+                    "es_filtro": True,
+                },
+            ],
+        )
+        filters, resolutions = resolver.resolve_schema_value_filters(
+            message="informacion del empleado con cedula: 98672304",
+            semantic_context={"column_profiles": profiles},
+        )
+        self.assertEqual(str(filters.get("cedula_empleado") or ""), "98672304")
+        self.assertTrue(resolutions)
+
+    def test_column_semantic_resolver_does_not_reinterpret_value_as_second_column(self):
+        resolver = ColumnSemanticResolver()
+        profiles = resolver.build_column_profiles(
+            runtime_columns=[],
+            dictionary_fields=[
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "campo_logico": "cargo",
+                    "column_name": "cargo",
+                    "es_filtro": True,
+                },
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "campo_logico": "supervisor",
+                    "column_name": "supervisor",
+                    "es_filtro": True,
+                },
+            ],
+        )
+        filters, _ = resolver.resolve_schema_value_filters(
+            message="informacion de empleados cargo JEFE DEPARTAMENTO TI",
+            semantic_context={
+                "column_profiles": profiles,
+                "synonym_index": {"jefe": "supervisor"},
+            },
+        )
+        self.assertEqual(str(filters.get("cargo") or ""), "jefe departamento ti")
+        self.assertNotIn("supervisor", filters)
+
     def test_rule_semantic_resolver_extracts_identifier(self):
         resolver = RuleSemanticResolver()
         value = resolver.infer_identifier_from_message(
@@ -258,6 +317,154 @@ class QuerySemanticResolversTests(SimpleTestCase):
         self.assertIn("supervisor", list(resolved.intent.group_by or []))
         relation_payload = dict((resolved.semantic_context or {}).get("resolved_semantic") or {})
         self.assertTrue(list(relation_payload.get("relations") or []))
+
+    def test_query_execution_planner_treats_logical_cedula_as_employee_detail_identifier(self):
+        planner = QueryExecutionPlanner()
+        resolved = ResolvedQuerySpec(
+            intent=StructuredQueryIntent(
+                raw_query="informacion del empleado con cedula: 98672304",
+                domain_code="empleados",
+                operation="detail",
+                template_id="detail_by_entity_and_period",
+                filters={"cedula_empleado": "98672304"},
+                confidence=0.9,
+            ),
+            semantic_context={
+                "tables": [{"table_name": "cinco_base_de_personal"}],
+                "columns": [{"column_name": "cedula"}, {"column_name": "nombre"}],
+            },
+            normalized_filters={"cedula_empleado": "98672304"},
+            normalized_period={},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=resolved.intent.raw_query, session_id="test", reset_memory=False),
+                resolved_query=resolved,
+            )
+        self.assertEqual(plan.strategy, "capability")
+        self.assertEqual(plan.capability_id, "empleados.detail.v1")
+
+    def test_query_execution_planner_allows_employee_detail_by_schema_filter(self):
+        planner = QueryExecutionPlanner()
+        resolved = ResolvedQuerySpec(
+            intent=StructuredQueryIntent(
+                raw_query="informacion de empleados del area DEPARTAMENTO TI",
+                domain_code="empleados",
+                operation="detail",
+                template_id="detail_by_entity_and_period",
+                filters={"area": "DEPARTAMENTO TI", "estado": "ACTIVO"},
+                confidence=0.9,
+            ),
+            semantic_context={
+                "tables": [{"table_name": "cinco_base_de_personal"}],
+                "columns": [{"column_name": "area"}, {"column_name": "cedula"}],
+            },
+            normalized_filters={"area": "DEPARTAMENTO TI", "estado": "ACTIVO"},
+            normalized_period={},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=resolved.intent.raw_query, session_id="test", reset_memory=False),
+                resolved_query=resolved,
+            )
+        self.assertEqual(plan.strategy, "capability")
+        self.assertEqual(plan.capability_id, "empleados.detail.v1")
+
+    def test_query_execution_planner_routes_birthday_month_to_employee_detail(self):
+        planner = QueryExecutionPlanner()
+        resolved = ResolvedQuerySpec(
+            intent=StructuredQueryIntent(
+                raw_query="empleados que cumplen años en mayo",
+                domain_code="empleados",
+                operation="detail",
+                template_id="detail_by_entity_and_period",
+                filters={"fnacimiento_month": "5", "estado": "ACTIVO"},
+                confidence=0.9,
+            ),
+            semantic_context={
+                "tables": [{"table_name": "cinco_base_de_personal"}],
+                "columns": [{"column_name": "fnacimiento"}, {"column_name": "cedula"}],
+            },
+            normalized_filters={"fnacimiento_month": "5", "estado": "ACTIVO"},
+            normalized_period={},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=resolved.intent.raw_query, session_id="test", reset_memory=False),
+                resolved_query=resolved,
+            )
+        self.assertEqual(plan.strategy, "capability")
+        self.assertEqual(plan.capability_id, "empleados.detail.v1")
+
+    def test_semantic_business_resolver_maps_birthday_month_to_detail_filter(self):
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(_FakeDomain(raw_context={})),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+        semantic_context = {
+            "tables": [{"table_name": "cinco_base_de_personal"}],
+            "columns": [{"column_name": "fnacimiento"}, {"column_name": "estado"}],
+            "relationships": [],
+            "dictionary": {"rules": [], "fields": [], "relations": [], "synonyms": []},
+            "column_profiles": [
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "logical_name": "fnacimiento",
+                    "column_name": "fnacimiento",
+                    "supports_filter": True,
+                    "is_date": True,
+                },
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "logical_name": "estado",
+                    "column_name": "estado",
+                    "supports_filter": True,
+                    "allowed_values": ["ACTIVO", "INACTIVO"],
+                },
+            ],
+            "relation_profiles": [],
+            "synonym_index": {},
+            "allowed_tables": ["cinco_base_de_personal"],
+            "allowed_columns": ["fnacimiento", "estado"],
+            "aliases": {},
+            "company_operational_scope": {"domain_known": True, "domain_operational": True},
+        }
+        intent = StructuredQueryIntent(
+            raw_query="empleados que cumplen años en mayo",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_records_by_period",
+            filters={"month_of_birth": "mayo"},
+            confidence=0.8,
+        )
+        resolved = resolver.resolve_query(
+            message=intent.raw_query,
+            intent=intent,
+            base_classification={"domain": "empleados"},
+            semantic_context_override=semantic_context,
+        )
+        self.assertEqual(str(resolved.normalized_filters.get("fnacimiento_month") or ""), "5")
+        self.assertEqual(resolved.intent.operation, "detail")
+        self.assertEqual(resolved.intent.template_id, "detail_by_entity_and_period")
+        self.assertNotIn("temporal_scope_ambiguous", resolved.warnings)
 
     def test_semantic_business_resolver_inferrs_group_by_area_from_plural_question(self):
         fake_domain = _FakeDomain(

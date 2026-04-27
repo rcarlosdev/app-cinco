@@ -301,11 +301,15 @@ class QueryExecutionPlanner:
             group_by = [str(item).strip().lower() for item in list(resolved_query.intent.group_by or []) if str(item).strip()]
             status_value = self._resolve_status_filter(filters=filters)
             has_employee_identifier = bool(
-                str(filters.get("cedula") or "").strip()
+                self._first_filter_value(
+                    filters=filters,
+                    keys=("cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"),
+                )
                 or str(filters.get("movil") or "").strip()
                 or str(filters.get("codigo_sap") or "").strip()
                 or str(filters.get("search") or "").strip()
             )
+            has_employee_detail_filter = self._has_employee_detail_filter(filters=filters)
             temporal_scope = self._extract_temporal_scope(resolved_query=resolved_query)
             has_temporal_scope = bool(
                 temporal_scope.get("column_hint")
@@ -315,7 +319,9 @@ class QueryExecutionPlanner:
             )
             if "turnover_rate" in metrics or re.search(r"\b(rotacion|rotaciones|turnover)\b", raw_query):
                 return "empleados.count.active.v1"
-            if template_id == "detail_by_entity_and_period" and has_employee_identifier:
+            if (template_id == "detail_by_entity_and_period" or operation == "detail") and (
+                has_employee_identifier or has_employee_detail_filter
+            ):
                 return "empleados.detail.v1"
             if operation == "count" and status_value in {"ACTIVO", "INACTIVO"}:
                 return "empleados.count.active.v1"
@@ -390,7 +396,10 @@ class QueryExecutionPlanner:
         elif operation == "count":
             result_shape = "kpi"
 
-        cedula = str(filters.get("cedula") or "").strip()
+        cedula = self._first_filter_value(
+            filters=filters,
+            keys=("cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"),
+        )
         movil = str(filters.get("movil") or "").strip()
         codigo_sap = str(filters.get("codigo_sap") or "").strip()
         search = str(filters.get("search") or "").strip()
@@ -674,7 +683,7 @@ class QueryExecutionPlanner:
             filters = dict(resolved_query.normalized_filters or {})
             if not any(
                 str(filters.get(key) or "").strip()
-                for key in ("cedula", "movil", "codigo_sap", "search")
+                for key in self._EMPLOYEE_DETAIL_FILTER_KEYS
             ):
                 missing.append("identificador_empleado")
         period = dict(resolved_query.normalized_period or {})
@@ -696,6 +705,39 @@ class QueryExecutionPlanner:
             return direct_scope
         resolved_semantic = dict(context.get("resolved_semantic") or {})
         return dict(resolved_semantic.get("temporal_scope") or {})
+
+    @staticmethod
+    def _first_filter_value(*, filters: dict[str, Any], keys: tuple[str, ...]) -> str:
+        for key in keys:
+            value = str((filters or {}).get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    _EMPLOYEE_DETAIL_FILTER_KEYS = (
+        "cedula",
+        "cedula_empleado",
+        "identificacion",
+        "documento",
+        "id_empleado",
+        "movil",
+        "codigo_sap",
+        "codigo_sap_empleado",
+        "nombre",
+        "area",
+        "cargo",
+        "tipo_labor",
+        "supervisor",
+        "carpeta",
+        "fnacimiento_month",
+        "birth_month",
+        "month_of_birth",
+        "search",
+    )
+
+    @classmethod
+    def _has_employee_detail_filter(cls, *, filters: dict[str, Any]) -> bool:
+        return any(str((filters or {}).get(key) or "").strip() for key in cls._EMPLOYEE_DETAIL_FILTER_KEYS)
 
     def _is_capability_rollout_enabled(self, capability_id: str) -> bool:
         definition = self.catalog.get(capability_id)

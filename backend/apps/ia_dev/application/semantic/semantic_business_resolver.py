@@ -330,6 +330,16 @@ class SemanticBusinessResolver:
         if identifier_filter:
             identifier_key, identifier_value = identifier_filter
             rule_filters.setdefault(identifier_key, identifier_value)
+        schema_value_filters, schema_value_resolutions = self.column_resolver.resolve_schema_value_filters(
+            message=message,
+            semantic_context=semantic_context,
+        )
+        for key, value in schema_value_filters.items():
+            if str(value or "").strip():
+                rule_filters.setdefault(str(key), value)
+        birthday_month = self._resolve_birthday_filter(message=message, filters=rule_filters)
+        if birthday_month:
+            rule_filters["fnacimiento_month"] = birthday_month
 
         normalized_filters, filter_resolutions = self.column_resolver.resolve_filters(
             filters=rule_filters,
@@ -337,6 +347,12 @@ class SemanticBusinessResolver:
             canonicalize_term=canonicalize_term,
             normalize_status_value=self.rule_resolver.normalize_status_value,
         )
+        filter_resolutions = [*list(schema_value_resolutions or []), *list(filter_resolutions or [])]
+        self._apply_executable_filter_aliases(normalized_filters=normalized_filters)
+        birthday_month = self._resolve_birthday_filter(message=message, filters=normalized_filters)
+        if birthday_month:
+            normalized_filters["fnacimiento_month"] = birthday_month
+            self._apply_executable_filter_aliases(normalized_filters=normalized_filters)
         status_resolution = self._resolve_status_from_dictionary(
             message=message,
             semantic_context=semantic_context,
@@ -365,6 +381,7 @@ class SemanticBusinessResolver:
                 semantic_context=semantic_context,
                 normalized_filters=normalized_filters,
             )
+            self._apply_executable_filter_aliases(normalized_filters=normalized_filters)
         normalized_filters = EmployeeIdentifierService.prune_redundant_search_filter(normalized_filters)
         resolved_group_by, group_resolutions = self.column_resolver.resolve_group_by(
             requested_group_by=list(intent.group_by or []),
@@ -410,8 +427,21 @@ class SemanticBusinessResolver:
             ],
         )
         status_value = self._extract_status_value(normalized_filters)
+        resolved_operation = str(intent.operation or "").strip().lower()
         resolved_template_id = str(intent.template_id or "").strip().lower()
-        if domain_code in {"empleados", "rrhh"} and str(intent.operation or "").strip().lower() == "count" and status_value:
+        is_birthday_query = domain_code in {"empleados", "rrhh"} and self._is_birthday_query(
+            message=message,
+            filters=normalized_filters,
+        )
+        if is_birthday_query:
+            resolved_operation = "detail"
+            resolved_template_id = "detail_by_entity_and_period"
+        if (
+            domain_code in {"empleados", "rrhh"}
+            and not is_birthday_query
+            and str(intent.operation or "").strip().lower() == "count"
+            and status_value
+        ):
             resolved_template_id = "count_entities_by_status"
 
         resolution_payload = {
@@ -488,7 +518,7 @@ class SemanticBusinessResolver:
             intent=StructuredQueryIntent(
                 raw_query=intent.raw_query,
                 domain_code=domain_code,
-                operation=intent.operation,
+                operation=resolved_operation or intent.operation,
                 template_id=resolved_template_id or str(intent.template_id or ""),
                 entity_type=intent.entity_type,
                 entity_value=intent.entity_value,
@@ -1022,6 +1052,8 @@ class SemanticBusinessResolver:
         normalized_domain = self.registry.normalize_domain_code(domain_code)
         if normalized_domain not in {"empleados", "rrhh"}:
             return {}
+        if self._is_birthday_query(message=message, filters=normalized_filters):
+            return {}
         if not self._has_explicit_period(message):
             return {}
         start_date = str((normalized_period or {}).get("start_date") or "").strip()
@@ -1106,6 +1138,48 @@ class SemanticBusinessResolver:
         lowered = str(value or "").strip().lower()
         normalized = unicodedata.normalize("NFKD", lowered)
         return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+    @classmethod
+    def _is_birthday_query(cls, *, message: str, filters: dict[str, Any]) -> bool:
+        return bool(cls._resolve_birthday_filter(message=message, filters=filters))
+
+    @classmethod
+    def _resolve_birthday_filter(cls, *, message: str, filters: dict[str, Any]) -> str:
+        for key in ("fnacimiento_month", "birth_month", "month_of_birth", "mes_cumpleanos"):
+            parsed = cls._parse_month_number((filters or {}).get(key))
+            if parsed:
+                return parsed
+        normalized = cls._normalize_text(message)
+        if not re.search(r"\b(cumple\w*|nacimiento|fnacimiento)\b", normalized):
+            return ""
+        return cls._parse_month_number(normalized)
+
+    @staticmethod
+    def _parse_month_number(value: Any) -> str:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return ""
+        if re.fullmatch(r"(?:0?[1-9]|1[0-2])", raw):
+            return str(int(raw))
+        months = {
+            "enero": "1",
+            "febrero": "2",
+            "marzo": "3",
+            "abril": "4",
+            "mayo": "5",
+            "junio": "6",
+            "julio": "7",
+            "agosto": "8",
+            "septiembre": "9",
+            "setiembre": "9",
+            "octubre": "10",
+            "noviembre": "11",
+            "diciembre": "12",
+        }
+        for name, number in months.items():
+            if re.search(rf"\b{re.escape(name)}\b", raw):
+                return number
+        return ""
 
     @classmethod
     def _resolve_attendance_reason_from_message(cls, *, message: str) -> str:
@@ -1244,6 +1318,24 @@ class SemanticBusinessResolver:
         if any(token in normalized for token in active_tokens):
             return "ACTIVO"
         return ""
+
+    @staticmethod
+    def _apply_executable_filter_aliases(*, normalized_filters: dict[str, Any]) -> None:
+        alias_pairs = (
+            ("cedula_empleado", "cedula"),
+            ("identificacion", "cedula"),
+            ("documento", "cedula"),
+            ("id_empleado", "cedula"),
+            ("movil_empleado", "movil"),
+            ("codigo_sap_empleado", "codigo_sap"),
+            ("birth_month", "fnacimiento_month"),
+            ("month_of_birth", "fnacimiento_month"),
+            ("mes_cumpleanos", "fnacimiento_month"),
+        )
+        for source, target in alias_pairs:
+            value = str(normalized_filters.get(source) or "").strip()
+            if value and not str(normalized_filters.get(target) or "").strip():
+                normalized_filters[target] = value
 
     @classmethod
     def _has_explicit_period(cls, message: str) -> bool:

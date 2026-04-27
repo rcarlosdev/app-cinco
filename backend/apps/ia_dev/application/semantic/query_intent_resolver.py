@@ -12,6 +12,7 @@ from apps.ia_dev.application.taxonomia_dominios import (
     normalizar_codigo_dominio,
     normalizar_dominio_operativo,
 )
+from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.period_service import resolve_period_from_text
 
@@ -42,7 +43,7 @@ class QueryIntentResolver:
     )
 
     def __init__(self):
-        self.model = str(os.getenv("IA_DEV_QUERY_INTENT_MODEL", os.getenv("IA_DEV_MODEL", "gpt-5-nano")) or "gpt-5-nano")
+        self.model = resolve_model_name("query_intent")
 
     @staticmethod
     def _get_openai_api_key() -> str:
@@ -146,6 +147,8 @@ class QueryIntentResolver:
             operation = "aggregate"
         elif any(token in normalized for token in ("tendencia", "historico", "evolucion", "trend")):
             operation = "trend"
+        elif domain in {"empleados", "rrhh"} and self._extract_birthday_month_filter(normalized):
+            operation = "detail"
         elif domain in {"empleados", "rrhh"} and self._has_identifier_signal(normalized):
             operation = "detail"
         elif self._looks_like_attendance_person_detail(normalized=normalized, domain=domain):
@@ -403,7 +406,37 @@ class QueryIntentResolver:
         attendance_reason = QueryIntentResolver._extract_attendance_reason_filter(normalized=normalized)
         if attendance_reason:
             filters["justificacion"] = attendance_reason
+        birthday_month = QueryIntentResolver._extract_birthday_month_filter(normalized)
+        if birthday_month:
+            filters["fnacimiento_month"] = birthday_month
         return filters
+
+    @staticmethod
+    def _extract_birthday_month_filter(normalized: str) -> str:
+        text = str(normalized or "").strip().lower()
+        if not re.search(r"\b(cumple\w*|nacimiento|fnacimiento)\b", text):
+            return ""
+        if re.fullmatch(r"(?:0?[1-9]|1[0-2])", text):
+            return str(int(text))
+        months = {
+            "enero": "1",
+            "febrero": "2",
+            "marzo": "3",
+            "abril": "4",
+            "mayo": "5",
+            "junio": "6",
+            "julio": "7",
+            "agosto": "8",
+            "septiembre": "9",
+            "setiembre": "9",
+            "octubre": "10",
+            "noviembre": "11",
+            "diciembre": "12",
+        }
+        for month_name, month_number in months.items():
+            if re.search(rf"\b{re.escape(month_name)}\b", text):
+                return month_number
+        return ""
 
     @staticmethod
     def _extract_group_by(*, normalized: str) -> list[str]:
@@ -630,6 +663,10 @@ class QueryIntentResolver:
                 continue
             if clean_key not in filters and value not in (None, ""):
                 filters[clean_key] = value
+        if cls._extract_birthday_month_filter(cls._normalize_text(message)):
+            filters.setdefault("fnacimiento_month", cls._extract_birthday_month_filter(cls._normalize_text(message)))
+            operation = str(fallback.operation or operation or "").strip().lower()
+            template_id = str(fallback.template_id or template_id or "").strip().lower()
 
         return StructuredQueryIntent(
             raw_query=fallback.raw_query,

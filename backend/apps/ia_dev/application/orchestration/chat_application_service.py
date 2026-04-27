@@ -1826,7 +1826,10 @@ class ChatApplicationService:
             "classifier_source": f"query_intelligence_{resolved_query.intent.source}",
             "needs_database": routing_domain not in {"general", ""},
             "output_mode": output_mode,
-            "needs_personal_join": bool("cedula" in dict(resolved_query.normalized_filters or {})),
+            "needs_personal_join": bool(
+                set(dict(resolved_query.normalized_filters or {}).keys())
+                & {"cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"}
+            ),
         }
 
     @staticmethod

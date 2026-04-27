@@ -5,6 +5,8 @@ import json
 import os
 from typing import Any
 
+from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+
 
 class CauseDiagnosticsService:
     """
@@ -14,9 +16,7 @@ class CauseDiagnosticsService:
     """
 
     def __init__(self):
-        self.model = str(
-            os.getenv("IA_DEV_CAUSE_DIAGNOSTICS_MODEL", os.getenv("IA_DEV_MODEL", "gpt-5-nano")) or "gpt-5-nano"
-        ).strip()
+        self.model = resolve_model_name("cause_diagnostics")
 
     @staticmethod
     def _flag_enabled(name: str, default: str = "1") -> bool:

@@ -17,7 +17,7 @@ class ColumnSemanticResolver:
 
     _COUNT_METRIC_TOKENS = ("cantidad", "cuantos", "cuantas", "total", "numero")
     _DATE_HINTS = ("fecha", "periodo", "dia", "mes", "year", "ano")
-    _IDENTIFIER_HINTS = ("cedula", "identificacion", "documento", "id_empleado")
+    _IDENTIFIER_HINTS = ("cedula", "identificacion", "documento", "id_empleado", "codigo_sap", "movil")
     @staticmethod
     def _normalize_text(value: str | None) -> str:
         lowered = str(value or "").strip().lower()
@@ -210,6 +210,178 @@ class ColumnSemanticResolver:
             logical = str(movil_profile.get("logical_name") or movil_profile.get("column_name") or "movil").strip().lower()
             return logical, value
         return None
+
+    def resolve_schema_value_filters(
+        self,
+        *,
+        message: str,
+        semantic_context: dict[str, Any],
+    ) -> tuple[dict[str, str], list[ColumnSemanticResolution]]:
+        """
+        Resolve explicit column/value references using the semantic schema.
+
+        This keeps the LLM/planner away from guessing physical fields: values are
+        only bound to columns that exist in column_profiles or approved aliases.
+        """
+
+        normalized_message = self._normalize_text(message)
+        profiles = [
+            dict(row)
+            for row in list((semantic_context or {}).get("column_profiles") or [])
+            if isinstance(row, dict)
+        ]
+        term_index = self._schema_term_index(
+            profiles=profiles,
+            semantic_context=semantic_context,
+        )
+        filters: dict[str, str] = {}
+        resolutions: list[ColumnSemanticResolution] = []
+
+        for term, profile in sorted(term_index.items(), key=lambda item: len(item[0]), reverse=True):
+            if not term or len(term) < 2:
+                continue
+            if self._term_already_captured_as_value(term=term, filters=filters):
+                continue
+            value = self._extract_value_after_term(
+                normalized_message=normalized_message,
+                term=term,
+                profile=profile,
+            )
+            if not value:
+                continue
+            logical_name = str(profile.get("logical_name") or profile.get("column_name") or "").strip().lower()
+            if not logical_name or logical_name in filters:
+                continue
+            filters[logical_name] = value
+            resolutions.append(self._profile_resolution(requested_term=term, profile=profile))
+
+        # Strong unlabelled identifiers are still schema-based: they bind only if
+        # an identifier-like profile is available, then fall back to safe names.
+        if not any(key in filters for key in ("cedula", "cedula_empleado", "identificacion", "documento")):
+            match = re.search(r"\b\d{6,13}\b", normalized_message)
+            if match:
+                profile = self._find_profile(
+                    profiles=profiles,
+                    accepted_names={"cedula", "cedula_empleado", "identificacion", "documento"},
+                    require_identifier=False,
+                )
+                logical = str((profile or {}).get("logical_name") or (profile or {}).get("column_name") or "cedula").strip().lower()
+                filters[logical] = "".join(ch for ch in match.group(0) if ch.isdigit())
+                if profile:
+                    resolutions.append(self._profile_resolution(requested_term=logical, profile=profile))
+
+        if not any(key in filters for key in ("movil",)):
+            movil = EmployeeIdentifierService.extract_movil_identifier(message or normalized_message)
+            if movil:
+                profile = self._find_profile(
+                    profiles=profiles,
+                    accepted_names={"movil"},
+                    require_identifier=False,
+                )
+                logical = str((profile or {}).get("logical_name") or (profile or {}).get("column_name") or "movil").strip().lower()
+                filters[logical] = movil
+                if profile:
+                    resolutions.append(self._profile_resolution(requested_term=logical, profile=profile))
+
+        return filters, resolutions
+
+    def _term_already_captured_as_value(self, *, term: str, filters: dict[str, str]) -> bool:
+        clean_term = self._normalize_text(term)
+        if not clean_term:
+            return False
+        return any(
+            bool(re.search(rf"\b{re.escape(clean_term)}\b", self._normalize_text(value)))
+            for value in dict(filters or {}).values()
+            if str(value or "").strip()
+        )
+
+    def _schema_term_index(
+        self,
+        *,
+        profiles: list[dict[str, Any]],
+        semantic_context: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        index: dict[str, dict[str, Any]] = {}
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            if not (
+                self._to_bool(profile.get("supports_filter"))
+                or self._to_bool(profile.get("is_identifier"))
+                or str(profile.get("logical_name") or "").strip().lower() in {"movil", "area", "cargo", "carpeta", "supervisor", "tipo_labor"}
+            ):
+                continue
+            for raw_term in (
+                profile.get("logical_name"),
+                profile.get("column_name"),
+                str(profile.get("logical_name") or "").replace("_", " "),
+                str(profile.get("column_name") or "").replace("_", " "),
+            ):
+                term = self._normalize_text(raw_term)
+                if term:
+                    index.setdefault(term, profile)
+
+        aliases = dict((semantic_context or {}).get("aliases") or {})
+        aliases.update(dict((semantic_context or {}).get("synonym_index") or {}))
+        for alias, canonical in aliases.items():
+            alias_term = self._normalize_text(alias)
+            canonical_term = self._normalize_text(canonical)
+            if not alias_term or not canonical_term:
+                continue
+            profile = self._match_profile(term=canonical_term, profiles=profiles)
+            if profile is not None:
+                index.setdefault(alias_term, profile)
+        return index
+
+    def _extract_value_after_term(
+        self,
+        *,
+        normalized_message: str,
+        term: str,
+        profile: dict[str, Any],
+    ) -> str:
+        logical = self._normalize_text(profile.get("logical_name") or profile.get("column_name"))
+        pattern = rf"\b{re.escape(term)}\b\s*(?::|=|es|de|del|la|el|con)?\s+([a-z0-9_ .-]{{2,80}})"
+        match = re.search(pattern, normalized_message)
+        if not match:
+            return ""
+        raw = str(match.group(1) or "").strip()
+        for separator in (" y ", " con ", " por ", ",", ".", ";", "?"):
+            if separator in raw:
+                raw = raw.split(separator, 1)[0].strip()
+        if logical in {"cedula", "cedula_empleado", "identificacion", "documento"}:
+            digit_match = re.search(r"\b\d{6,13}\b", raw)
+            return digit_match.group(0) if digit_match else ""
+        if logical == "movil":
+            token = EmployeeIdentifierService.normalize_movil_value(raw.split()[0] if raw.split() else raw)
+            return token if EmployeeIdentifierService.is_movil_candidate(token) else ""
+        if logical == "codigo_sap":
+            token = raw.split()[0] if raw.split() else raw
+            return token.upper()[:40]
+        return raw[:80].strip()
+
+    def _profile_resolution(
+        self,
+        *,
+        requested_term: str,
+        profile: dict[str, Any],
+    ) -> ColumnSemanticResolution:
+        return ColumnSemanticResolution(
+            requested_term=str(requested_term or ""),
+            canonical_term=str(profile.get("logical_name") or profile.get("column_name") or "").strip().lower(),
+            table_name=str(profile.get("table_name") or ""),
+            column_name=str(profile.get("column_name") or ""),
+            supports_filter=self._to_bool(profile.get("supports_filter")),
+            supports_group_by=self._to_bool(profile.get("supports_group_by")),
+            supports_metric=self._to_bool(profile.get("supports_metric")),
+            supports_dimension=self._to_bool(profile.get("supports_dimension")),
+            is_date=self._to_bool(profile.get("is_date")),
+            is_identifier=self._to_bool(profile.get("is_identifier")),
+            is_chart_dimension=self._to_bool(profile.get("is_chart_dimension")),
+            is_chart_measure=self._to_bool(profile.get("is_chart_measure")),
+            allowed_values=self._parse_allowed_values(profile.get("allowed_values")),
+            confidence=float(profile.get("confidence") or 0.0),
+        )
 
     @staticmethod
     def _has_letters_and_digits(value: str) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
@@ -588,6 +589,7 @@ class EmpleadosHandler:
                 "estado",
                 "codigo_sap",
                 "sede",
+                "fnacimiento",
                 "link_foto",
             )[: max(1, min(int(limit), 20))]
         )
@@ -611,6 +613,7 @@ class EmpleadosHandler:
                     "estado": str(row.get("estado") or "").strip(),
                     "codigo_sap": str(row.get("codigo_sap") or "").strip(),
                     "sede": str(row.get("sede") or "").strip(),
+                    "fnacimiento": row.get("fnacimiento").isoformat() if row.get("fnacimiento") else "",
                     "link_foto": str(row.get("link_foto") or "").strip(),
                 }
             )
@@ -624,6 +627,8 @@ class EmpleadosHandler:
     ) -> list[str]:
         if str((filtros_aplicados or {}).get("movil") or "").strip():
             return ["cedula", "nombre", "apellido", "cargo", "area", "carpeta", "tipo_labor", "movil"]
+        if str((filtros_aplicados or {}).get("fnacimiento_month") or "").strip():
+            return ["cedula", "nombre", "apellido", "cargo", "area", "fnacimiento", "estado"]
         if empleados:
             return list(empleados[0].keys())
         return [
@@ -635,6 +640,7 @@ class EmpleadosHandler:
             "carpeta",
             "tipo_labor",
             "estado",
+            "fnacimiento",
         ]
 
     def _resolve_detail_filters(
@@ -650,11 +656,31 @@ class EmpleadosHandler:
             dict((resolved_query.normalized_filters if resolved_query else {}) or {}),
             self._extraer_filtros_desde_texto(consulta=consulta),
         ):
-            for key in ("cedula", "movil", "codigo_sap", "nombre", "area", "cargo", "tipo_labor", "supervisor", "carpeta", "search"):
-                value = str(source.get(key) or "").strip()
+            normalized_source = self._normalize_executable_filter_aliases(source)
+            for key in ("cedula", "movil", "codigo_sap", "nombre", "area", "cargo", "tipo_labor", "supervisor", "carpeta", "fnacimiento_month", "birth_month", "month_of_birth", "search"):
+                value = str(normalized_source.get(key) or "").strip()
                 if value:
                     merged.setdefault(key, value)
         return EmployeeIdentifierService.prune_redundant_search_filter(merged)
+
+    @staticmethod
+    def _normalize_executable_filter_aliases(source: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(source or {})
+        alias_pairs = (
+            ("cedula_empleado", "cedula"),
+            ("identificacion", "cedula"),
+            ("documento", "cedula"),
+            ("id_empleado", "cedula"),
+            ("movil_empleado", "movil"),
+            ("codigo_sap_empleado", "codigo_sap"),
+            ("birth_month", "fnacimiento_month"),
+            ("month_of_birth", "fnacimiento_month"),
+        )
+        for source_key, target_key in alias_pairs:
+            value = str(normalized.get(source_key) or "").strip()
+            if value and not str(normalized.get(target_key) or "").strip():
+                normalized[target_key] = value
+        return normalized
 
     @staticmethod
     def _build_employee_detail_reply(
@@ -663,6 +689,7 @@ class EmpleadosHandler:
         filtros_aplicados: dict[str, Any],
     ) -> str:
         movil = str((filtros_aplicados or {}).get("movil") or "").strip()
+        birth_month = str((filtros_aplicados or {}).get("fnacimiento_month") or "").strip()
         if not empleados:
             filtro_texto = ", ".join(
                 f"{key}={value}" for key, value in dict(filtros_aplicados or {}).items() if str(value or "").strip()
@@ -677,6 +704,12 @@ class EmpleadosHandler:
                 "Te muestro cedula, nombre, apellido, cargo, area, carpeta y tipo de labor. "
                 "Si deseas conocer algo especifico adicional de esta movil, puedo ayudarte."
             )
+        if birth_month:
+            label = EmpleadosHandler._month_label(birth_month)
+            return (
+                f"Encontre {len(empleados)} empleados activos que cumplen anos en {label}. "
+                "Te muestro cedula, nombre, apellido, cargo, area y fecha de nacimiento."
+            )
         if len(empleados) == 1:
             row = dict(empleados[0] or {})
             return (
@@ -690,6 +723,24 @@ class EmpleadosHandler:
             )
         preview = ", ".join(str(item.get("nombre_completo") or item.get("cedula") or "N/D") for item in empleados[:3])
         return f"Encontre {len(empleados)} empleados que coinciden. Primeros resultados: {preview}."
+
+    @staticmethod
+    def _month_label(value: str) -> str:
+        labels = {
+            "1": "enero",
+            "2": "febrero",
+            "3": "marzo",
+            "4": "abril",
+            "5": "mayo",
+            "6": "junio",
+            "7": "julio",
+            "8": "agosto",
+            "9": "septiembre",
+            "10": "octubre",
+            "11": "noviembre",
+            "12": "diciembre",
+        }
+        return labels.get(str(value or "").strip(), str(value or "").strip() or "el mes indicado")
 
     @staticmethod
     def _build_turnover_reply(*, stats: dict[str, Any]) -> str:
@@ -854,7 +905,7 @@ class EmpleadosHandler:
 
     def _buscar_empleados(self, *, filtros: dict[str, str], limite: int) -> list[dict[str, Any]]:
         query_params: dict[str, str] = {}
-        for key in ("cedula", "movil", "codigo_sap", "nombre", "area", "cargo", "tipo_labor", "supervisor", "carpeta"):
+        for key in ("cedula", "movil", "codigo_sap", "nombre", "area", "cargo", "tipo_labor", "supervisor", "carpeta", "fnacimiento_month"):
             value = str(filtros.get(key) or "").strip()
             if value:
                 query_params[key] = value
@@ -937,6 +988,10 @@ class EmpleadosHandler:
         if carpeta:
             filters["carpeta"] = carpeta
 
+        birth_month = EmpleadosHandler._extract_birth_month_filter(lowered)
+        if birth_month:
+            filters["fnacimiento_month"] = birth_month
+
         generic_lookup = re.search(
             r"\b(?:info|informacion|detalle|datos|ficha)\s+de\s+([a-z0-9_-]{3,40})\b",
             lowered,
@@ -961,6 +1016,43 @@ class EmpleadosHandler:
         if not filters:
             filters["search"] = lowered[:80]
         return filters
+
+    @staticmethod
+    def _extract_birth_month_filter(text: str) -> str:
+        normalized = EmpleadosHandler._normalize_text(text)
+        if not re.search(r"\b(cumple\w*|nacimiento|fnacimiento)\b", normalized):
+            return ""
+        return EmpleadosHandler._parse_month_number(normalized)
+
+    @staticmethod
+    def _parse_month_number(text: str) -> str:
+        raw = str(text or "").strip().lower()
+        if re.fullmatch(r"(?:0?[1-9]|1[0-2])", raw):
+            return str(int(raw))
+        months = {
+            "enero": "1",
+            "febrero": "2",
+            "marzo": "3",
+            "abril": "4",
+            "mayo": "5",
+            "junio": "6",
+            "julio": "7",
+            "agosto": "8",
+            "septiembre": "9",
+            "setiembre": "9",
+            "octubre": "10",
+            "noviembre": "11",
+            "diciembre": "12",
+        }
+        for name, value in months.items():
+            if re.search(rf"\b{re.escape(name)}\b", raw):
+                return value
+        return ""
+
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+        return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
     @staticmethod
     def _extract_after_keyword(text: str, *, keyword: str) -> str:

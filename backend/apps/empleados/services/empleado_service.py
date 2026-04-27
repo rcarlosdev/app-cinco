@@ -12,6 +12,9 @@ class EmpleadoService:
         "temporal_column_hint",
         "temporal_start_date",
         "temporal_end_date",
+        "fnacimiento_month",
+        "birth_month",
+        "month_of_birth",
     }
     
     def existe(self, empleado_id):
@@ -71,6 +74,14 @@ class EmpleadoService:
                 queryset = EmpleadoService._annotate_movil_normalized(queryset=queryset)
                 search_filter |= Q(movil_normalized__icontains=EmpleadoService._normalize_movil_lookup(search))
             queryset = queryset.filter(search_filter)
+
+        birth_month = EmpleadoService._parse_month_number(
+            query_params.get("fnacimiento_month")
+            or query_params.get("birth_month")
+            or query_params.get("month_of_birth")
+        )
+        if birth_month:
+            queryset = queryset.filter(fnacimiento__month=birth_month)
 
         temporal_column = str(query_params.get("temporal_column_hint") or "").strip().lower()
         start_date = EmpleadoService._parse_iso_date(query_params.get("temporal_start_date"))
@@ -284,7 +295,40 @@ class EmpleadoService:
             if end_date:
                 queryset = queryset.filter(**{f"{temporal_column}__lte": end_date})
 
+        birth_month = EmpleadoService._parse_month_number(
+            query_params.get("fnacimiento_month")
+            or query_params.get("birth_month")
+            or query_params.get("month_of_birth")
+        )
+        if birth_month:
+            queryset = queryset.filter(fnacimiento__month=birth_month)
+
         return queryset
+
+    @staticmethod
+    def _parse_month_number(value) -> int | None:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return None
+        if raw.isdigit():
+            month = int(raw)
+            return month if 1 <= month <= 12 else None
+        months = {
+            "enero": 1,
+            "febrero": 2,
+            "marzo": 3,
+            "abril": 4,
+            "mayo": 5,
+            "junio": 6,
+            "julio": 7,
+            "agosto": 8,
+            "septiembre": 9,
+            "setiembre": 9,
+            "octubre": 10,
+            "noviembre": 11,
+            "diciembre": 12,
+        }
+        return months.get(raw)
 
     @staticmethod
     def _resolve_runtime_lookup(*, field_name):

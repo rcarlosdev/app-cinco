@@ -13,6 +13,7 @@ from apps.ia_dev.application.semantic.cause_diagnostics_service import CauseDiag
 from apps.ia_dev.application.runtime.service_runtime_bootstrap import (
     apply_service_runtime_bootstrap,
 )
+from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 
 from .observability_service import ObservabilityService
 from .dictionary_tool_service import DictionaryToolService
@@ -43,23 +44,15 @@ class IADevOrchestratorService:
         self.enable_openai_general = os.getenv(
             "IA_DEV_USE_OPENAI_GENERAL", "1"
         ).strip().lower() in ("1", "true", "yes", "on")
-        self.general_model = os.getenv(
-            "IA_DEV_GENERAL_MODEL", os.getenv("IA_DEV_MODEL", "gpt-5-nano")
-        )
+        self.general_model = resolve_model_name("general_answer")
         self.enable_openai_period = os.getenv(
             "IA_DEV_USE_OPENAI_PERIOD", "1"
         ).strip().lower() in ("1", "true", "yes", "on")
-        self.period_model = os.getenv(
-            "IA_DEV_PERIOD_MODEL",
-            os.getenv("IA_DEV_INTENT_MODEL", self.general_model),
-        )
+        self.period_model = resolve_model_name("period_extraction")
         self.enable_openai_followups = os.getenv(
             "IA_DEV_USE_OPENAI_FOLLOWUPS", "1"
         ).strip().lower() in ("1", "true", "yes", "on")
-        self.followup_model = os.getenv(
-            "IA_DEV_FOLLOWUP_MODEL",
-            self.general_model,
-        )
+        self.followup_model = resolve_model_name("followups")
         self._last_openai_usage: dict | None = None
         self.cause_diagnostics_service = CauseDiagnosticsService()
         self._delegate_state = threading.local()

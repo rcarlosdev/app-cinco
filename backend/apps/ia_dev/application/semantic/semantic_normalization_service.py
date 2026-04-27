@@ -14,6 +14,7 @@ from apps.ia_dev.application.taxonomia_dominios import (
     dominio_desde_capacidad,
     normalizar_codigo_dominio,
 )
+from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 
 
@@ -159,11 +160,12 @@ class SemanticNormalizationService:
             query=normalized_query,
             classification=classification,
         )
-        candidate_entities = self._candidate_entities(query=normalized_query)
+        candidate_entities = self._candidate_entities(query=normalized_query, context=context)
         candidate_filters = self._candidate_filters(
             query=normalized_query,
             memory_hints=hints,
             semantic_aliases=semantic_aliases,
+            context=context,
         )
         normalized_capability_hints = self._normalize_capability_hints(capability_hints=capability_hints)
 
@@ -327,6 +329,16 @@ class SemanticNormalizationService:
         domain_code = self._top_domain_code(candidate_domains=candidate_domains)
         intent_code = self._top_intent_code(candidate_intents=candidate_intents)
         normalized_filters = self._top_filter_map(candidate_filters=candidate_filters)
+        if domain_code in {"empleados", "rrhh"} and str(normalized_filters.get("fnacimiento_month") or "").strip():
+            intent_code = "detail"
+            candidate_intents = [
+                {"intent": "detail", "confidence": 0.92, "source": "birthday_month_resolution"},
+                *[
+                    item
+                    for item in list(candidate_intents or [])
+                    if str((item or {}).get("intent") or "").strip().lower() != "detail"
+                ],
+            ]
         if llm_applied and llm_comparison.get("llm_changed_anything"):
             resolved_by = "llm_semantic_normalization_prompt"
         elif llm_invoked:
@@ -485,6 +497,9 @@ class SemanticNormalizationService:
                 "vigent",
                 "rotacion",
                 "rotaciones",
+                "cumple",
+                "cumpleanos",
+                "nacimiento",
             )
         ):
             score["empleados"] += 0.65
@@ -553,6 +568,8 @@ class SemanticNormalizationService:
             intent_scores["count"] += 0.62
         if any(token in query for token in ("detalle", "tabla", "listar", "lista", "informacion", "info", "ficha", "datos")):
             intent_scores["detail"] += 0.6
+        if cls._birthday_month_filter(query):
+            intent_scores["detail"] += 0.65
         if EmployeeIdentifierService.has_movil_identifier(query) or bool(re.search(r"\b\d{6,13}\b", query)):
             intent_scores["detail"] += 0.55
         if any(token in query for token in ("vacacion", "vacaciones", "incapacidad", "licencia", "permiso", "calamidad")) and any(
@@ -577,24 +594,38 @@ class SemanticNormalizationService:
             if confidence > 0
         ]
 
-    @staticmethod
-    def _candidate_entities(*, query: str) -> list[dict[str, Any]]:
+    @classmethod
+    def _candidate_entities(cls, *, query: str, context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         entities: list[dict[str, Any]] = []
         cedula_match = re.search(r"\b\d{6,13}\b", query)
         if cedula_match:
+            column = cls._schema_column_for_entity(
+                context=context or {},
+                accepted_names={"cedula", "cedula_empleado", "identificacion", "documento"},
+            )
             entities.append(
                 {
                     "entity_type": "cedula",
                     "entity_value": "".join(ch for ch in cedula_match.group(0) if ch.isdigit()),
+                    "matched_column": column.get("column_name", "cedula"),
+                    "matched_logical_name": column.get("logical_name", "cedula"),
+                    "table_name": column.get("table_name", ""),
                     "confidence": 0.95,
                 }
             )
         movil_match = EmployeeIdentifierService.extract_movil_identifier(query)
         if movil_match:
+            column = cls._schema_column_for_entity(
+                context=context or {},
+                accepted_names={"movil"},
+            )
             entities.append(
                 {
                     "entity_type": "movil",
                     "entity_value": movil_match,
+                    "matched_column": column.get("column_name", "movil"),
+                    "matched_logical_name": column.get("logical_name", "movil"),
+                    "table_name": column.get("table_name", ""),
                     "confidence": 0.93,
                 }
             )
@@ -608,6 +639,22 @@ class SemanticNormalizationService:
             )
         return entities
 
+    @staticmethod
+    def _schema_column_for_entity(*, context: dict[str, Any], accepted_names: set[str]) -> dict[str, str]:
+        accepted = {str(item or "").strip().lower() for item in accepted_names if str(item or "").strip()}
+        for row in list((context or {}).get("column_profiles") or []):
+            if not isinstance(row, dict):
+                continue
+            logical = str(row.get("logical_name") or "").strip().lower()
+            column = str(row.get("column_name") or "").strip().lower()
+            if logical in accepted or column in accepted:
+                return {
+                    "logical_name": logical or column,
+                    "column_name": column or logical,
+                    "table_name": str(row.get("table_name") or "").strip().lower(),
+                }
+        return {}
+
     @classmethod
     def _candidate_filters(
         cls,
@@ -615,6 +662,7 @@ class SemanticNormalizationService:
         query: str,
         memory_hints: dict[str, Any],
         semantic_aliases: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         filters: list[dict[str, Any]] = []
         canonical_aliases = {str(item.get("alias") or ""): str(item.get("canonical") or "") for item in list(semantic_aliases or [])}
@@ -651,7 +699,97 @@ class SemanticNormalizationService:
                     }
                 )
                 break
+        birth_month = cls._birthday_month_filter(query)
+        if birth_month and not any(str(row.get("filter") or "").strip().lower() == "fnacimiento_month" for row in filters):
+            filters.append(
+                {
+                    "filter": "fnacimiento_month",
+                    "value": birth_month,
+                    "confidence": 0.92,
+                    "source": "birthday_month_resolution",
+                }
+            )
+        for item in cls._schema_value_candidate_filters(query=query, context=context or {}):
+            key = str(item.get("filter") or "").strip().lower()
+            value = str(item.get("value") or "").strip()
+            if key and value and not any(str(row.get("filter") or "").strip().lower() == key for row in filters):
+                filters.append(item)
         return filters
+
+    @classmethod
+    def _schema_value_candidate_filters(
+        cls,
+        *,
+        query: str,
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        filters: list[dict[str, Any]] = []
+        cedula_match = re.search(r"\b\d{6,13}\b", query)
+        if cedula_match:
+            column = cls._schema_column_for_entity(
+                context=context,
+                accepted_names={"cedula", "cedula_empleado", "identificacion", "documento"},
+            )
+            logical = str(column.get("logical_name") or "cedula").strip().lower()
+            filters.append(
+                {
+                    "filter": logical,
+                    "value": "".join(ch for ch in cedula_match.group(0) if ch.isdigit()),
+                    "confidence": 0.95,
+                    "source": "schema_value_resolution",
+                    "column_name": str(column.get("column_name") or "cedula"),
+                    "table_name": str(column.get("table_name") or ""),
+                }
+            )
+        movil = EmployeeIdentifierService.extract_movil_identifier(query)
+        if movil:
+            column = cls._schema_column_for_entity(context=context, accepted_names={"movil"})
+            logical = str(column.get("logical_name") or "movil").strip().lower()
+            filters.append(
+                {
+                    "filter": logical,
+                    "value": movil,
+                    "confidence": 0.93,
+                    "source": "schema_value_resolution",
+                    "column_name": str(column.get("column_name") or "movil"),
+                    "table_name": str(column.get("table_name") or ""),
+                }
+            )
+        return filters
+
+    @classmethod
+    def _birthday_month_filter(cls, query: str) -> str:
+        normalized = cls._normalize_text(query)
+        if not re.search(r"\b(cumple\w*|nacimiento|fnacimiento)\b", normalized):
+            return ""
+        return cls._parse_month_number(normalized)
+
+    @staticmethod
+    def _parse_month_number(value: Any) -> str:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return ""
+        if re.fullmatch(r"(?:0?[1-9]|1[0-2])", raw):
+            return str(int(raw))
+        months = {
+            "enero": "1",
+            "febrero": "2",
+            "marzo": "3",
+            "abril": "4",
+            "mayo": "5",
+            "junio": "6",
+            "julio": "7",
+            "agosto": "8",
+            "septiembre": "9",
+            "setiembre": "9",
+            "octubre": "10",
+            "noviembre": "11",
+            "diciembre": "12",
+        }
+        for name, number in months.items():
+            if re.search(rf"\b{re.escape(name)}\b", raw):
+                return number
+        return ""
 
     @staticmethod
     def _normalize_capability_hints(
@@ -822,7 +960,7 @@ class SemanticNormalizationService:
                 "candidate_entities": candidate_entities,
             }
             response = client.responses.create(
-                model=str(os.getenv("IA_DEV_SEMANTIC_NORMALIZATION_LLM_MODEL", os.getenv("IA_DEV_MODEL", "gpt-5-nano")) or "gpt-5-nano"),
+                model=resolve_model_name("semantic_normalization_llm"),
                 input=[
                     {
                         "role": "system",
