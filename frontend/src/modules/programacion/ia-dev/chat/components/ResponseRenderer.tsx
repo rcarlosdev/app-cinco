@@ -3,18 +3,83 @@
 import { useMemo, useState } from "react";
 import { Check, Copy, Wrench } from "lucide-react";
 import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
+import type {
+  IADevChartPayload,
+  IADevChatResponse,
+} from "@/services/ia-dev.service";
 import KPISection from "@/modules/programacion/ia-dev/chat/components/KPISection";
 import InsightList from "@/modules/programacion/ia-dev/chat/components/InsightList";
 import SmartChartRenderer from "@/modules/programacion/ia-dev/chat/components/SmartChartRenderer";
 import DataTableRenderer from "@/modules/programacion/ia-dev/chat/components/DataTableRenderer";
 import ReasoningPanel from "@/modules/programacion/ia-dev/chat/components/ReasoningPanel";
+import {
+  getSemanticTone,
+  toneSoftClass,
+} from "@/modules/programacion/ia-dev/chat/utils/semanticTone";
 
 type ResponseRendererProps = {
   message: ChatMessageModel;
+  variant?: "full" | "clean";
+};
+
+const INTERNAL_TEXT_PATTERN =
+  /(sql asistido|solo lectura|ai_dictionary|inferencia semantica|modo sql|restringido|runtime|orchestrator|classifier|compiler|query_sql|join_aware)/i;
+
+const isInternalText = (value: string | undefined | null) =>
+  Boolean(value && INTERNAL_TEXT_PATTERN.test(value));
+
+const getRowCount = (payload: NonNullable<ChatMessageModel["normalized"]>) => {
+  const rowCountKpi = payload.kpis.find((item) => item.key === "rowcount");
+  if (typeof rowCountKpi?.rawValue === "number") return rowCountKpi.rawValue;
+  if (payload.table?.rowcount) return payload.table.rowcount;
+  return payload.table?.rows.length || null;
+};
+
+const cleanSummary = (
+  payload: NonNullable<ChatMessageModel["normalized"]>,
+  content: string,
+) => {
+  const candidate = payload.summary || content;
+  if (!isInternalText(candidate)) return candidate;
+
+  const rowCount = getRowCount(payload);
+  if (rowCount) {
+    return `Encontre ${rowCount} registros para tu consulta.`;
+  }
+  if (payload.insights.some((insight) => !isInternalText(insight))) {
+    return "Estos son los resultados principales.";
+  }
+  return "Consulta completada. Revisa los resultados principales a continuacion.";
+};
+
+const cleanChartTitle = (title: unknown) => {
+  const value = typeof title === "string" ? title.trim() : "";
+  if (!value || isInternalText(value)) return "Resultados principales";
+  return value;
+};
+
+const cleanChart = (chart: IADevChartPayload): IADevChartPayload => ({
+  ...chart,
+  title: cleanChartTitle(chart.title),
+});
+
+const toCleanPayload = (
+  payload: NonNullable<ChatMessageModel["normalized"]>,
+  message: ChatMessageModel,
+): NonNullable<ChatMessageModel["normalized"]> => {
+  const chart = payload.chart ? cleanChart(payload.chart) : null;
+  return {
+    ...payload,
+    summary: cleanSummary(payload, message.content),
+    insights: payload.insights.filter((insight) => !isInternalText(insight)),
+    chart,
+    charts: chart ? [chart] : payload.charts.slice(0, 1).map(cleanChart),
+    meta: {},
+  };
 };
 
 const formatOrchestratorMeta = (message: ChatMessageModel) => {
-  const response = message.response;
+  const response = message.response as Partial<IADevChatResponse> | undefined;
   if (!response) return [];
   const usedTools =
     response.orchestrator?.used_tools &&
@@ -43,31 +108,49 @@ const formatOrchestratorMeta = (message: ChatMessageModel) => {
   ];
 };
 
-const ResponseRenderer = ({ message }: ResponseRendererProps) => {
+const ResponseRenderer = ({
+  message,
+  variant = "full",
+}: ResponseRendererProps) => {
   const [copied, setCopied] = useState(false);
   const payload = message.normalized;
+  const showRuntimeDetails = variant === "full";
+  const renderPayload = useMemo(
+    () =>
+      payload && variant === "clean"
+        ? toCleanPayload(payload, message)
+        : payload,
+    [message, payload, variant],
+  );
 
   const copyText = useMemo(() => {
-    if (payload?.hasStructuredContent) {
+    if (renderPayload?.hasStructuredContent) {
       return JSON.stringify(
         {
-          summary: payload.summary,
-          kpis: payload.kpis,
-          insights: payload.insights,
-          table: payload.table,
-          chart: payload.chart,
+          summary: renderPayload.summary,
+          kpis: renderPayload.kpis,
+          insights: renderPayload.insights,
+          table: renderPayload.table,
+          chart: renderPayload.chart,
         },
         null,
         2,
       );
     }
     return message.content;
-  }, [message.content, payload]);
+  }, [message.content, renderPayload]);
 
   const metadata = useMemo(() => formatOrchestratorMeta(message), [message]);
+  const summaryTone = useMemo(
+    () =>
+      getSemanticTone({
+        value: renderPayload?.summary || message.content,
+      }),
+    [message.content, renderPayload?.summary],
+  );
   const extraCharts = useMemo(
-    () => payload?.charts.slice(1, 3) ?? [],
-    [payload?.charts],
+    () => (showRuntimeDetails ? (renderPayload?.charts.slice(1, 3) ?? []) : []),
+    [renderPayload?.charts, showRuntimeDetails],
   );
 
   const copyResponse = async () => {
@@ -80,13 +163,15 @@ const ResponseRenderer = ({ message }: ResponseRendererProps) => {
     }
   };
 
-  if (!payload || !payload.hasStructuredContent) {
+  if (!renderPayload || !renderPayload.hasStructuredContent) {
     return (
       <div className="space-y-4">
-        <ReasoningPanel
-          response={message.response}
-          isStreaming={message.status === "streaming"}
-        />
+        {showRuntimeDetails && (
+          <ReasoningPanel
+            response={message.response}
+            isStreaming={message.status === "streaming"}
+          />
+        )}
         <p className="whitespace-pre-wrap">{message.content}</p>
       </div>
     );
@@ -94,14 +179,18 @@ const ResponseRenderer = ({ message }: ResponseRendererProps) => {
 
   return (
     <div className="space-y-4">
-      <ReasoningPanel
-        response={message.response}
-        isStreaming={message.status === "streaming"}
-      />
+      {showRuntimeDetails && (
+        <ReasoningPanel
+          response={message.response}
+          isStreaming={message.status === "streaming"}
+        />
+      )}
 
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-sm leading-6 whitespace-pre-wrap text-gray-800 dark:text-gray-200">
-          {payload.summary || message.content}
+      <div
+        className={`flex items-start justify-between gap-2 rounded-xl border px-3 py-2 ${toneSoftClass[summaryTone]}`}
+      >
+        <p className="text-sm leading-6 whitespace-pre-wrap">
+          {renderPayload.summary || message.content}
         </p>
         <button
           type="button"
@@ -113,22 +202,23 @@ const ResponseRenderer = ({ message }: ResponseRendererProps) => {
         </button>
       </div>
 
-      <KPISection items={payload.kpis} />
-      <InsightList insights={payload.insights} />
-      <SmartChartRenderer payload={payload} />
+      <KPISection items={renderPayload.kpis} />
+      <InsightList insights={renderPayload.insights} />
+      <SmartChartRenderer payload={renderPayload} variant={variant} />
       {extraCharts.map((chart, index) => (
         <SmartChartRenderer
           key={`${chart.title || "chart"}-${index}`}
           payload={{
-            ...payload,
+            ...renderPayload,
             chart,
             charts: [chart],
           }}
+          variant={variant}
         />
       ))}
-      <DataTableRenderer table={payload.table} />
+      <DataTableRenderer table={renderPayload.table} />
 
-      {metadata.length > 0 && (
+      {showRuntimeDetails && metadata.length > 0 && (
         <section className="space-y-2">
           <p className="flex items-center gap-2 text-[11px] font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
             <Wrench size={12} />
