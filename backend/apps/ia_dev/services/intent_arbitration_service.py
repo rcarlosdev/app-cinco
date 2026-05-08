@@ -171,6 +171,10 @@ class IntentArbitrationService:
                         "Regla de RRHH: consultas como 'personal activo hoy', 'colaboradores activos' o "
                         "'cuantos empleados activos hay' son analytics de conteo/resumen; no las conviertas "
                         "en detalle si no traen identificador puntual.\n"
+                        "Ontologia de empleados: SEDE > AREA > CARPETA > MOVIL > EMPLEADOS.\n"
+                        "Usa ai_dictionary para reconocer equivalencias declaradas como movil=cuadrilla/brigada/grupo tecnico, "
+                        "supervisor=jefe directo/lider/encargado y tipo_labor OPERATIVO=tecnicos/personal operativo.\n"
+                        "GPT no genera SQL; solo decide la naturaleza semantica y de gobierno de la solicitud.\n"
                         "Si la confianza es baja, usa final_intent=fallback y required_clarification."
                     ),
                 },
@@ -337,10 +341,14 @@ class IntentArbitrationService:
         should_use_sql_assisted = bool(decision.get("should_use_sql_assisted"))
         should_use_handler = bool(decision.get("should_use_handler"))
         should_fallback = bool(decision.get("should_fallback"))
+        executable_analytics = bool(semantic_inference.get("executable_analytics"))
 
         if final_intent == "analytics_query":
+            if executable_analytics:
+                confidence = max(confidence, self.confidence_threshold)
+                low_confidence = False
             should_create_kpro = False
-            should_execute_query = not low_confidence and final_domain not in {"", "general", "knowledge"}
+            should_execute_query = (not low_confidence or executable_analytics) and final_domain not in {"", "general", "knowledge"}
             should_use_sql_assisted = (
                 should_execute_query
                 and has_real_data
@@ -373,7 +381,7 @@ class IntentArbitrationService:
             should_use_sql_assisted = False
             should_use_handler = False
 
-        if low_confidence:
+        if low_confidence and not executable_analytics:
             should_fallback = True
             should_execute_query = False
             should_use_sql_assisted = False
@@ -381,6 +389,9 @@ class IntentArbitrationService:
                 clarification = (
                     "Aclara si buscas analitica de datos, un cambio de conocimiento o una accion operativa."
                 )
+        elif executable_analytics:
+            should_fallback = False
+            clarification = ""
 
         if not has_real_data and final_intent == "analytics_query":
             should_use_sql_assisted = False
@@ -392,7 +403,7 @@ class IntentArbitrationService:
             "should_create_kpro": bool(should_create_kpro),
             "should_use_sql_assisted": bool(should_use_sql_assisted),
             "should_use_handler": bool(should_use_handler),
-            "should_fallback": bool(should_fallback or low_confidence),
+            "should_fallback": bool(should_fallback or (low_confidence and not executable_analytics)),
             "confidence": confidence,
             "reasoning_summary": reasoning_summary[:280],
             "required_clarification": clarification[:280],
@@ -630,6 +641,11 @@ class IntentArbitrationService:
             normalized_query=normalized_query,
             filters=filters,
         )
+        valid_group_dimensions = cls._resolve_valid_group_dimensions(
+            requested_group_by=list(llm_payload.get("group_by") or []),
+            fields=fields,
+            synonyms=synonyms,
+        )
         inferred_domain = normalizar_codigo_dominio(
             llm_payload.get("domain")
             or matched_concept.get("domain")
@@ -645,6 +661,15 @@ class IntentArbitrationService:
             confidence += 0.12
         if inferred_operation in {"list", "count", "group"}:
             confidence += 0.08
+        if valid_group_dimensions:
+            confidence += 0.15
+        executable_analytics = bool(
+            inferred_domain in {"empleados", "rrhh", "ausentismo", "attendance"}
+            and inferred_operation in {"count", "group", "summary"}
+            and valid_group_dimensions
+        )
+        if executable_analytics:
+            confidence += 0.12
         confidence = max(float(llm_payload.get("confidence") or 0.0), min(confidence, 0.97))
         explanation = ""
         if matched_concept:
@@ -661,6 +686,9 @@ class IntentArbitrationService:
             "operation": inferred_operation,
             "temporal_filter": temporal_filter,
             "confidence": round(float(confidence), 4),
+            "valid_group_dimensions": valid_group_dimensions,
+            "has_group_by": bool(valid_group_dimensions),
+            "executable_analytics": executable_analytics,
             "explanation": explanation[:280],
         }
 
@@ -856,6 +884,38 @@ class IntentArbitrationService:
             f"No hay suficiente certeza para arbitrar la intencion final (risk={risk_level}); "
             f"se requiere aclaracion sobre: {original_question[:120]}"
         )
+
+    @classmethod
+    def _resolve_valid_group_dimensions(
+        cls,
+        *,
+        requested_group_by: list[str],
+        fields: list[dict[str, Any]],
+        synonyms: list[dict[str, Any]],
+    ) -> list[str]:
+        requested = [cls._normalize_text(item) for item in list(requested_group_by or []) if cls._normalize_text(item)]
+        if not requested:
+            return []
+        direct_dimensions = {
+            cls._normalize_text(row.get("campo_logico") or row.get("logical_name") or row.get("column_name"))
+            for row in fields
+            if isinstance(row, dict)
+            and bool(row.get("supports_group_by") or row.get("es_group_by") or row.get("supports_dimension") or row.get("es_dimension"))
+        }
+        synonym_map: dict[str, str] = {}
+        for row in synonyms:
+            if not isinstance(row, dict):
+                continue
+            canonical = cls._normalize_text(row.get("termino"))
+            alias = cls._normalize_text(row.get("sinonimo"))
+            if canonical and alias:
+                synonym_map[alias] = canonical
+        valid: list[str] = []
+        for token in requested:
+            canonical = synonym_map.get(token, token)
+            if canonical in direct_dimensions and canonical not in valid:
+                valid.append(canonical)
+        return valid
 
     @staticmethod
     def _safe_json(raw: str) -> dict[str, Any]:

@@ -62,6 +62,10 @@ class SemanticNormalizationService:
         "labores": "tipo_labor",
         "tipo labor": "tipo_labor",
         "tipo de labor": "tipo_labor",
+        "tipo laboral": "tipo_labor",
+        "clase de labor": "tipo_labor",
+        "categoria laboral": "tipo_labor",
+        "personal por tipo": "tipo_labor",
     }
 
     _ATTENDANCE_REASON_SIGNALS = {

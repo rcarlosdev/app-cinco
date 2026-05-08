@@ -13,6 +13,7 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 )
 from apps.ia_dev.application.delegation.domain_registry import DomainRegistry
 from apps.ia_dev.application.semantic.column_semantic_resolver import ColumnSemanticResolver
+from apps.ia_dev.application.semantic.query_intent_resolver import QueryIntentResolver
 from apps.ia_dev.application.semantic.relation_semantic_resolver import RelationSemanticResolver
 from apps.ia_dev.application.semantic.rule_semantic_resolver import RuleSemanticResolver
 from apps.ia_dev.application.semantic.synonym_semantic_resolver import SynonymSemanticResolver
@@ -121,6 +122,10 @@ class SemanticBusinessResolver:
                     dictionary_context = self.dictionary_tool.get_domain_context("inventario_materiales", limit=20)
             except Exception:
                 dictionary_context = {}
+            dictionary_context = self._merge_remediation_dictionary_context(
+                normalized_domain=normalized_domain,
+                dictionary_context=dictionary_context,
+            )
 
         dictionary_fields = list(dictionary_context.get("fields") or [])
         dictionary_relations = list(dictionary_context.get("relations") or [])
@@ -128,6 +133,24 @@ class SemanticBusinessResolver:
         dictionary_rules = list(dictionary_context.get("rules") or [])
         dictionary_field_profiles = list(dictionary_context.get("field_profiles") or [])
         dictionary_tables = self._dictionary_tables_from_context(dictionary_context=dictionary_context)
+        dictionary_field_profiles.extend(
+            self._load_dictionary_table_field_profiles(
+                table_names=[
+                    str(item.get("table_fqn") or item.get("table_name") or "").strip()
+                    for item in dictionary_tables
+                    if isinstance(item, dict)
+                    and str(item.get("table_fqn") or item.get("table_name") or "").strip()
+                ]
+            )
+        )
+        dictionary_field_profiles = self._merge_dictionary_rows(
+            rows=dictionary_field_profiles,
+            key_builder=lambda row: (
+                str((row or {}).get("table_name") or "").strip().lower(),
+                str((row or {}).get("campo_logico") or (row or {}).get("logical_name") or "").strip().lower(),
+                str((row or {}).get("column_name") or "").strip().lower(),
+            ),
+        )
         dictionary_relationships = self._dictionary_relationships_from_relations(dictionary_relations=dictionary_relations)
         dictionary_fields, dictionary_field_profiles = self._extend_joined_table_semantics(
             normalized_domain=normalized_domain,
@@ -320,6 +343,110 @@ class SemanticBusinessResolver:
             "columnas_prioritarias": columnas_prioritarias,
         }
 
+    def _merge_remediation_dictionary_context(
+        self,
+        *,
+        normalized_domain: str,
+        dictionary_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if normalized_domain not in {"empleados", "rrhh"}:
+            return dict(dictionary_context or {})
+        manifest = self._normalize_remediation_manifest(
+            AIDictionaryRemediationService()._build_domain_manifest(domain_code="empleados")
+        )
+        merged = dict(dictionary_context or {})
+        for key, key_builder in (
+            (
+                "tables",
+                lambda row: (
+                    str((row or {}).get("schema_name") or "").strip().lower(),
+                    str((row or {}).get("table_name") or "").strip().lower(),
+                ),
+            ),
+            (
+                "fields",
+                lambda row: (
+                    str((row or {}).get("table_name") or "").strip().lower(),
+                    str((row or {}).get("campo_logico") or "").strip().lower(),
+                    str((row or {}).get("column_name") or "").strip().lower(),
+                ),
+            ),
+            (
+                "rules",
+                lambda row: str((row or {}).get("codigo") or (row or {}).get("nombre") or "").strip().lower(),
+            ),
+            (
+                "synonyms",
+                lambda row: (
+                    str((row or {}).get("termino") or "").strip().lower(),
+                    str((row or {}).get("sinonimo") or "").strip().lower(),
+                ),
+            ),
+        ):
+            merged[key] = self._merge_dictionary_rows(
+                rows=[*list(merged.get(key) or []), *list(manifest.get(key) or [])],
+                key_builder=key_builder,
+            )
+        return merged
+
+    def _load_dictionary_table_field_profiles(self, *, table_names: list[str]) -> list[dict[str, Any]]:
+        requested = [str(item or "").strip() for item in list(table_names or []) if str(item or "").strip()]
+        if not requested or not hasattr(self.dictionary_tool, "get_table_field_profiles"):
+            return []
+        try:
+            rows = self.dictionary_tool.get_table_field_profiles(requested, limit=80)
+        except Exception:
+            return []
+        if not isinstance(rows, list):
+            return []
+        return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
+
+    @staticmethod
+    def _merge_dictionary_rows(
+        *,
+        rows: list[dict[str, Any]],
+        key_builder,
+    ) -> list[dict[str, Any]]:
+        merged: dict[Any, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = key_builder(row)
+            if not key:
+                continue
+            merged[key] = {**dict(merged.get(key) or {}), **dict(row)}
+        return list(merged.values())
+
+    @staticmethod
+    def _normalize_remediation_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(manifest or {})
+        fields: list[dict[str, Any]] = []
+        for item in list(normalized.get("fields") or []):
+            if not isinstance(item, dict):
+                continue
+            capabilities = dict(item.get("capabilities") or {})
+            fields.append(
+                {
+                    **dict(item),
+                    "campo_logico": item.get("campo_logico") or item.get("logical_name"),
+                    "valores_permitidos": item.get("valores_permitidos") or item.get("allowed_values"),
+                    "es_filtro": item.get("es_filtro") if item.get("es_filtro") is not None else capabilities.get("supports_filter"),
+                    "es_group_by": item.get("es_group_by") if item.get("es_group_by") is not None else capabilities.get("supports_group_by"),
+                    "es_metrica": item.get("es_metrica") if item.get("es_metrica") is not None else capabilities.get("supports_metric"),
+                    "es_dimension": item.get("es_dimension") if item.get("es_dimension") is not None else capabilities.get("supports_dimension"),
+                }
+            )
+        normalized["fields"] = fields
+        synonyms: list[dict[str, Any]] = []
+        for item in list(normalized.get("synonyms") or []):
+            if isinstance(item, dict):
+                synonyms.append(dict(item))
+                continue
+            if isinstance(item, tuple) and len(item) == 2:
+                synonyms.append({"termino": item[0], "sinonimo": item[1]})
+        normalized["synonyms"] = synonyms
+        return normalized
+
     def _extend_joined_table_semantics(
         self,
         *,
@@ -333,9 +460,10 @@ class SemanticBusinessResolver:
             return list(dictionary_fields or []), list(dictionary_field_profiles or [])
 
         joined_table_names = {
-            str(item.get("table_name") or "").strip().lower()
+            str(item.get("table_fqn") or item.get("table_name") or "").strip().lower()
             for item in list(tables or [])
-            if isinstance(item, dict) and str(item.get("table_name") or "").strip()
+            if isinstance(item, dict)
+            and str(item.get("table_fqn") or item.get("table_name") or "").strip()
         }
         joined_table_names.update(
             {
@@ -410,12 +538,24 @@ class SemanticBusinessResolver:
             )
         operational_scope = dict(semantic_context.get("company_operational_scope") or {})
         synonym_index = dict(semantic_context.get("synonym_index") or {})
+        known_logical_names = {
+            str(item.get("logical_name") or item.get("column_name") or "").strip().lower()
+            for item in list(semantic_context.get("column_profiles") or [])
+            if isinstance(item, dict) and str(item.get("logical_name") or item.get("column_name") or "").strip()
+        }
 
         def canonicalize_term(value: str | None) -> str:
-            return self.synonym_resolver.canonicalize(
+            normalized_value = self._normalize_text(value)
+            if normalized_value in known_logical_names:
+                return normalized_value
+            canonical = self.synonym_resolver.canonicalize(
                 term=value,
                 synonym_index=synonym_index,
             )
+            normalized_canonical = self._normalize_text(canonical)
+            if normalized_value in known_logical_names and normalized_canonical not in known_logical_names:
+                return normalized_value
+            return canonical
 
         dictionary_rules = list((semantic_context.get("dictionary") or {}).get("rules") or [])
         rule_filters = self.rule_resolver.apply_rule_overrides(
@@ -499,6 +639,7 @@ class SemanticBusinessResolver:
                 normalized_filters=normalized_filters,
             )
             self._apply_executable_filter_aliases(normalized_filters=normalized_filters)
+            self._prune_missingness_literal_siblings(normalized_filters=normalized_filters)
         normalized_filters = EmployeeIdentifierService.prune_redundant_search_filter(normalized_filters)
         resolved_group_by, group_resolutions = self.column_resolver.resolve_group_by(
             requested_group_by=list(intent.group_by or []),
@@ -515,6 +656,21 @@ class SemanticBusinessResolver:
         )
         if inferred_group_by:
             resolved_group_by = list(dict.fromkeys([*list(resolved_group_by or []), *list(inferred_group_by or [])]))
+        if (
+            domain_code in {"empleados", "rrhh"}
+            and QueryIntentResolver._has_missingness_filter(filters=dict(normalized_filters or {}))
+            and not re.search(r"\bpor\s+[a-z0-9_]+\b", self._normalize_text(message))
+        ):
+            resolved_group_by = []
+        if domain_code in {"empleados", "rrhh"}:
+            resolved_group_by = self._prune_employee_group_by_filters(
+                resolved_group_by=resolved_group_by,
+                normalized_filters=normalized_filters,
+            )
+        self._drop_group_dimension_filters(
+            resolved_group_by=resolved_group_by,
+            normalized_filters=normalized_filters,
+        )
         if (
             domain_code in {"empleados", "rrhh"}
             and self._is_birthday_query(message=message, filters=normalized_filters)
@@ -587,6 +743,7 @@ class SemanticBusinessResolver:
         if (
             domain_code in {"empleados", "rrhh"}
             and not is_birthday_query
+            and not QueryIntentResolver._has_missingness_filter(filters=dict(normalized_filters or {}))
             and status_value
             and (
                 str(intent.operation or "").strip().lower() == "count"
@@ -598,7 +755,7 @@ class SemanticBusinessResolver:
             )
         ):
             resolved_operation = "aggregate" if resolved_group_by else "count"
-            resolved_template_id = "count_entities_by_status"
+            resolved_template_id = "aggregate_by_group_and_period" if resolved_group_by else "count_entities_by_status"
 
         resolution_payload = {
             "filters": [item.as_dict() for item in filter_resolutions],
@@ -1338,6 +1495,12 @@ class SemanticBusinessResolver:
         canonicalize_term,
     ) -> list[str]:
         normalized_message = self._normalize_text(message)
+        if (
+            domain_code in {"empleados", "rrhh"}
+            and QueryIntentResolver._has_missingness_filter(filters=dict(intent.filters or {}))
+            and not re.search(r"\bpor\s+[a-z0-9_]+\b", normalized_message)
+        ):
+            return []
         entity_hint = self._normalize_text(getattr(intent, "entity_type", "") or "")
         candidate_dimensions = self._candidate_group_dimensions_from_context(
             domain_code=domain_code,
@@ -1346,19 +1509,12 @@ class SemanticBusinessResolver:
         if not candidate_dimensions:
             return []
 
-        variants = {
-            "supervisor": ("supervisor", "supervisores", "jefe", "jefes", "lider", "lideres"),
-            "area": ("area", "areas"),
-            "cargo": ("cargo", "cargos"),
-            "carpeta": ("carpeta", "carpetas"),
-            "birth_month": ("mes", "meses", "mes de cumpleanos", "mes de nacimiento"),
-            "justificacion": ("justificacion", "motivo", "causa"),
-            "estado_justificacion": ("estado", "estado de justificacion", "tipo de ausentismo", "tipo de ausencia"),
-            "centro_costo": ("centro costo", "centro de costo", "centros de costo", "cc"),
-        }
+        semantic_variants = QueryIntentResolver._semantic_group_dimension_variants(
+            semantic_context=semantic_context,
+        )
         resolved: list[str] = []
         for canonical in candidate_dimensions:
-            tokens = variants.get(canonical, (canonical,))
+            tokens = semantic_variants.get(canonical, (canonical, canonical.replace("_", " ")))
             canonical_terms = {
                 canonical,
                 self._normalize_text(canonicalize_term(canonical) or canonical),
@@ -1375,6 +1531,10 @@ class SemanticBusinessResolver:
                 if canonical == "birth_month" and not self._is_birthday_query(message=message, filters=dict(intent.filters or {})):
                     continue
                 resolved.append(canonical)
+        if any(item in {"estado", "estado_empleado"} for item in resolved):
+            explicit_status_group = bool(re.search(r"\bpor\s+(estado|estatus)\b", normalized_message))
+            if not explicit_status_group:
+                resolved = [item for item in resolved if item not in {"estado", "estado_empleado"}]
         return list(dict.fromkeys(resolved))
 
     def _candidate_group_dimensions_from_context(
@@ -1406,11 +1566,11 @@ class SemanticBusinessResolver:
 
         default_dimensions: list[str] = []
         if normalized_domain in {"empleados", "rrhh"}:
-            default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede", "centro_costo", "birth_month"])
+            default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "movil", "sede", "centro_costo", "birth_month"])
         if normalized_domain in {"ausentismo", "attendance"}:
             default_dimensions.extend(["justificacion", "estado_justificacion"])
             if has_personal_join:
-                default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "sede", "centro_costo"])
+                default_dimensions.extend(["supervisor", "area", "cargo", "carpeta", "tipo_labor", "movil", "sede", "centro_costo"])
 
         return list(dict.fromkeys([item for item in [*dimensions, *default_dimensions] if item]))
 
@@ -1480,6 +1640,41 @@ class SemanticBusinessResolver:
                 }
             )
         return results
+
+    @staticmethod
+    def _prune_employee_group_by_filters(
+        *,
+        resolved_group_by: list[str],
+        normalized_filters: dict[str, Any],
+    ) -> list[str]:
+        group_values = [str(item or "").strip().lower() for item in list(resolved_group_by or []) if str(item or "").strip()]
+        if len(group_values) <= 1:
+            return group_values
+        filter_keys = {
+            str(key or "").strip().lower()
+            for key, value in dict(normalized_filters or {}).items()
+            if str(key or "").strip() and str(value or "").strip()
+        }
+        pruned = [item for item in group_values if item not in filter_keys]
+        return pruned or group_values
+
+    @staticmethod
+    def _drop_group_dimension_filters(
+        *,
+        resolved_group_by: list[str],
+        normalized_filters: dict[str, Any],
+    ) -> None:
+        for key in [str(item or "").strip().lower() for item in list(resolved_group_by or []) if str(item or "").strip()]:
+            normalized_filters.pop(key, None)
+
+    @staticmethod
+    def _prune_missingness_literal_siblings(*, normalized_filters: dict[str, Any]) -> None:
+        if not QueryIntentResolver._has_missingness_filter(filters=dict(normalized_filters or {})):
+            return
+        if isinstance(normalized_filters.get("documento_identidad"), dict):
+            for key in ("documento_identidad_lado_a", "documento_identidad_lado_b"):
+                if key in normalized_filters and not isinstance(normalized_filters.get(key), dict):
+                    normalized_filters.pop(key, None)
 
     @classmethod
     def _normalize_period(cls, *, message: str, intent: StructuredQueryIntent) -> dict[str, Any]:
@@ -1796,6 +1991,8 @@ class SemanticBusinessResolver:
     @classmethod
     def _resolve_attendance_reason_from_message(cls, *, message: str) -> str:
         normalized = cls._normalize_text(message)
+        if re.search(r"\bpermiso\s+de\s+trabajo\b", normalized):
+            return ""
         reason_signals = {
             "vacaciones": "VACACIONES",
             "vacacion": "VACACIONES",
@@ -1979,10 +2176,19 @@ class SemanticBusinessResolver:
             ("mes_cumpleanos", "fnacimiento_month"),
         )
         for source, target in alias_pairs:
-            value = str(normalized_filters.get(source) or "").strip()
-            if value and not str(normalized_filters.get(target) or "").strip():
-                normalized_filters[target] = value
-            if value and str(normalized_filters.get(target) or "").strip():
+            raw_value = normalized_filters.get(source)
+            has_source = (
+                isinstance(raw_value, dict)
+                or bool(str(raw_value or "").strip())
+            )
+            target_value = normalized_filters.get(target)
+            has_target = (
+                isinstance(target_value, dict)
+                or bool(str(target_value or "").strip())
+            )
+            if has_source and not has_target:
+                normalized_filters[target] = raw_value
+            if has_source and target in normalized_filters:
                 normalized_filters.pop(source, None)
 
     @classmethod
@@ -2069,11 +2275,31 @@ class SemanticBusinessResolver:
         normalized_message = self._normalize_text(message)
         if not normalized_message:
             return resolved
+        dimension_variants = QueryIntentResolver._semantic_group_dimension_variants(
+            semantic_context=semantic_context,
+        )
+        protected_dimension_tokens = {
+            token
+            for tokens in dimension_variants.values()
+            for token in tokens
+            if token and re.search(rf"\b{re.escape(token)}\b", normalized_message)
+        }
+        synonym_index = {
+            self._normalize_text(key): self._normalize_text(value)
+            for key, value in dict(semantic_context.get("synonym_index") or {}).items()
+            if str(key or "").strip() and str(value or "").strip()
+        }
+        known_logical_names = {
+            self._normalize_text(item.get("logical_name") or item.get("column_name"))
+            for item in list(semantic_context.get("column_profiles") or [])
+            if isinstance(item, dict) and str(item.get("logical_name") or item.get("column_name") or "").strip()
+        }
 
         for profile in list(semantic_context.get("column_profiles") or []):
             if not isinstance(profile, dict):
                 continue
             logical_name = str(profile.get("logical_name") or profile.get("column_name") or "").strip().lower()
+            column_name = str(profile.get("column_name") or "").strip().lower()
             if not logical_name or logical_name in {"estado", "estado_empleado"}:
                 continue
             if str((normalized_filters or {}).get(logical_name) or "").strip():
@@ -2087,13 +2313,42 @@ class SemanticBusinessResolver:
             ]
             if not allowed_values:
                 continue
+            logical_markers = {
+                self._normalize_text(logical_name),
+                self._normalize_text(column_name),
+                self._normalize_text(logical_name.replace("_", " ")),
+                self._normalize_text(column_name.replace("_", " ")) if column_name else "",
+            }
+            column_explicitly_named = any(
+                marker and re.search(rf"\b{re.escape(marker)}\b", normalized_message)
+                for marker in logical_markers
+            )
             for candidate in allowed_values:
                 normalized_candidate = self._normalize_text(candidate)
                 if not normalized_candidate:
                     continue
-                if re.search(rf"\b{re.escape(normalized_candidate)}\b", normalized_message):
-                    resolved[logical_name] = candidate
-                    break
+                if normalized_candidate in {"si", "no"} and not column_explicitly_named:
+                    continue
+                candidate_aliases = {
+                    normalized_candidate,
+                    *{
+                        alias
+                        for alias, canonical in synonym_index.items()
+                        if canonical == normalized_candidate
+                        and normalized_candidate not in known_logical_names
+                    },
+                }
+                matched_aliases = [
+                    alias
+                    for alias in candidate_aliases
+                    if alias and re.search(rf"\b{re.escape(alias)}\b", normalized_message)
+                ]
+                if not matched_aliases:
+                    continue
+                if all(alias in protected_dimension_tokens for alias in matched_aliases):
+                    continue
+                resolved[logical_name] = candidate
+                break
         return resolved
 
     def _find_status_profile(self, *, semantic_context: dict[str, Any]) -> dict[str, Any]:

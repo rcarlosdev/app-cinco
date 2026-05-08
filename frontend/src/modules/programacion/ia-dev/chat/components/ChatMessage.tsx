@@ -10,9 +10,15 @@ type ChatMessageProps = {
   message: ChatMessageModel;
   onActionClick: (action: IADevAction) => void;
   isBusy: boolean;
+  variant?: "full" | "clean";
 };
 
-const ChatMessage = ({ message, onActionClick, isBusy }: ChatMessageProps) => {
+const ChatMessage = ({
+  message,
+  onActionClick,
+  isBusy,
+  variant = "full",
+}: ChatMessageProps) => {
   if (message.role === "user") {
     return <UserMessage message={message} />;
   }
@@ -22,6 +28,7 @@ const ChatMessage = ({ message, onActionClick, isBusy }: ChatMessageProps) => {
       message={message}
       onActionClick={onActionClick}
       isBusy={isBusy}
+      variant={variant}
     />
   );
 };

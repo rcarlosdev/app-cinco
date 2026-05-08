@@ -12,6 +12,7 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 )
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.semantic.query_execution_planner import QueryExecutionPlanner
+from apps.ia_dev.application.semantic.query_intent_resolver import QueryIntentResolver
 from apps.ia_dev.application.semantic.column_semantic_resolver import (
     ColumnSemanticResolver,
 )
@@ -260,11 +261,13 @@ class _FakeDictionaryTool:
     @staticmethod
     def get_table_field_profiles(table_names, *, limit: int = 80) -> list[dict]:
         requested = {str(item or "").strip().lower() for item in list(table_names or [])}
-        if "cinco_base_de_personal" not in requested:
+        if not ({"cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"} & requested):
             return []
         return [
             {
+                "schema_name": "bd_c3nc4s1s",
                 "table_name": "cinco_base_de_personal",
+                "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
                 "campo_id": 999,
                 "campo_logico": "sede",
                 "column_name": "zona_nodo",
@@ -286,7 +289,9 @@ class _FakeDictionaryTool:
                 "priority": 90,
             },
             {
+                "schema_name": "bd_c3nc4s1s",
                 "table_name": "cinco_base_de_personal",
+                "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
                 "campo_id": 1000,
                 "campo_logico": "area",
                 "column_name": "area",
@@ -308,7 +313,9 @@ class _FakeDictionaryTool:
                 "priority": 90,
             },
             {
+                "schema_name": "bd_c3nc4s1s",
                 "table_name": "cinco_base_de_personal",
+                "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
                 "campo_id": 1001,
                 "campo_logico": "cargo",
                 "column_name": "cargo",
@@ -330,7 +337,9 @@ class _FakeDictionaryTool:
                 "priority": 90,
             },
             {
+                "schema_name": "bd_c3nc4s1s",
                 "table_name": "cinco_base_de_personal",
+                "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
                 "campo_id": 1002,
                 "campo_logico": "supervisor",
                 "column_name": "supervisor",
@@ -352,7 +361,9 @@ class _FakeDictionaryTool:
                 "priority": 90,
             },
             {
+                "schema_name": "bd_c3nc4s1s",
                 "table_name": "cinco_base_de_personal",
+                "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
                 "campo_id": 1003,
                 "campo_logico": "carpeta",
                 "column_name": "carpeta",
@@ -374,10 +385,12 @@ class _FakeDictionaryTool:
                 "priority": 90,
             },
             {
+                "schema_name": "bd_c3nc4s1s",
                 "table_name": "cinco_base_de_personal",
+                "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
                 "campo_id": 1004,
                 "campo_logico": "tipo_labor",
-                "column_name": "tipo",
+                "column_name": "tipo_labor",
                 "definicion_negocio": "Tipo de labor",
                 "es_filtro": True,
                 "es_group_by": True,
@@ -412,6 +425,21 @@ class QuerySemanticResolversTests(SimpleTestCase):
             "bd_c3nc4s1s",
         )
 
+    def test_build_semantic_context_uses_employee_table_fqn_for_joined_profiles(self):
+        resolver = SemanticBusinessResolver()
+        context = resolver.build_semantic_context(domain_code="empleados", include_dictionary=True)
+        employee_profiles = [
+            item for item in list(context.get("column_profiles") or [])
+            if str(item.get("logical_name") or item.get("campo_logico") or "").strip().lower() == "tipo_labor"
+        ]
+        self.assertTrue(employee_profiles)
+        self.assertTrue(
+            all(
+                str(item.get("column_name") or "").strip().lower() == "tipo_labor"
+                for item in employee_profiles
+            )
+        )
+
     def test_synonym_semantic_resolver_canonicalize(self):
         resolver = SynonymSemanticResolver()
         index = resolver.build_index(
@@ -429,6 +457,15 @@ class QuerySemanticResolversTests(SimpleTestCase):
             runtime_columns=[],
         )
         self.assertEqual(resolver.canonicalize(term="labor", synonym_index=index), "tipo_labor")
+
+    def test_synonym_semantic_resolver_maps_categoria_laboral_to_tipo_labor(self):
+        resolver = SynonymSemanticResolver()
+        index = resolver.build_index(
+            dictionary_synonyms=[],
+            dictionary_fields=[],
+            runtime_columns=[],
+        )
+        self.assertEqual(resolver.canonicalize(term="categoria laboral", synonym_index=index), "tipo_labor")
 
     def test_column_semantic_resolver_normalizes_status_filter(self):
         resolver = ColumnSemanticResolver()
@@ -512,6 +549,32 @@ class QuerySemanticResolversTests(SimpleTestCase):
         self.assertEqual(str(filters.get("cargo") or ""), "jefe departamento ti")
         self.assertNotIn("supervisor", filters)
 
+    def test_column_semantic_resolver_ignores_dangling_conjunction_after_schema_term(self):
+        resolver = ColumnSemanticResolver()
+        profiles = resolver.build_column_profiles(
+            runtime_columns=[],
+            dictionary_fields=[
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "campo_logico": "area",
+                    "column_name": "area",
+                    "es_filtro": True,
+                },
+                {
+                    "table_name": "cinco_base_de_personal",
+                    "campo_logico": "carpeta",
+                    "column_name": "carpeta",
+                    "es_filtro": True,
+                    "es_group_by": True,
+                },
+            ],
+        )
+        filters, _ = resolver.resolve_schema_value_filters(
+            message="Personal activo por area y carpeta",
+            semantic_context={"column_profiles": profiles},
+        )
+        self.assertNotIn("area", filters)
+
     def test_rule_semantic_resolver_extracts_identifier(self):
         resolver = RuleSemanticResolver()
         value = resolver.infer_identifier_from_message(
@@ -572,6 +635,69 @@ class QuerySemanticResolversTests(SimpleTestCase):
         self.assertIn("supervisor", list(resolved.intent.group_by or []))
         relation_payload = dict((resolved.semantic_context or {}).get("resolved_semantic") or {})
         self.assertTrue(list(relation_payload.get("relations") or []))
+
+    def test_semantic_business_resolver_keeps_supervisor_as_group_dimension_and_operativo_as_filter(self):
+        fake_domain = _FakeDomain(
+            raw_context={
+                "tables": [
+                    {
+                        "schema_name": "bd_c3nc4s1s",
+                        "table_name": "cinco_base_de_personal",
+                        "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
+                        "rol": "dimension",
+                        "es_principal": True,
+                    }
+                ],
+                "columns": [
+                    {"table_name": "cinco_base_de_personal", "column_name": "estado", "nombre_columna_logico": "estado"},
+                    {"table_name": "cinco_base_de_personal", "column_name": "tipo_labor", "nombre_columna_logico": "tipo_labor"},
+                    {"table_name": "cinco_base_de_personal", "column_name": "supervisor", "nombre_columna_logico": "supervisor"},
+                ],
+                "relationships": [],
+                "flags": {"sql_asistido_permitido": False},
+            }
+        )
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(fake_domain),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+        intent = StructuredQueryIntent(
+            raw_query="Que supervisores tienen mas personal operativo asignado",
+            domain_code="empleados",
+            operation="aggregate",
+            template_id="aggregate_by_group_and_period",
+            filters={"tipo_labor": "OPERATIVO", "subtipo_personal_asignado": "OPERATIVO"},
+            group_by=["supervisor"],
+            metrics=["count"],
+            confidence=0.92,
+        )
+
+        resolved = resolver.resolve_query(
+            message=intent.raw_query,
+            intent=intent,
+            base_classification={"domain": "general"},
+        )
+
+        self.assertEqual(list(resolved.intent.group_by or []), ["supervisor"])
+        self.assertEqual(str(resolved.normalized_filters.get("tipo_labor") or ""), "OPERATIVO")
+        self.assertNotIn("supervisor", list(resolved.normalized_filters.keys()))
+
+    def test_query_intent_dimension_variants_do_not_treat_tecnicos_as_tipo_labor_group_alias(self):
+        variants = QueryIntentResolver._semantic_group_dimension_variants(
+            semantic_context={
+                "query_hints": {"candidate_group_dimensions": ["tipo_labor", "supervisor"]},
+                "synonym_index": {
+                    "tecnicos": "operativo",
+                    "operativos": "operativo",
+                    "jefes directos": "supervisor",
+                    "tipo de labor": "tipo_labor",
+                },
+                "aliases": {"tipo_labor": "tipo_labor", "supervisor": "supervisor"},
+            }
+        )
+
+        self.assertIn("tipo de labor", list(variants.get("tipo_labor") or []))
+        self.assertNotIn("tecnicos", list(variants.get("tipo_labor") or []))
 
     def test_semantic_business_resolver_uses_dictionary_as_only_structural_source(self):
         fake_domain = _FakeDomain(
@@ -644,9 +770,34 @@ class QuerySemanticResolversTests(SimpleTestCase):
             (str(item.get("type") or ""), str(item.get("value") or ""))
             for item in list(context.get("missing_dictionary_metadata") or [])
         }
-        self.assertIn(("dictionary_column_missing", "sede"), missing)
-        self.assertIn(("dictionary_group_by_metadata_missing", "sede"), missing)
-        self.assertNotIn("zona_nodo", list(context.get("allowed_columns") or []))
+        self.assertFalse(missing)
+        self.assertIn("sede", list(context.get("allowed_columns") or []))
+
+    def test_semantic_business_resolver_supplements_employee_dictionary_with_remediation_manifest(self):
+        fake_domain = _FakeDomain(
+            raw_context={
+                "tables": [
+                    {
+                        "schema_name": "bd_c3nc4s1s",
+                        "table_name": "cinco_base_de_personal",
+                        "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal",
+                        "rol": "dimension",
+                        "es_principal": True,
+                    }
+                ],
+            }
+        )
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(fake_domain),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+
+        context = resolver.build_semantic_context(domain_code="empleados", include_dictionary=True)
+
+        self.assertEqual(str((context.get("synonym_index") or {}).get("cuadrillas") or ""), "movil")
+        self.assertEqual(str((context.get("synonym_index") or {}).get("jefes directos") or ""), "supervisor")
+        self.assertIn("movil", list(context.get("allowed_columns") or []))
+        self.assertIn("sede", list(context.get("allowed_columns") or []))
 
     def test_query_execution_planner_treats_logical_cedula_as_employee_detail_identifier(self):
         planner = QueryExecutionPlanner()
@@ -1211,6 +1362,49 @@ class QuerySemanticResolversTests(SimpleTestCase):
         self.assertEqual(str(resolved.normalized_filters.get("estado_empleado") or ""), "ACTIVO")
         self.assertIn("area", list(resolved.intent.group_by or []))
 
+    def test_semantic_business_resolver_upgrades_grouped_employee_population_count_to_aggregate_template(self):
+        fake_domain = _FakeDomain(
+            raw_context={
+                "tables": [
+                    {
+                        "schema_name": "cincosas_cincosas",
+                        "table_name": "cinco_base_de_personal",
+                        "table_fqn": "cincosas_cincosas.cinco_base_de_personal",
+                        "rol": "dimension",
+                        "es_principal": True,
+                    }
+                ],
+                "columns": [
+                    {"table_name": "cinco_base_de_personal", "column_name": "estado", "nombre_columna_logico": "estado_empleado"},
+                    {"table_name": "cinco_base_de_personal", "column_name": "tipo_labor", "nombre_columna_logico": "tipo_labor"},
+                ],
+                "relationships": [],
+                "flags": {"sql_asistido_permitido": False},
+            }
+        )
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(fake_domain),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+        intent = StructuredQueryIntent(
+            raw_query="Cuantos empleados activos hay y como se distribuyen por tipo de labor",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={"estado": "ACTIVO"},
+            group_by=["tipo_labor"],
+            metrics=["count"],
+            confidence=0.9,
+        )
+        resolved = resolver.resolve_query(
+            message=intent.raw_query,
+            intent=intent,
+            base_classification={"domain": "empleados"},
+        )
+        self.assertEqual(str(resolved.intent.operation or ""), "aggregate")
+        self.assertEqual(str(resolved.intent.template_id or ""), "aggregate_by_group_and_period")
+        self.assertIn("tipo_labor", list(resolved.intent.group_by or []))
+
     def test_semantic_business_resolver_treats_personal_activo_hoy_as_current_population_count(self):
         fake_domain = _FakeDomain(
             raw_context={
@@ -1297,6 +1491,37 @@ class QuerySemanticResolversTests(SimpleTestCase):
             base_classification={"domain": "empleados"},
         )
         self.assertIn("cargo", list(resolved.intent.group_by or []))
+
+    def test_semantic_business_resolver_keeps_missing_supervisor_as_filter_without_inferred_group_by(self):
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(_FakeDomain(raw_context={"tables": [], "columns": [], "relationships": [], "flags": {}})),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+        intent = StructuredQueryIntent(
+            raw_query="Que empleados activos no tienen supervisor registrado",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={
+                "supervisor": {"operator": "is_missing", "match_mode": "null_or_empty"},
+                "estado": "ACTIVO",
+            },
+            group_by=[],
+            metrics=["count"],
+            confidence=0.9,
+        )
+        resolved = resolver.resolve_query(
+            message=intent.raw_query,
+            intent=intent,
+            base_classification={"domain": "empleados"},
+        )
+        self.assertEqual(str(resolved.intent.operation or ""), "detail")
+        self.assertEqual(list(resolved.intent.group_by or []), [])
+        self.assertEqual(
+            dict(resolved.normalized_filters or {}).get("supervisor"),
+            {"operator": "is_missing", "match_mode": "null_or_empty"},
+        )
+        self.assertNotIn("conduce", dict(resolved.normalized_filters or {}))
 
     def test_relation_semantic_resolver_builds_relation_profiles(self):
         resolver = RelationSemanticResolver()

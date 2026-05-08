@@ -232,13 +232,30 @@ class LegacyResponseAssembler:
     def _inject_business_response_summary(self, *, response: dict[str, Any]) -> None:
         data = dict(response.get("data") or {})
         existing_business_response = dict(data.get("business_response") or {})
+        table = dict(data.get("table") or {})
+        result_set = dict((dict(data.get("meta") or {}).get("result_set") or {}))
+        if not result_set:
+            result_set = {
+                "total_records": int(table.get("total_records") or table.get("rowcount") or 0),
+                "returned_records": int(table.get("returned_records") or table.get("rowcount") or 0),
+                "truncated": bool(table.get("truncated")),
+                "limit": int(table.get("limit") or 0),
+            }
         if all(
             str(existing_business_response.get(key) or "").strip()
             for key in ("dato", "hallazgo", "riesgo", "recomendacion", "siguiente_accion")
         ):
+            if bool(result_set.get("truncated")):
+                existing_business_response["hallazgo"] = self._append_truncation_notice(
+                    text=str(existing_business_response.get("hallazgo") or ""),
+                    result_set=result_set,
+                )
+                existing_business_response["siguiente_accion"] = (
+                    "Filtra por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+                )
+                data["business_response"] = existing_business_response
             response["data"] = data
             return
-        table = dict(data.get("table") or {})
         findings = [item for item in list(data.get("findings") or []) if isinstance(item, dict)]
         insights = [str(item or "").strip() for item in list(data.get("insights") or []) if str(item or "").strip()]
         actions = [item for item in list(response.get("actions") or []) if isinstance(item, dict)]
@@ -247,6 +264,16 @@ class LegacyResponseAssembler:
 
         dato = ""
         if kpis:
+            if {
+                "certificados_vencidos",
+                "certificados_proximos_vencer",
+            }.issubset(set(kpis.keys())):
+                vencidos = kpis.get("certificados_vencidos")
+                proximos = kpis.get("certificados_proximos_vencer")
+                dato = (
+                    f"{vencidos} certificados de alturas vencidos y "
+                    f"{proximos} proximos a vencer."
+                )
             if "total_empleados" in kpis:
                 first_row = (list(table.get("rows") or []) or [{}])[0]
                 status_value = str((first_row or {}).get("estado") or "").strip().upper()
@@ -267,27 +294,55 @@ class LegacyResponseAssembler:
                 if first_key:
                     dato = f"{first_key}: {kpis.get(first_key)}"
         elif int(table.get("rowcount") or 0) > 0:
-            dato = f"{int(table.get('rowcount') or 0)} filas disponibles."
+            total_records = int(result_set.get("total_records") or table.get("rowcount") or 0)
+            returned_records = int(result_set.get("returned_records") or table.get("rowcount") or 0)
+            if bool(result_set.get("truncated")):
+                dato = f"{total_records} registros encontrados; se muestran {returned_records}."
+            else:
+                dato = f"{returned_records} filas disponibles."
 
         hallazgo = ""
+        if {
+            "certificados_vencidos",
+            "certificados_proximos_vencer",
+        }.issubset(set(kpis.keys())):
+            hallazgo = "Hay personal operativo activo con riesgo documental si existen certificados vencidos o proximos a vencer."
         if findings:
             hallazgo = str(findings[0].get("detail") or findings[0].get("title") or "").strip()
         if not hallazgo and insights:
             hallazgo = insights[0]
         if not hallazgo and dato:
             hallazgo = "La consulta se resolvio como un indicador empresarial listo para seguimiento."
+        if bool(result_set.get("truncated")):
+            hallazgo = self._append_truncation_notice(text=hallazgo, result_set=result_set)
 
         recomendacion = ""
         if len(insights) > 1:
             recomendacion = insights[1]
         if not recomendacion and actions:
             recomendacion = str(actions[0].get("label") or "").strip()
+        if (
+            not recomendacion
+            and {"certificados_vencidos", "certificados_proximos_vencer"}.issubset(set(kpis.keys()))
+        ):
+            recomendacion = "Priorizar renovacion de vencidos y programar renovacion de proximos a vencer."
         if not recomendacion and hallazgo:
             recomendacion = "Amplia la consulta con un desglose por dimension o solicita el detalle para accionar."
+        if bool(result_set.get("truncated")):
+            recomendacion = (
+                f"{recomendacion} Segmenta por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+            ).strip()
 
         siguiente_accion = ""
         if actions:
             siguiente_accion = str(actions[0].get("label") or "").strip()
+        if (
+            not siguiente_accion
+            and {"certificados_vencidos", "certificados_proximos_vencer"}.issubset(set(kpis.keys()))
+        ):
+            siguiente_accion = "Muestrame el detalle por empleado, area, supervisor o movil."
+        if bool(result_set.get("truncated")):
+            siguiente_accion = "Filtra por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
         interpretacion = self._infer_business_interpretation(
             dato=dato,
             hallazgo=hallazgo,
@@ -312,6 +367,22 @@ class LegacyResponseAssembler:
         response["data"] = data
 
     @staticmethod
+    def _append_truncation_notice(*, text: str, result_set: dict[str, Any]) -> str:
+        total_records = int(result_set.get("total_records") or 0)
+        returned_records = int(result_set.get("returned_records") or 0)
+        limit = int(result_set.get("limit") or 0)
+        notice = (
+            f"El detalle esta truncado: se muestran {returned_records} de {total_records} registros"
+            + (f" por limite operativo de {limit}." if limit else ".")
+        )
+        base = str(text or "").strip()
+        if not base:
+            return notice
+        if "truncad" in base.lower() or "se muestran" in base.lower():
+            return base
+        return f"{base} {notice}"
+
+    @staticmethod
     def _infer_business_interpretation(
         *,
         dato: str,
@@ -322,6 +393,8 @@ class LegacyResponseAssembler:
         text = " ".join(part for part in (dato, hallazgo, reply) if part).lower()
         if not text and rowcount <= 0:
             return "No se generaron datos accionables para interpretar."
+        if "certificados de alturas vencidos" in text or "proximos a vencer" in text:
+            return "La vigencia del certificado de alturas impacta directamente la habilitacion operativa del personal expuesto a trabajos en altura."
         if "actualmente hay 0" in text or "no encontre" in text or "no encontr" in text:
             return "El resultado sugiere filtros restrictivos o una ausencia puntual de datos para la consulta."
         if "empleados activos" in text:
@@ -341,6 +414,8 @@ class LegacyResponseAssembler:
         rowcount: int,
     ) -> str:
         text = " ".join(part for part in (dato, hallazgo, reply) if part).lower()
+        if "certificados de alturas vencidos" in text or "proximos a vencer" in text:
+            return "Un tecnico con certificado vencido no deberia ser asignado a trabajos en alturas."
         if "actualmente hay 0" in text or "no encontre" in text or "no encontr" in text:
             return "Puede existir riesgo de interpretacion si los filtros no reflejan la operacion esperada."
         if "rotacion" in text or "egresos" in text or "inactivos" in text:
@@ -349,7 +424,9 @@ class LegacyResponseAssembler:
             return "Riesgo bajo; el siguiente paso es validar distribucion por area, cargo o sede."
         if rowcount > 20:
             return "El volumen de resultados puede requerir priorizacion para una lectura ejecutiva."
-        return ""
+        if rowcount > 0:
+            return "Conviene validar el segmento con mayor concentracion antes de tomar decisiones operativas."
+        return "No se identifico un riesgo operativo concluyente con la informacion disponible."
 
     @staticmethod
     def _coerce_numeric_series(series_value: Any) -> list[float]:

@@ -376,12 +376,13 @@ class DictionaryToolService:
                 ORDER BY prioridad, codigo
                 LIMIT %s
                 """,
-                [dominio_id, safe_limit],
+                [dominio_id, safe_limit * 20],
             )
             rule_rows = cursor.fetchall()
 
             field_rows: list[tuple[Any, ...]] = []
             relation_rows: list[tuple[Any, ...]] = []
+            related_table_rows: list[tuple[Any, ...]] = []
             if table_ids:
                 in_clause = ", ".join(["%s"] * len(table_ids))
                 join_profile = ""
@@ -468,6 +469,31 @@ class DictionaryToolService:
                     [*table_ids, *table_ids, safe_limit],
                 )
                 relation_rows = cursor.fetchall()
+                if domain_key in {"ausentismo", "attendance"}:
+                    cursor.execute(
+                        f"""
+                        SELECT DISTINCT t.id, t.schema_name, t.table_name, t.alias_negocio, t.clave_negocio, t.descripcion
+                        FROM {schema}.dd_relaciones AS r
+                        JOIN {schema}.dd_tablas AS t
+                          ON t.id = CASE
+                            WHEN r.tabla_origen_id IN ({in_clause}) THEN r.tabla_destino_id
+                            ELSE r.tabla_origen_id
+                          END
+                        WHERE {relations_active_filter}
+                          AND (
+                            r.tabla_origen_id IN ({in_clause})
+                            OR r.tabla_destino_id IN ({in_clause})
+                          )
+                        ORDER BY t.table_name, t.id
+                        LIMIT %s
+                        """,
+                        [*table_ids, *table_ids, *table_ids, safe_limit],
+                    )
+                    related_table_rows = [
+                        row
+                        for row in cursor.fetchall()
+                        if int(row[0] or 0) not in table_ids
+                    ]
 
             synonyms_active_filter = self._active_filter(alias="s", available_columns=synonyms_columns)
             cursor.execute(
@@ -494,6 +520,19 @@ class DictionaryToolService:
             }
             for row in table_rows
         ]
+        tables.extend(
+            [
+                {
+                    "id": int(row[0]),
+                    "schema_name": str(row[1] or ""),
+                    "table_name": str(row[2] or ""),
+                    "alias_negocio": str(row[3] or ""),
+                    "clave_negocio": str(row[4] or ""),
+                    "descripcion": str(row[5] or ""),
+                }
+                for row in related_table_rows
+            ]
+        )
         fields: list[dict[str, Any]] = []
         field_profiles: list[dict[str, Any]] = []
         for row in field_rows:
@@ -617,9 +656,19 @@ class DictionaryToolService:
             for item in list(table_names or [])
             if str(item or "").strip()
         ]
-        requested = list(dict.fromkeys([item for item in requested if _SAFE_IDENTIFIER_RE.match(item)]))
+        requested = list(
+            dict.fromkeys(
+                [
+                    item
+                    for item in requested
+                    if all(_SAFE_IDENTIFIER_RE.match(part) for part in item.split("."))
+                ]
+            )
+        )
         if not requested:
             return []
+        requested_fqns = {item for item in requested if "." in item}
+        requested_table_names = {item.split(".")[-1] for item in requested}
 
         safe_limit = max(1, min(int(limit), 500))
         with connections[self.db_alias].cursor() as cursor:
@@ -654,7 +703,7 @@ class DictionaryToolService:
                         return f"p.{item} AS {alias_name}"
                 return f"NULL AS {alias_name}"
 
-            in_clause = ", ".join(["%s"] * len(requested))
+            in_clause = ", ".join(["%s"] * len(requested_table_names))
             cursor.execute(
                 f"""
                 SELECT
@@ -692,7 +741,7 @@ class DictionaryToolService:
                 ORDER BY t.table_name, c.id
                 LIMIT %s
                 """,
-                [*requested, safe_limit],
+                [*sorted(requested_table_names), safe_limit],
             )
             rows = cursor.fetchall()
 
@@ -707,6 +756,13 @@ class DictionaryToolService:
             logical_name = str(row[3] or "")
             column_name = str(row[4] or "")
             table_fqn = f"{schema_name}.{table_name}" if schema_name and table_name else table_name
+            normalized_table_fqn = table_fqn.strip().lower()
+            normalized_table_name = table_name.strip().lower()
+            if requested_fqns:
+                if normalized_table_fqn not in requested_fqns:
+                    continue
+            elif normalized_table_name not in requested_table_names:
+                continue
             semantic_role = self._semantic_role_for_field(
                 logical_name=logical_name,
                 column_name=column_name,

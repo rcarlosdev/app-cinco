@@ -3,6 +3,10 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Table } from "lucide-react";
 import type { NormalizedTable } from "@/modules/programacion/ia-dev/chat/types";
+import {
+  getSemanticTone,
+  toneCellClass,
+} from "@/modules/programacion/ia-dev/chat/utils/semanticTone";
 
 type DataTableRendererProps = {
   table: NormalizedTable | null;
@@ -65,14 +69,22 @@ const DataTableRenderer = ({ table }: DataTableRendererProps) => {
                   key={`table-row-${index}`}
                   className="odd:bg-white even:bg-gray-50/40 dark:odd:bg-gray-900/80 dark:even:bg-gray-800/45"
                 >
-                  {table.columns.map((column) => (
-                    <td
-                      key={`${column}-${index}`}
-                      className="border-b border-gray-100 px-3 py-2 text-gray-700 dark:border-gray-800 dark:text-gray-300"
-                    >
-                      {formatCell(row[column])}
-                    </td>
-                  ))}
+                  {table.columns.map((column) => {
+                    const tone = getSemanticTone({
+                      label: column,
+                      value: row[column],
+                      row,
+                    });
+
+                    return (
+                      <td
+                        key={`${column}-${index}`}
+                        className={`border-b border-gray-100 px-3 py-2 dark:border-gray-800 ${toneCellClass[tone]}`}
+                      >
+                        {formatCell(row[column])}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

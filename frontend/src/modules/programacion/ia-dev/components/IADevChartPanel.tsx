@@ -11,6 +11,8 @@ type IADevChartPanelProps = {
   chart: IADevChartPayload | null;
   onClose?: () => void;
   embedded?: boolean;
+  showDetails?: boolean;
+  showHeader?: boolean;
 };
 
 type NormalizedChartData = {
@@ -183,6 +185,8 @@ const IADevChartPanel = ({
   chart,
   onClose,
   embedded = false,
+  showDetails = true,
+  showHeader = true,
 }: IADevChartPanelProps) => {
   const normalized = useMemo(() => normalizeChart(chart), [chart]);
   const chartRef = useRef<HTMLDivElement | null>(null);
@@ -325,7 +329,11 @@ const IADevChartPanel = ({
         embedded ? "" : "mx-3 mt-3"
       }`}
     >
-      <div className="mb-2 flex items-start justify-between gap-2">
+      <div
+        className={`mb-2 items-start justify-between gap-2 ${
+          showHeader ? "flex" : "hidden"
+        }`}
+      >
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
             <BarChart3 size={13} />
@@ -361,17 +369,19 @@ const IADevChartPanel = ({
             )}
             <div ref={chartRef} className="h-full w-full" />
           </div>
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-            <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
-              amCharts 5
-            </span>
-            <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
-              tipo: {normalized?.type || "bar"}
-            </span>
-            <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
-              puntos: {normalized?.rows.length || 0}
-            </span>
-          </div>
+          {showDetails && (
+            <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+              <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
+                amCharts 5
+              </span>
+              <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
+                tipo: {normalized?.type || "bar"}
+              </span>
+              <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
+                puntos: {normalized?.rows.length || 0}
+              </span>
+            </div>
+          )}
         </>
       )}
     </div>

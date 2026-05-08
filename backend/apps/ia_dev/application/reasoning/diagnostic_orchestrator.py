@@ -55,6 +55,12 @@ class DiagnosticOrchestrator:
         ).strip()
         canonical_comparison = dict((qi.get("canonical_resolution") or {}).get("comparison") or {})
         normalization_comparison = dict((qi.get("semantic_normalization") or {}).get("comparison") or {})
+        planner_sql_authority = self._planner_sql_authority_active(
+            execution_plan=execution_plan,
+            route=route,
+            execution_meta=execution_payload,
+            response=response,
+        )
 
         if rowcount == 0 and identifiers:
             items.append(
@@ -142,7 +148,13 @@ class DiagnosticOrchestrator:
                 "Crear atajos de planificacion por identificador para evitar preguntas innecesarias."
             )
 
-        if int(canonical_comparison.get("differences_count") or 0) > 0 or int(normalization_comparison.get("differences_count") or 0) > 0:
+        if (
+            not planner_sql_authority
+            and (
+                int(canonical_comparison.get("differences_count") or 0) > 0
+                or int(normalization_comparison.get("differences_count") or 0) > 0
+            )
+        ):
             items.append(
                 self._build_item(
                     signature="semantic_runtime_divergence",
@@ -297,6 +309,36 @@ class DiagnosticOrchestrator:
             "items": items,
             "recommended_actions": deduped_actions[:5],
         }
+
+    @staticmethod
+    def _planner_sql_authority_active(
+        *,
+        execution_plan: QueryExecutionPlan | None,
+        route: dict[str, Any],
+        execution_meta: dict[str, Any],
+        response: dict[str, Any],
+    ) -> bool:
+        if str((execution_plan.strategy if execution_plan else "") or "").strip().lower() != "sql_assisted":
+            return False
+        if not bool(str((execution_plan.sql_query if execution_plan else "") or "").strip()):
+            return False
+        if not bool((execution_plan.policy if execution_plan else {}) and (execution_plan.policy or {}).get("allowed")):
+            return False
+        if not bool(execution_meta.get("satisfied", True)):
+            return False
+        if bool(execution_meta.get("used_legacy")):
+            return False
+        if bool(execution_meta.get("blocked_legacy_fallback")):
+            return False
+        if str(execution_meta.get("runtime_only_fallback_reason") or "").strip():
+            return False
+        if str(execution_meta.get("fallback_reason") or "").strip():
+            return False
+        if bool(route.get("execute_capability")):
+            return False
+        classifier_source = str(((response.get("orchestrator") or {}).get("classifier_source") or "")).strip().lower()
+        runtime_authority = str(route.get("runtime_authority") or "").strip().lower()
+        return runtime_authority == "query_execution_planner" or "sql_assisted" in classifier_source
 
     @staticmethod
     def _build_item(

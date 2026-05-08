@@ -17,13 +17,19 @@ class IntentArbitrationServiceTests(SimpleTestCase):
     def _dictionary_context() -> dict:
         return {
             "fields": [
-                {"logical_name": "area", "table_name": "cinco_base_de_personal"},
-                {"logical_name": "cargo", "table_name": "cinco_base_de_personal"},
+                {"logical_name": "area", "table_name": "cinco_base_de_personal", "supports_group_by": True},
+                {"logical_name": "cargo", "table_name": "cinco_base_de_personal", "supports_group_by": True},
+                {"logical_name": "movil", "table_name": "cinco_base_de_personal", "supports_group_by": True},
+                {"logical_name": "supervisor", "table_name": "cinco_base_de_personal", "supports_group_by": True},
                 {"logical_name": "fecha_nacimiento", "table_name": "cinco_base_de_personal", "column_name": "fnacimiento", "is_date": True},
             ],
             "relations": [{"nombre_relacion": "ausentismo_empleado"}],
             "rules": [],
-            "synonyms": [{"termino": "fecha_nacimiento", "sinonimo": "cumpleanos"}],
+            "synonyms": [
+                {"termino": "fecha_nacimiento", "sinonimo": "cumpleanos"},
+                {"termino": "movil", "sinonimo": "cuadrilla"},
+                {"termino": "supervisor", "sinonimo": "jefe"},
+            ],
         }
 
     def test_analytics_questions_do_not_create_kpro(self):
@@ -218,6 +224,36 @@ class IntentArbitrationServiceTests(SimpleTestCase):
         self.assertTrue(bool(result.get("should_execute_query")))
         self.assertTrue(bool(result.get("should_use_sql_assisted")))
         self.assertFalse(bool(result.get("should_fallback")))
+
+    def test_employee_grouped_movil_queries_do_not_require_clarification(self):
+        service = self._service()
+
+        result = service.arbitrate(
+            original_question="Que moviles o cuadrillas tienen mas tecnicos asignados",
+            candidate_domain="general",
+            heuristic_intent={"intent": "general_question", "domain": "general", "confidence": 0.31},
+            llm_intent=StructuredQueryIntent(
+                raw_query="Que moviles o cuadrillas tienen mas tecnicos asignados",
+                domain_code="empleados",
+                operation="aggregate",
+                template_id="aggregate_by_group_and_period",
+                confidence=0.78,
+                source="rules",
+                group_by=["movil"],
+                filters={"tipo_labor": "OPERATIVO"},
+            ),
+            candidate_capabilities=[{"capability_id": "empleados.count.active.v1"}],
+            ai_dictionary_context=self._dictionary_context(),
+            action_risk={"level": "low"},
+            knowledge_governance_signals={"explicit_change_request": False, "explicit_apply_request": False},
+        )
+
+        self.assertEqual(str(result.get("final_intent") or ""), "analytics_query")
+        self.assertEqual(str(result.get("final_domain") or ""), "empleados")
+        self.assertTrue(bool(result.get("should_execute_query")))
+        self.assertTrue(bool(result.get("should_use_sql_assisted")))
+        self.assertFalse(bool(result.get("should_fallback")))
+        self.assertIn("movil", list(result.get("valid_group_dimensions") or []))
 
     def test_birthday_queries_expose_structural_semantic_inference(self):
         service = self._service()

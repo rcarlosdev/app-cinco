@@ -12,6 +12,10 @@ class SynonymSemanticResolver:
     _LOCAL_EQUIVALENCES = {
         "labor": "tipo_labor",
         "labores": "tipo_labor",
+        "tipo laboral": "tipo_labor",
+        "clase de labor": "tipo_labor",
+        "categoria laboral": "tipo_labor",
+        "personal por tipo": "tipo_labor",
         "tipo_labor": "tipo_labor",
     }
 

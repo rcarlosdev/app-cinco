@@ -2,6 +2,10 @@
 
 import { BarChart2 } from "lucide-react";
 import type { NormalizedKPI } from "@/modules/programacion/ia-dev/chat/types";
+import {
+  getSemanticTone,
+  toneCardClass,
+} from "@/modules/programacion/ia-dev/chat/utils/semanticTone";
 
 type KPISectionProps = {
   items: NormalizedKPI[];
@@ -27,13 +31,13 @@ const KPISection = ({ items }: KPISectionProps) => {
         {items.map((kpi) => (
           <article
             key={kpi.key}
-            className="shadow-theme-xs rounded-xl border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900/80"
+            className={`shadow-theme-xs rounded-xl border px-3 py-2 ${toneCardClass[getSemanticTone({ label: `${kpi.key} ${kpi.label}`, value: kpi.rawValue })]}`}
           >
-            <div className="mb-1 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+            <div className="mb-1 flex items-center gap-2 text-[11px] opacity-75">
               <BarChart2 size={12} />
               <span className="truncate">{kpi.label}</span>
             </div>
-            <p className="truncate text-lg font-semibold text-gray-900 dark:text-white">
+            <p className="truncate text-lg font-semibold">
               {formatValue(kpi.value)}
             </p>
           </article>

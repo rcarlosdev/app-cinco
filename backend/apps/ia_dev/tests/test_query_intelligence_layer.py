@@ -221,6 +221,144 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(intent.operation, "aggregate")
         self.assertIn("tipo_labor", list(intent.group_by or []))
 
+    def test_query_intent_resolver_treats_movil_and_tecnicos_as_operational_grouped_employee_aggregate(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="Que moviles o cuadrillas tienen mas tecnicos asignados",
+                base_classification={
+                    "domain": "general",
+                    "intent": "general_question",
+                    "needs_database": False,
+                },
+                semantic_context={
+                    "column_profiles": [
+                        {
+                            "logical_name": "movil",
+                            "column_name": "movil",
+                            "supports_group_by": True,
+                            "supports_dimension": True,
+                        },
+                        {
+                            "logical_name": "tipo_labor",
+                            "column_name": "tipo_labor",
+                            "supports_filter": True,
+                            "allowed_values": ["OPERATIVO", "ADMINISTRATIVO", "SUPERVISOR", "TRANSVERSAL"],
+                        },
+                    ],
+                    "synonym_index": {
+                        "cuadrilla": "movil",
+                        "cuadrillas": "movil",
+                        "tecnico": "operativo",
+                        "tecnicos": "operativo",
+                    },
+                    "query_hints": {
+                        "candidate_group_dimensions": ["movil", "tipo_labor"],
+                    },
+                },
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "aggregate")
+        self.assertEqual(intent.template_id, "aggregate_by_group_and_period")
+        self.assertIn("movil", list(intent.group_by or []))
+        self.assertEqual(str((intent.filters or {}).get("tipo_labor") or ""), "OPERATIVO")
+
+    def test_query_intent_resolver_detects_identity_document_missingness_as_general_operator(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="Que documentos de identidad faltan",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "analytics_query",
+                    "needs_database": True,
+                },
+                semantic_context={
+                    "column_profiles": [
+                        {"logical_name": "documento_identidad_lado_a", "column_name": "datos", "supports_filter": True},
+                        {"logical_name": "documento_identidad_lado_b", "column_name": "datos", "supports_filter": True},
+                    ],
+                    "synonym_index": {"documento de identidad": "documento_identidad_lado_a"},
+                },
+            )
+        self.assertEqual(str(intent.domain_code or ""), "empleados")
+        self.assertEqual(
+            dict(intent.filters or {}).get("documento_identidad"),
+            {"operator": "is_incomplete", "match_mode": "null_or_empty"},
+        )
+
+    def test_query_intent_resolver_merge_preserves_missingness_filters_over_llm_noise(self):
+        resolver = QueryIntentResolver()
+        fallback = StructuredQueryIntent(
+            raw_query="Que empleados activos no tienen supervisor registrado",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={"supervisor": {"operator": "is_missing", "match_mode": "null_or_empty"}},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.8,
+            source="rules",
+        )
+        llm = StructuredQueryIntent(
+            raw_query=fallback.raw_query,
+            domain_code="empleados",
+            operation="aggregate",
+            template_id="aggregate_by_group_and_period",
+            filters={"conduce": "NO", "estado": "ACTIVO"},
+            period={},
+            group_by=["supervisor"],
+            metrics=["count"],
+            confidence=0.9,
+            source="openai",
+        )
+        merged = resolver._merge_intents(fallback=fallback, llm=llm)
+        self.assertEqual(str(merged.operation or ""), "detail")
+        self.assertEqual(str(merged.template_id or ""), "detail_by_entity_and_period")
+        self.assertEqual(list(merged.group_by or []), [])
+        self.assertEqual(
+            dict(merged.filters or {}).get("supervisor"),
+            {"operator": "is_missing", "match_mode": "null_or_empty"},
+        )
+        self.assertNotIn("conduce", dict(merged.filters or {}))
+
+    def test_query_intent_resolver_does_not_convert_group_dimension_into_tipo_labor_filter(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="Empleados operativos por supervisor",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "empleados_query",
+                    "needs_database": True,
+                },
+                semantic_context={
+                    "column_profiles": [
+                        {
+                            "logical_name": "supervisor",
+                            "column_name": "supervisor",
+                            "supports_group_by": True,
+                            "supports_dimension": True,
+                        },
+                        {
+                            "logical_name": "tipo_labor",
+                            "column_name": "tipo_labor",
+                            "supports_filter": True,
+                            "allowed_values": ["OPERATIVO", "ADMINISTRATIVO", "SUPERVISOR", "TRANSVERSAL"],
+                        },
+                    ],
+                    "synonym_index": {
+                        "operativos": "operativo",
+                    },
+                    "query_hints": {
+                        "candidate_group_dimensions": ["supervisor"],
+                    },
+                },
+            )
+        self.assertEqual(list(intent.group_by or []), ["supervisor"])
+        self.assertEqual(str((intent.filters or {}).get("tipo_labor") or ""), "OPERATIVO")
+
     def test_query_intent_resolver_infers_empleados_domain_from_business_dimensions_only(self):
         resolver = QueryIntentResolver()
         with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
@@ -1215,6 +1353,169 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertIn("e.tipo_labor = 'OPERATIVO'", str(plan.sql_query or ""))
         self.assertEqual(str((plan.metadata or {}).get("compiler") or ""), "employee_semantic_sql")
         self.assertEqual(str((plan.metadata or {}).get("metric_used") or ""), "certificado_alturas_vigencia")
+        self.assertEqual(str((plan.constraints or {}).get("result_shape") or ""), "kpi")
+        self.assertFalse(bool((plan.constraints or {}).get("chart_requested")))
+
+    def test_query_execution_planner_prioritizes_employee_group_by_over_generic_count_template(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Cuantos empleados activos hay y como se distribuyen por tipo de labor",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={"estado": "ACTIVO"},
+            period={},
+            group_by=["tipo_labor"],
+            metrics=["count"],
+            confidence=0.9,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={
+                "domain_status": "active",
+                "supports_sql_assisted": True,
+                "tables": [{"table_fqn": "bd_c3nc4s1s.cinco_base_de_personal", "table_name": "cinco_base_de_personal"}],
+                "columns": [{"column_name": "estado"}, {"column_name": "tipo_labor"}],
+                "column_profiles": [
+                    {"table_name": "cinco_base_de_personal", "logical_name": "estado", "column_name": "estado", "supports_filter": True, "allowed_values": ["ACTIVO", "INACTIVO"]},
+                    {"table_name": "cinco_base_de_personal", "logical_name": "tipo_labor", "column_name": "tipo_labor", "supports_group_by": True, "supports_filter": True},
+                ],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["estado", "tipo_labor"],
+                "aliases": {"tipo_labor": "tipo_labor"},
+                "source_of_truth": {"pilot_sql_assisted_enabled": True},
+            },
+            normalized_filters={"estado": "ACTIVO"},
+            normalized_period={},
+            mapped_columns={"estado": "estado", "tipo_labor": "tipo_labor"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=intent.raw_query, session_id="employee-group-by", reset_memory=False),
+                resolved_query=resolved_query,
+            )
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertIn("GROUP BY tipo_labor", str(plan.sql_query or ""))
+        self.assertNotIn("LIMIT 1", str(plan.sql_query or ""))
+        self.assertEqual(str((plan.metadata or {}).get("compiler") or ""), "employee_semantic_sql")
+
+    def test_query_execution_planner_keeps_all_employee_group_dimensions(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Personal activo por area y carpeta",
+            domain_code="empleados",
+            operation="count",
+            template_id="aggregate_by_group_and_period",
+            filters={"estado": "ACTIVO"},
+            period={},
+            group_by=["area", "carpeta"],
+            metrics=["count"],
+            confidence=0.91,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={
+                "domain_status": "active",
+                "supports_sql_assisted": True,
+                "tables": [{"table_fqn": "bd_c3nc4s1s.cinco_base_de_personal", "table_name": "cinco_base_de_personal"}],
+                "columns": [{"column_name": "estado"}, {"column_name": "area"}, {"column_name": "carpeta"}],
+                "column_profiles": [
+                    {"table_name": "cinco_base_de_personal", "logical_name": "estado", "column_name": "estado", "supports_filter": True, "allowed_values": ["ACTIVO", "INACTIVO"]},
+                    {"table_name": "cinco_base_de_personal", "logical_name": "area", "column_name": "area", "supports_group_by": True, "supports_filter": True},
+                    {"table_name": "cinco_base_de_personal", "logical_name": "carpeta", "column_name": "carpeta", "supports_group_by": True, "supports_filter": True},
+                ],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["estado", "area", "carpeta"],
+                "aliases": {"area": "area", "carpeta": "carpeta"},
+                "source_of_truth": {"pilot_sql_assisted_enabled": True},
+            },
+            normalized_filters={"estado": "ACTIVO"},
+            normalized_period={},
+            mapped_columns={"estado": "estado", "area": "area", "carpeta": "carpeta"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=intent.raw_query, session_id="employee-group-by-multi", reset_memory=False),
+                resolved_query=resolved_query,
+            )
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertIn("SELECT area AS area, carpeta AS carpeta, COUNT(*) AS total_registros", str(plan.sql_query or ""))
+        self.assertIn("GROUP BY area, carpeta", str(plan.sql_query or ""))
+        self.assertEqual(list((plan.metadata or {}).get("dimensions_used") or []), ["area", "carpeta"])
+        self.assertEqual(str((plan.metadata or {}).get("compiler") or ""), "employee_semantic_sql")
+
+    def test_query_execution_planner_does_not_emit_unregistered_alias_as_group_column(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Distribuye el personal activo por tipo de labor",
+            domain_code="empleados",
+            operation="aggregate",
+            template_id="aggregate_by_group_and_period",
+            filters={"estado": "ACTIVO"},
+            period={},
+            group_by=["tipo_labor"],
+            metrics=["count"],
+            confidence=0.91,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={
+                "domain_status": "active",
+                "supports_sql_assisted": True,
+                "tables": [{"table_fqn": "bd_c3nc4s1s.cinco_base_de_personal", "table_name": "cinco_base_de_personal"}],
+                "columns": [{"column_name": "estado"}, {"column_name": "tipo_labor"}],
+                "column_profiles": [
+                    {"table_name": "cinco_base_de_personal", "logical_name": "estado", "column_name": "estado", "supports_filter": True, "allowed_values": ["ACTIVO", "INACTIVO"]},
+                    {"table_name": "cinco_base_de_personal", "logical_name": "tipo_labor", "column_name": "tipo_labor", "supports_group_by": True, "supports_filter": True},
+                ],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["estado", "tipo_labor"],
+                "aliases": {"tipo_labor": "tipo"},
+                "source_of_truth": {"pilot_sql_assisted_enabled": True},
+            },
+            normalized_filters={"estado": "ACTIVO"},
+            normalized_period={},
+            mapped_columns={"estado": "estado", "tipo_labor": "tipo_labor"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_CAP_EMPLEADOS_ENABLED": "1",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=intent.raw_query, session_id="employee-group-alias-safe", reset_memory=False),
+                resolved_query=resolved_query,
+            )
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertIn("SELECT tipo_labor AS tipo_labor, COUNT(*) AS total_registros", str(plan.sql_query or ""))
+        self.assertIn("GROUP BY tipo_labor", str(plan.sql_query or ""))
+        self.assertNotIn("GROUP BY tipo ORDER BY", str(plan.sql_query or ""))
 
     def test_query_execution_planner_heights_certificate_uses_calturas_fallback_when_json_path_missing(self):
         planner = QueryExecutionPlanner()
@@ -1468,6 +1769,30 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         )
         self.assertFalse(validation.satisfied)
         self.assertEqual(validation.reason, "group_count_requested_but_result_is_not_aggregated")
+
+    def test_result_satisfaction_validator_accepts_grouped_count_with_generic_numeric_alias(self):
+        validator = ResultSatisfactionValidator()
+        response = {
+            "reply": "Personal activo agrupado por area.",
+            "data": {
+                "kpis": {"rowcount": 3},
+                "table": {
+                    "columns": ["area", "total_registros"],
+                    "rows": [
+                        {"area": "OPERACIONES", "total_registros": 120},
+                        {"area": "MANTENIMIENTO", "total_registros": 87},
+                    ],
+                    "rowcount": 2,
+                },
+            },
+        }
+        validation = validator.validate(
+            message="Cantidad de personal activo por area",
+            response=response,
+            resolved_query=None,
+        )
+        self.assertTrue(validation.satisfied)
+        self.assertEqual(validation.reason, "ok")
 
     def test_result_satisfaction_validator_respects_explicit_empty_group_by_from_planner_for_heights_kpi(self):
         validator = ResultSatisfactionValidator()

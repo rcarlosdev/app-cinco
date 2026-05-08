@@ -27,7 +27,7 @@ class Phase7DictionaryRemediationTests(SimpleTestCase):
         )
         self.assertTrue(
             any(
-                field["logical_name"] == "tipo_labor" and field["column_name"] == "tipo"
+                field["logical_name"] == "tipo_labor" and field["column_name"] == "tipo_labor"
                 for field in empleados_fields
             )
         )

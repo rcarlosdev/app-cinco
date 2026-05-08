@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.test import SimpleTestCase
 
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
@@ -192,4 +194,99 @@ class SatisfactionReviewGateTests(SimpleTestCase):
         issues = [str(item.get("code") or "") for item in list(result.issues or [])]
         self.assertNotIn("wrong_domain", issues)
         self.assertNotIn("semantic_mismatch", issues)
+
+    def test_llm_reviewer_adds_clarification_without_overriding_authoritative_data(self):
+        resolved = self._resolved_intent(domain="empleados", operation="detail")
+        with patch.object(
+            SatisfactionReviewGate,
+            "_run_llm_semantic_review",
+            return_value={
+                "enabled": True,
+                "used": True,
+                "answered_user_goal": False,
+                "preferred_output": "alert",
+                "missing_important_filter": False,
+                "missing_filter_reason": "",
+                "needs_clarification": True,
+                "clarification_reason": "Hace falta definir si el alcance es solo personal activo.",
+                "risk_interpretation_needed": True,
+                "repairable": True,
+                "repair_focus": "confirmar alcance activo",
+                "notes": ["reviewed"],
+                "authority": "runtime_validated_data",
+            },
+        ):
+            result = self.gate.evaluate(
+                raw_query="Que empleados no tienen supervisor registrado",
+                canonical_resolution={
+                    "domain_code": "empleados",
+                    "intent_code": "detail",
+                    "capability_code": "empleados.data_quality.missing.v1",
+                    "confidence": 0.92,
+                },
+                runtime_intent=resolved.intent,
+                resolved_query=resolved,
+                execution_result={"ok": True, "used_legacy": False, "fallback_reason": ""},
+                candidate_response={
+                    "reply": "Se listan 12 empleados activos sin supervisor registrado.",
+                    "data": {"kpis": {"rowcount": 12}, "table": {"rows": [{"cedula": "1"}], "rowcount": 1}},
+                },
+                strategy="sql_assisted",
+                planned_capability={"capability_id": "empleados.data_quality.missing.v1"},
+                loop_metadata={"iteration": 0},
+                legacy_validation={"satisfied": True, "reason": "ok", "checks": {}},
+                runtime_flags={"active": True, "shadow": False, "llm_reviewer_enabled": True},
+            )
+        payload = result.as_dict()
+        self.assertFalse(bool(payload.get("approved")))
+        self.assertEqual(str(payload.get("next_action") or ""), "retry_with_next_candidate")
+        self.assertEqual(str((payload.get("review_meta") or {}).get("llm_review", {}).get("authority") or ""), "runtime_validated_data")
+
+    def test_llm_reviewer_caps_repair_budget_to_one(self):
+        resolved = self._resolved_intent(domain="empleados", operation="detail")
+        with patch.object(
+            SatisfactionReviewGate,
+            "_run_llm_semantic_review",
+            return_value={
+                "enabled": True,
+                "used": True,
+                "answered_user_goal": False,
+                "preferred_output": "table",
+                "missing_important_filter": True,
+                "missing_filter_reason": "Falta definir si debe incluir inactivos.",
+                "needs_clarification": False,
+                "clarification_reason": "",
+                "risk_interpretation_needed": False,
+                "repairable": True,
+                "repair_focus": "filtro de estado",
+                "notes": ["repair_once"],
+                "authority": "runtime_validated_data",
+            },
+        ):
+            result = self.gate.evaluate(
+                raw_query="Que empleados no tienen EPS registrada",
+                canonical_resolution={
+                    "domain_code": "empleados",
+                    "intent_code": "detail",
+                    "capability_code": "empleados.data_quality.missing.v1",
+                    "confidence": 0.92,
+                },
+                runtime_intent=resolved.intent,
+                resolved_query=resolved,
+                execution_result={"ok": True, "used_legacy": False, "fallback_reason": ""},
+                candidate_response={
+                    "reply": "Se listan empleados sin EPS registrada.",
+                    "data": {"kpis": {"rowcount": 7}, "table": {"rows": [{"cedula": "1"}], "rowcount": 1}},
+                },
+                strategy="sql_assisted",
+                planned_capability={"capability_id": "empleados.data_quality.missing.v1"},
+                loop_metadata={"iteration": 1},
+                legacy_validation={"satisfied": True, "reason": "ok", "checks": {}},
+                runtime_flags={"active": True, "shadow": False, "llm_reviewer_enabled": True},
+            )
+        payload = result.as_dict()
+        review_meta = dict(payload.get("review_meta") or {})
+        self.assertEqual(str(payload.get("next_action") or ""), "ask_clarification")
+        self.assertEqual(int(review_meta.get("max_repairs") or 0), 1)
+        self.assertEqual(int(review_meta.get("repair_budget_remaining")), 0)
 

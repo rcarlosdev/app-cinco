@@ -6,7 +6,7 @@ estado_dominio: active
 nivel_madurez: growing
 nivel_confianza_esquema: 0.9
 tablas_asociadas:
-  - schema_name: cincosas_cincosas
+  - schema_name: bd_c3nc4s1s
     table_name: cinco_base_de_personal
     nombre_tabla_logico: empleados_maestro
     rol: dimension
@@ -36,7 +36,7 @@ columnas_clave:
     column_name: movil
     nombre_columna_logico: movil
   - table_name: cinco_base_de_personal
-    column_name: tipo
+    column_name: tipo_labor
     nombre_columna_logico: tipo_labor
   - table_name: cinco_base_de_personal
     column_name: zona_nodo
