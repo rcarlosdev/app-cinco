@@ -51,6 +51,52 @@ const isValidChart = (chart: unknown): chart is IADevChartPayload => {
   );
 };
 
+const normalizeChartValue = (value: unknown): unknown => {
+  if (Array.isArray(value))
+    return value.map((item) => normalizeChartValue(item));
+  if (!value || typeof value !== "object") return value;
+
+  const source = value as Record<string, unknown>;
+  return Object.keys(source)
+    .filter((key) => source[key] !== undefined && key !== "meta")
+    .sort()
+    .reduce<Record<string, unknown>>((acc, key) => {
+      acc[key] = normalizeChartValue(source[key]);
+      return acc;
+    }, {});
+};
+
+const getChartFingerprint = (chart: IADevChartPayload): string => {
+  try {
+    return JSON.stringify(
+      normalizeChartValue({
+        type: chart.type,
+        x_key: chart.x_key,
+        y_key: chart.y_key,
+        labels: chart.labels,
+        series: chart.series,
+        points: chart.points,
+        data: chart.data,
+      }),
+    );
+  } catch {
+    return String(chart.title || chart.type || Math.random());
+  }
+};
+
+const dedupeCharts = (
+  charts: Array<IADevChartPayload | null | undefined>,
+): IADevChartPayload[] => {
+  const seen = new Set<string>();
+  return charts.filter((chart): chart is IADevChartPayload => {
+    if (!chart) return false;
+    const fingerprint = getChartFingerprint(chart);
+    if (seen.has(fingerprint)) return false;
+    seen.add(fingerprint);
+    return true;
+  });
+};
+
 const normalizeKpis = (value: unknown): NormalizedKPI[] => {
   const source = asObject(value);
   if (!source) return [];
@@ -278,12 +324,13 @@ export const normalizeChatPayload = (
     rebuildChartFromTable(table, title, meta) ||
     rebuildChartFromLabelsSeries(labels, series, title, meta);
 
-  const chart =
-    rawChart || rawCharts[0] || chartFromActions || rebuiltChart || null;
-  const charts = [...rawCharts];
-  if (chart && !charts.includes(chart)) {
-    charts.unshift(chart);
-  }
+  const charts = dedupeCharts([
+    rawChart,
+    ...rawCharts,
+    chartFromActions,
+    rebuiltChart,
+  ]);
+  const chart = charts[0] ?? null;
 
   const hasStructuredContent = Boolean(
     kpis.length ||

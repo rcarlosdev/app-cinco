@@ -12,10 +12,7 @@ import { normalizeChatPayload } from "@/modules/programacion/ia-dev/chat/utils/n
 import { usePromptHistory } from "@/modules/programacion/ia-dev/chat/hooks/usePromptHistory";
 import { useSmartAutoScroll } from "@/modules/programacion/ia-dev/chat/hooks/useSmartAutoScroll";
 import { useIADevChatTransport } from "@/modules/programacion/ia-dev/chat/hooks/useIADevChatTransport";
-import {
-  createIADevTicket,
-  type IADevAction,
-} from "@/services/ia-dev.service";
+import { createIADevTicket, type IADevAction } from "@/services/ia-dev.service";
 import {
   clearAgenteIAChatHistory,
   loadAgenteIAChatHistory,
@@ -24,7 +21,7 @@ import {
 } from "@/modules/agente-ia/persistence/chatSessionStorage";
 
 const INITIAL_ASSISTANT_MESSAGE =
-  "Agente IA listo. Describe tu consulta para continuar por chat.";
+  "Hola, soy Agente IA. Escribe tu consulta para comenzar.";
 const INITIAL_CHAT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 const MAX_CHAT_HISTORY = 30;
 
@@ -46,6 +43,32 @@ const INITIAL_MESSAGES: ChatMessageModel[] = [
 
 const getVisibleActions = (actions: IADevAction[] | undefined) =>
   (actions ?? []).filter((action) => action.type !== "memory_review");
+
+const isOperationalChatStatus = (status: string) =>
+  status.trim().toLowerCase() === "respuesta generada correctamente.";
+
+const getSuggestionQuery = (action: IADevAction) => {
+  const payload = action.payload ?? {};
+  const candidates = [
+    payload.query,
+    payload.message,
+    payload.suggestion,
+    payload.consulta,
+    payload.prompt,
+    action.label,
+  ];
+
+  return (
+    candidates
+      .map((candidate) =>
+        typeof candidate === "string" ? candidate.trim() : "",
+      )
+      .find(Boolean) ?? ""
+  );
+};
+
+const isKnownNonQueryAction = (action: IADevAction) =>
+  action.type === "create_ticket" || action.type === "render_chart";
 
 const chatHasUserMessages = (chat: AgenteIAChatThread) =>
   chat.messages.some(
@@ -120,7 +143,9 @@ const AgenteIAModule = () => {
       return {
         chats: sortChatsByRecent(persistedHistory.chats),
         activeChatId:
-          persistedHistory.activeChatId ?? persistedHistory.chats[0]?.id ?? null,
+          persistedHistory.activeChatId ??
+          persistedHistory.chats[0]?.id ??
+          null,
         restoredFromHistory: true,
       };
     }
@@ -133,10 +158,7 @@ const AgenteIAModule = () => {
     };
   });
   const { pushPrompt, navigate, resetNavigation } = usePromptHistory();
-  const {
-    sendMessage,
-    lastError: transportError,
-  } = useIADevChatTransport();
+  const { sendMessage, lastError: transportError } = useIADevChatTransport();
   const {
     unreadCount,
     showScrollButton,
@@ -183,16 +205,16 @@ const AgenteIAModule = () => {
     if (transportError) {
       return "No fue posible conectar con el servicio en este momento.";
     }
-    if (chatStatus) {
+    if (chatStatus && !isOperationalChatStatus(chatStatus)) {
       return chatStatus;
     }
     if (messages.length <= 1) {
-      return "Nuevo chat listo para consultas.";
+      return "Nuevo chat listo.";
     }
     if (initialHistoryState.restoredFromHistory) {
       return "Historial recuperado correctamente.";
     }
-    return "Listo para consultas analiticas.";
+    return "Listo para continuar.";
   }, [
     chatStatus,
     initialHistoryState.restoredFromHistory,
@@ -236,7 +258,7 @@ const AgenteIAModule = () => {
     const nextActiveChatId = persistableChats.some(
       (chat) => chat.id === activeChat?.id,
     )
-      ? activeChat?.id ?? null
+      ? (activeChat?.id ?? null)
       : persistableChats[0].id;
 
     saveAgenteIAChatHistory({
@@ -360,8 +382,8 @@ const AgenteIAModule = () => {
     return historyDateFormatter.format(new Date(chat.updatedAt));
   };
 
-  const submitChat = async () => {
-    const value = chatInput.trim();
+  const submitChat = async (overridePrompt?: string) => {
+    const value = (overridePrompt ?? chatInput).trim();
     if (!value || isSubmitting || !activeChat) return;
 
     const userMessageId = createMessageId("user");
@@ -418,7 +440,10 @@ const AgenteIAModule = () => {
                 message.id === assistantMessageId
                   ? {
                       ...message,
-                      response: mergeStreamingResponse(message.response, progress),
+                      response: mergeStreamingResponse(
+                        message.response,
+                        progress,
+                      ),
                       status: "streaming",
                     }
                   : message,
@@ -470,7 +495,7 @@ const AgenteIAModule = () => {
         return {
           ...chat,
           sessionId: result.session_id,
-          chatStatus: "Respuesta generada correctamente.",
+          chatStatus: "",
           messages: nextMessages,
           title: buildChatTitle(nextMessages, value),
           updatedAt: new Date().toISOString(),
@@ -521,6 +546,12 @@ const AgenteIAModule = () => {
       }));
       return;
     }
+    if (!isKnownNonQueryAction(action)) {
+      const query = getSuggestionQuery(action);
+      if (!query) return;
+      await submitChat(query);
+      return;
+    }
     if (action.type !== "create_ticket") return;
 
     const title = action.payload?.title?.trim() || "Solicitud desde Agente IA";
@@ -546,9 +577,12 @@ const AgenteIAModule = () => {
         chatStatus: `Ticket ${created.ticket.ticket_id} creado`,
       }));
     } catch {
-      appendAssistantMessage("No fue posible crear el ticket en este momento.", {
-        status: "error",
-      });
+      appendAssistantMessage(
+        "No fue posible crear el ticket en este momento.",
+        {
+          status: "error",
+        },
+      );
       updateActiveChat((chat) => ({
         ...chat,
         chatStatus: "Error al crear ticket",
@@ -563,7 +597,7 @@ const AgenteIAModule = () => {
       <PageBreadcrumb pageTitle={["Agente IA"]} />
 
       <div className="h-[calc(100vh-190px)] min-h-[680px] w-full min-w-0">
-        <div className="mx-auto h-full min-w-0 max-w-[1400px]">
+        <div className="mx-auto h-full max-w-[1400px] min-w-0">
           <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white lg:flex-row dark:border-gray-800 dark:bg-white/3">
             <aside className="flex w-full shrink-0 flex-col border-b border-gray-200 bg-gray-50/80 lg:h-full lg:w-80 lg:border-r lg:border-b-0 dark:border-gray-800 dark:bg-gray-900/60">
               <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-800">
@@ -573,14 +607,14 @@ const AgenteIAModule = () => {
                       Historico de chats
                     </p>
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-300">
-                      Retoma conversaciones anteriores o inicia una nueva.
+                      Conversaciones recientes.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={startNewChat}
                     disabled={isSubmitting}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="bg-brand-500 hover:bg-brand-600 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white transition disabled:cursor-not-allowed disabled:opacity-70"
                     title="Nuevo chat"
                   >
                     <Plus size={18} />
@@ -654,9 +688,8 @@ const AgenteIAModule = () => {
                     Agente Conversacional
                   </div>
                   <p className="mt-1 text-sm text-gray-500 dark:text-gray-300">
-                    Modulo de chat para consultas analiticas con IA. Describe tu
-                    consulta y el agente te respondera con insights,
-                    visualizaciones y acciones recomendadas.
+                    Consulta informacion, revisa respuestas y continua tu
+                    conversacion en un solo lugar.
                   </p>
                 </div>
               </div>
@@ -709,6 +742,7 @@ const AgenteIAModule = () => {
                         onActionClick={(action) => {
                           void handleActionClick(action);
                         }}
+                        variant="clean"
                       />
                     ))}
                   </div>

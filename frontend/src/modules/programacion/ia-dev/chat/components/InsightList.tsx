@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { Lightbulb, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  getSemanticTone,
+  toneSoftClass,
+} from "@/modules/programacion/ia-dev/chat/utils/semanticTone";
 
 type InsightListProps = {
   insights: string[];
@@ -28,7 +32,7 @@ const InsightList = ({ insights }: InsightListProps) => {
         {visibleInsights.map((insight, index) => (
           <li
             key={`${insight}-${index}`}
-            className="border-blue-light-200 bg-blue-light-50/70 text-blue-light-900 dark:border-blue-light-800 dark:bg-blue-light-950/35 dark:text-blue-light-200 flex items-start gap-2 rounded-xl border px-3 py-2 text-sm"
+            className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm ${toneSoftClass[getSemanticTone({ value: insight })]}`}
           >
             <Lightbulb size={14} className="mt-0.5 shrink-0" />
             <span>{insight}</span>
