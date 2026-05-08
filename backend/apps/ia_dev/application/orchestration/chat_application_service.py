@@ -369,14 +369,28 @@ class ChatApplicationService:
             summary="Se generaron candidatos de capacidad para resolver la consulta.",
             details={
                 "candidate_count": len(candidate_plans),
-                "top_capability_id": str((candidate_plans[0] if candidate_plans else {}).get("capability_id") or ""),
+                "top_capability_id": (
+                    "query_execution_planner.sql_assisted"
+                    if str((query_intelligence.get("execution_plan") or {}).get("strategy") or "").strip().lower()
+                    == "sql_assisted"
+                    else str((candidate_plans[0] if candidate_plans else {}).get("capability_id") or "")
+                ),
                 "top_reason": str((candidate_plans[0] if candidate_plans else {}).get("reason") or ""),
             },
             next_step="ejecutar la ruta principal y validar el resultado",
             confidence=0.72,
         )
 
+        execution_result_snapshot = dict(query_intelligence.get("execution_result") or {})
         precomputed_response = dict(query_intelligence.get("precomputed_response") or {})
+        if (
+            not precomputed_response
+            and self._planner_valid_sql_result_wins(
+                query_intelligence=query_intelligence,
+                execution_meta=execution_result_snapshot,
+            )
+        ):
+            precomputed_response = dict(execution_result_snapshot.get("response") or {})
 
         run_context.metadata["delegation"] = {
             "mode": "off",
@@ -415,13 +429,19 @@ class ChatApplicationService:
             )
             route = {
                 "routing_mode": run_context.routing_mode,
-                "selected_capability_id": str(
-                    planned_capability.get("capability_id")
-                    or f"query_intelligence.{str(query_intelligence.get('execution_plan', {}).get('strategy') or 'precomputed')}.v1"
+                "selected_capability_id": (
+                    "query_execution_planner.sql_assisted"
+                    if str((query_intelligence.get("execution_plan") or {}).get("strategy") or "").strip().lower()
+                    == "sql_assisted"
+                    else str(
+                        planned_capability.get("capability_id")
+                        or f"query_intelligence.{str(query_intelligence.get('execution_plan', {}).get('strategy') or 'precomputed')}.v1"
+                    )
                 ),
                 "execute_capability": False,
                 "use_legacy": False,
                 "shadow_enabled": True,
+                "selected_capability_authoritative": False,
                 "runtime_authority": "query_execution_planner",
                 "planner_was_authority": True,
                 "planner_selected_strategy": str(
@@ -434,6 +454,11 @@ class ChatApplicationService:
                 "capability_exists": bool(planned_capability.get("capability_exists")),
                 "rollout_enabled": bool(planned_capability.get("rollout_enabled", True)),
             }
+            route = self._enforce_planner_sql_authority_route(
+                route=route,
+                query_intelligence=query_intelligence,
+                execution_meta=execution,
+            )
             primary_response = precomputed_response
             self._save_task_state(
                 run_context=run_context,
@@ -496,11 +521,20 @@ class ChatApplicationService:
                     planned_capability=planned_capability,
                 )
             primary_response = dict(execution.get("response") or {})
+        execution_meta = self._resolve_runtime_execution_metadata(
+            query_intelligence=query_intelligence,
+            execution_meta=dict((execution or {}) if "execution" in locals() else {}),
+        )
+        route = self._enforce_planner_sql_authority_route(
+            route=route,
+            query_intelligence=query_intelligence,
+            execution_meta=execution_meta,
+        )
         response_flow = self._resolve_runtime_response_flow(
             query_intelligence=query_intelligence,
             route=route,
             response=primary_response,
-            execution_meta=dict((execution or {}) if "execution" in locals() else {}),
+            execution_meta=execution_meta,
         )
         classification = self._extract_classification(primary_response)
 
@@ -550,54 +584,38 @@ class ChatApplicationService:
             memory_effects=memory_effects,
             observability=observability,
         )
-        execution_meta = dict((execution or {}) if "execution" in locals() else {})
+        run_context.metadata["runtime_execution_meta"] = dict(execution_meta)
         run_context.metadata["runtime_compatibility"] = self._build_runtime_compatibility_metadata(
             query_intelligence=query_intelligence,
             route=route,
             execution_meta=execution_meta,
         )
-        plan_metadata = dict(((query_intelligence.get("execution_plan") or {}).get("metadata") or {}))
+        runtime_metadata = self._resolve_runtime_execution_metadata(
+            query_intelligence=query_intelligence,
+            execution_meta=execution_meta,
+        )
         cleanup_guard = {
             "legacy_analytics_fallback_disabled": bool(
-                execution_meta.get("legacy_analytics_fallback_disabled")
-                or plan_metadata.get("legacy_analytics_fallback_disabled")
+                runtime_metadata.get("legacy_analytics_fallback_disabled")
             ),
             "blocked_legacy_fallback": bool(
-                execution_meta.get("blocked_legacy_fallback")
-                or plan_metadata.get("blocked_legacy_fallback")
+                runtime_metadata.get("blocked_legacy_fallback")
             ),
-            "analytics_router_decision": str(
-                execution_meta.get("analytics_router_decision")
-                or plan_metadata.get("analytics_router_decision")
-                or ""
-            ),
-            "legacy_analytics_isolated": bool(
-                execution_meta.get("legacy_analytics_isolated")
-                or plan_metadata.get("legacy_analytics_isolated")
-            ),
+            "analytics_router_decision": str(runtime_metadata.get("analytics_router_decision") or ""),
+            "legacy_analytics_isolated": bool(runtime_metadata.get("legacy_analytics_isolated")),
             "blocked_tool_ausentismo_service": bool(
-                execution_meta.get("blocked_tool_ausentismo_service")
-                or plan_metadata.get("blocked_tool_ausentismo_service")
+                runtime_metadata.get("blocked_tool_ausentismo_service")
             ),
             "blocked_run_legacy_for_analytics": bool(
-                execution_meta.get("blocked_run_legacy_for_analytics")
-                or plan_metadata.get("blocked_run_legacy_for_analytics")
+                runtime_metadata.get("blocked_run_legacy_for_analytics")
             ),
             "runtime_only_fallback_reason": str(
-                execution_meta.get("runtime_only_fallback_reason")
-                or plan_metadata.get("runtime_only_fallback_reason")
-                or ""
+                runtime_metadata.get("runtime_only_fallback_reason") or ""
             ),
             "fallback_reason": str(
-                execution_meta.get("fallback_reason")
-                or plan_metadata.get("fallback_reason")
-                or ""
+                runtime_metadata.get("fallback_reason") or ""
             ),
-            "cleanup_phase": str(
-                execution_meta.get("cleanup_phase")
-                or plan_metadata.get("cleanup_phase")
-                or ""
-            ),
+            "cleanup_phase": str(runtime_metadata.get("cleanup_phase") or ""),
         }
         run_context.metadata["cleanup_guard"] = dict(cleanup_guard)
         diagnostics = self._record_reasoning_diagnostics(
@@ -630,7 +648,7 @@ class ChatApplicationService:
         fallback_payload = {
             "used": bool(execution_meta.get("used_legacy")),
             "reason": str(
-                execution_meta.get("fallback_reason")
+                runtime_metadata.get("fallback_reason")
                 or cleanup_guard.get("fallback_reason")
                 or route.get("reason")
                 or ""
@@ -648,6 +666,11 @@ class ChatApplicationService:
         final_task_status = "completed" if satisfaction_snapshot.get("satisfied", True) else "verified"
         if str((query_intelligence.get("execution_plan") or {}).get("strategy") or "") == "ask_context":
             final_task_status = "needs_input"
+        display_planned_capability_id = str(planned_capability.get("capability_id") or "")
+        planned_capability_authoritative = bool(route.get("execute_capability"))
+        if response_flow == "sql_assisted" and not bool(route.get("execute_capability")):
+            display_planned_capability_id = "query_execution_planner.sql_assisted"
+            planned_capability_authoritative = False
         self._save_task_state(
             run_context=run_context,
             status=final_task_status,
@@ -655,13 +678,24 @@ class ChatApplicationService:
             detected_domain=str(classification.get("domain") or ""),
             plan={
                 "planned_capability": {
-                    "capability_id": str(planned_capability.get("capability_id") or ""),
+                    "capability_id": display_planned_capability_id,
                     "reason": str(planned_capability.get("reason") or ""),
+                    "authoritative": planned_capability_authoritative,
                 },
                 "route": dict(route or {}),
                 "query_intelligence": {
                     "mode": str(query_intelligence.get("mode") or "off"),
                     "execution_plan": dict(query_intelligence.get("execution_plan") or {}),
+                    "result_set": dict(
+                        (
+                            dict((dict(primary_response.get("data") or {}).get("meta") or {}).get("result_set") or {})
+                            or (
+                                (dict(primary_response.get("data") or {}).get("table") or {})
+                                if isinstance((dict(primary_response.get("data") or {}).get("table") or {}), dict)
+                                else {}
+                            )
+                        )
+                    ),
                 },
             },
             source_used=self._build_source_used_payload(
@@ -1101,6 +1135,16 @@ class ChatApplicationService:
                 execution_plan=execution_plan,
                 arbitration=intent_arbitration,
             )
+            if (
+                execution_plan.strategy == "sql_assisted"
+                and str((execution_plan.metadata or {}).get("response_category") or "") == "data_quality"
+                and str((execution_plan.metadata or {}).get("data_quality_operator") or "")
+            ):
+                intent_arbitration = {
+                    **dict(intent_arbitration or {}),
+                    "should_fallback": False,
+                    "required_clarification": "",
+                }
             semantic_normalization_meta = dict(run_context.metadata.get("semantic_normalization") or {})
             semantic_normalization_meta["ab_evaluation"] = self._build_semantic_normalization_ab_evaluation(
                 semantic_normalization=semantic_normalization_meta,
@@ -1157,9 +1201,23 @@ class ChatApplicationService:
                             execution_plan=execution_plan,
                         )
                         if validation.satisfied:
+                            execution_result.update(
+                                {
+                                    "satisfied": True,
+                                    "satisfaction_reason": str(validation.reason or "ok"),
+                                }
+                            )
                             precomputed_response = candidate_response
                         else:
-                            execution_result["validation"] = validation.as_dict()
+                            execution_result.update(
+                                {
+                                    "validation": validation.as_dict(),
+                                    "satisfied": False,
+                                    "satisfaction_reason": str(
+                                        validation.reason or "validation_failed"
+                                    ),
+                                }
+                            )
                     if not precomputed_response:
                         fallback_meta = self._build_runtime_only_sql_failure_meta(
                             execution_plan=execution_plan,
@@ -1978,6 +2036,18 @@ class ChatApplicationService:
             "sql_assisted_selected_by_arbitration": bool(payload.get("sql_assisted_selected_by_arbitration")),
         }
         final_intent = str(payload.get("final_intent") or "").strip().lower()
+        if (
+            execution_plan.strategy == "sql_assisted"
+            and str((execution_plan.metadata or {}).get("response_category") or "") == "data_quality"
+            and str((execution_plan.metadata or {}).get("data_quality_operator") or "")
+        ):
+            payload["should_fallback"] = False
+        if (
+            execution_plan.strategy == "sql_assisted"
+            and str((execution_plan.metadata or {}).get("metric_used") or "").strip().lower()
+            == "certificado_alturas_vigencia"
+        ):
+            payload["should_fallback"] = False
         if final_intent == "knowledge_change_request":
             return QueryExecutionPlan(
                 strategy="fallback",
@@ -2815,6 +2885,17 @@ class ChatApplicationService:
     ) -> dict[str, Any]:
         execution_plan = dict(query_intelligence.get("execution_plan") or {})
         planner_strategy = str(execution_plan.get("strategy") or "").strip().lower()
+        if ChatApplicationService._planner_valid_sql_result_wins(
+            query_intelligence=query_intelligence,
+            execution_meta=execution_meta,
+        ):
+            return {
+                "runtime_authority": "query_execution_planner",
+                "planner_was_authority": True,
+                "planner_selected_strategy": "sql_assisted",
+                "routing_mode": str(route.get("routing_mode") or ""),
+                "legacy_capability_path_used": False,
+            }
         runtime_authority = str(route.get("runtime_authority") or "")
         if not runtime_authority and str(query_intelligence.get("mode") or "off") == "active":
             runtime_authority = "query_execution_planner"
@@ -3936,6 +4017,130 @@ class ChatApplicationService:
         }
 
     @staticmethod
+    def _sql_assisted_execution_succeeded(
+        *,
+        query_intelligence: dict[str, Any],
+        execution_meta: dict[str, Any],
+    ) -> bool:
+        execution_plan = dict(query_intelligence.get("execution_plan") or {})
+        policy = dict(execution_plan.get("policy") or {})
+        return (
+            str(execution_plan.get("strategy") or "").strip().lower() == "sql_assisted"
+            and bool(str(execution_plan.get("sql_query") or "").strip())
+            and bool(policy.get("allowed"))
+            and bool(execution_meta.get("satisfied", True))
+            and not bool(execution_meta.get("used_legacy"))
+            and not bool(execution_meta.get("blocked_legacy_fallback"))
+            and not str(execution_meta.get("runtime_only_fallback_reason") or "").strip()
+            and not str(execution_meta.get("fallback_reason") or "").strip()
+        )
+
+    @classmethod
+    def _resolve_runtime_execution_metadata(
+        cls,
+        *,
+        query_intelligence: dict[str, Any],
+        execution_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        resolved = dict(((query_intelligence.get("execution_plan") or {}).get("metadata") or {}))
+        resolved.update(dict(execution_meta or {}))
+        if cls._sql_assisted_execution_succeeded(
+            query_intelligence=query_intelligence,
+            execution_meta=resolved,
+        ):
+            resolved.update(
+                {
+                    "analytics_router_decision": "sql_assisted",
+                    "legacy_analytics_isolated": False,
+                    "legacy_analytics_fallback_disabled": False,
+                    "blocked_legacy_fallback": False,
+                    "blocked_tool_ausentismo_service": False,
+                    "blocked_run_legacy_for_analytics": False,
+                    "runtime_only_fallback_reason": "",
+                    "fallback_reason": "",
+                    "cleanup_phase": "",
+                }
+            )
+        return resolved
+
+    @classmethod
+    def _planner_valid_sql_result_wins(
+        cls,
+        *,
+        query_intelligence: dict[str, Any],
+        execution_meta: dict[str, Any] | None = None,
+    ) -> bool:
+        execution_plan = dict(query_intelligence.get("execution_plan") or {})
+        policy = dict(execution_plan.get("policy") or {})
+        if str(execution_plan.get("strategy") or "").strip().lower() != "sql_assisted":
+            return False
+        if not bool(str(execution_plan.get("sql_query") or "").strip()):
+            return False
+        if not bool(policy.get("allowed")):
+            return False
+
+        resolved_meta = cls._resolve_runtime_execution_metadata(
+            query_intelligence=query_intelligence,
+            execution_meta=dict(execution_meta or query_intelligence.get("execution_result") or {}),
+        )
+        response_payload = dict(resolved_meta.get("response") or {})
+        if not response_payload:
+            response_payload = dict(query_intelligence.get("precomputed_response") or {})
+        if not response_payload:
+            return False
+
+        validation = dict(resolved_meta.get("validation") or {})
+        if validation and not bool(validation.get("satisfied")):
+            return False
+
+        return (
+            bool(resolved_meta.get("satisfied", True))
+            and not bool(resolved_meta.get("used_legacy"))
+            and not bool(resolved_meta.get("blocked_legacy_fallback"))
+            and not str(resolved_meta.get("runtime_only_fallback_reason") or "").strip()
+            and not str(resolved_meta.get("fallback_reason") or "").strip()
+        )
+
+    @classmethod
+    def _enforce_planner_sql_authority_route(
+        cls,
+        *,
+        route: dict[str, Any],
+        query_intelligence: dict[str, Any],
+        execution_meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_route = dict(route or {})
+        if not cls._planner_valid_sql_result_wins(
+            query_intelligence=query_intelligence,
+            execution_meta=execution_meta,
+        ):
+            return normalized_route
+
+        selected_capability_id = str(normalized_route.get("selected_capability_id") or "").strip()
+        execution_plan = dict(query_intelligence.get("execution_plan") or {})
+        compat_capability_id = str(
+            execution_plan.get("capability_id")
+            or (execution_plan.get("metadata") or {}).get("capability_id")
+            or ""
+        ).strip()
+        normalized_route.update(
+            {
+                "selected_capability_id": selected_capability_id or "query_execution_planner.sql_assisted",
+                "selected_capability_compat_id": compat_capability_id,
+                "execute_capability": False,
+                "use_legacy": False,
+                "shadow_enabled": bool(selected_capability_id or compat_capability_id),
+                "selected_capability_authoritative": False,
+                "runtime_authority": "query_execution_planner",
+                "planner_was_authority": True,
+                "planner_selected_strategy": "sql_assisted",
+                "legacy_capability_path_used": False,
+                "reason": "query_execution_planner_sql_assisted_authority",
+            }
+        )
+        return normalized_route
+
+    @staticmethod
     def _build_source_used_payload(
         *,
         query_intelligence: dict[str, Any],
@@ -3988,6 +4193,11 @@ class ChatApplicationService:
         response: dict[str, Any],
         execution_meta: dict[str, Any],
     ) -> str:
+        if ChatApplicationService._planner_valid_sql_result_wins(
+            query_intelligence=query_intelligence,
+            execution_meta=execution_meta,
+        ):
+            return "sql_assisted"
         if bool(execution_meta.get("blocked_legacy_fallback")):
             return "runtime_only_fallback"
         if bool(execution_meta.get("used_legacy")):
@@ -4063,7 +4273,10 @@ class ChatApplicationService:
         semantic_context = dict(resolved_query.get("semantic_context") or {})
         resolved_semantic = dict(semantic_context.get("resolved_semantic") or {})
         source_of_truth = dict(semantic_context.get("source_of_truth") or {})
-        execution_plan_meta = dict(((query_intelligence.get("execution_plan") or {}).get("metadata") or {}))
+        runtime_metadata = self._resolve_runtime_execution_metadata(
+            query_intelligence=query_intelligence,
+            execution_meta=execution_meta,
+        )
         domain_resolved = str(((resolved_query.get("intent") or {}).get("domain_code") or ""))
         pilot_enabled = self._productive_pilot_enabled_for_domain(domain_code=domain_resolved)
         runtime_compatibility = dict(run_context.metadata.get("runtime_compatibility") or {})
@@ -4142,51 +4355,28 @@ class ChatApplicationService:
                 "runtime_authority": str(runtime_compatibility.get("runtime_authority") or ""),
                 "planner_selected_strategy": str(runtime_compatibility.get("planner_selected_strategy") or ""),
                 "legacy_capability_path_used": bool(runtime_compatibility.get("legacy_capability_path_used")),
-                "fallback_reason": str(
-                    execution_meta.get("fallback_reason")
-                    or execution_plan_meta.get("fallback_reason")
-                    or ""
-                ),
+                "fallback_reason": str(runtime_metadata.get("fallback_reason") or ""),
                 "sql_reason": str(
                     execution_meta.get("sql_reason")
                     or ((query_intelligence.get("execution_plan") or {}).get("metadata") or {}).get("sql_reason")
                     or ""
                 ),
                 "legacy_analytics_fallback_disabled": bool(
-                    execution_meta.get("legacy_analytics_fallback_disabled")
-                    or execution_plan_meta.get("legacy_analytics_fallback_disabled")
+                    runtime_metadata.get("legacy_analytics_fallback_disabled")
                 ),
                 "blocked_legacy_fallback": bool(
-                    execution_meta.get("blocked_legacy_fallback")
-                    or execution_plan_meta.get("blocked_legacy_fallback")
+                    runtime_metadata.get("blocked_legacy_fallback")
                 ),
-                "analytics_router_decision": str(
-                    execution_meta.get("analytics_router_decision")
-                    or execution_plan_meta.get("analytics_router_decision")
-                    or ""
-                ),
-                "legacy_analytics_isolated": bool(
-                    execution_meta.get("legacy_analytics_isolated")
-                    or execution_plan_meta.get("legacy_analytics_isolated")
-                ),
+                "analytics_router_decision": str(runtime_metadata.get("analytics_router_decision") or ""),
+                "legacy_analytics_isolated": bool(runtime_metadata.get("legacy_analytics_isolated")),
                 "blocked_tool_ausentismo_service": bool(
-                    execution_meta.get("blocked_tool_ausentismo_service")
-                    or execution_plan_meta.get("blocked_tool_ausentismo_service")
+                    runtime_metadata.get("blocked_tool_ausentismo_service")
                 ),
                 "blocked_run_legacy_for_analytics": bool(
-                    execution_meta.get("blocked_run_legacy_for_analytics")
-                    or execution_plan_meta.get("blocked_run_legacy_for_analytics")
+                    runtime_metadata.get("blocked_run_legacy_for_analytics")
                 ),
-                "runtime_only_fallback_reason": str(
-                    execution_meta.get("runtime_only_fallback_reason")
-                    or execution_plan_meta.get("runtime_only_fallback_reason")
-                    or ""
-                ),
-                "cleanup_phase": str(
-                    execution_meta.get("cleanup_phase")
-                    or execution_plan_meta.get("cleanup_phase")
-                    or ""
-                ),
+                "runtime_only_fallback_reason": str(runtime_metadata.get("runtime_only_fallback_reason") or ""),
+                "cleanup_phase": str(runtime_metadata.get("cleanup_phase") or ""),
                 "satisfaction_review": dict(satisfaction_snapshot or {}),
                 "classifier_source": str(((response.get("orchestrator") or {}).get("classifier_source") or "")),
                 "sql_used": self._resolve_sql_used_for_runtime_event(
@@ -4214,7 +4404,10 @@ class ChatApplicationService:
         intent_arbitration = dict(run_context.metadata.get("intent_arbitration") or {})
         query_intelligence = dict(run_context.metadata.get("query_intelligence") or {})
         execution_plan = dict(query_intelligence.get("execution_plan") or {})
-        execution_meta = dict(execution_plan.get("metadata") or {})
+        execution_meta = ChatApplicationService._resolve_runtime_execution_metadata(
+            query_intelligence=query_intelligence,
+            execution_meta=dict(run_context.metadata.get("runtime_execution_meta") or {}),
+        )
         resolved_query = dict(query_intelligence.get("resolved_query") or {})
         semantic_context = dict(resolved_query.get("semantic_context") or {})
         source_of_truth = dict(semantic_context.get("source_of_truth") or {})
@@ -4245,9 +4438,7 @@ class ChatApplicationService:
             or ""
         )
         orchestrator["fallback_reason"] = str(
-            (run_context.metadata.get("cleanup_guard") or {}).get("fallback_reason")
-            or execution_meta.get("fallback_reason")
-            or ""
+            execution_meta.get("fallback_reason") or ""
         )
         payload["orchestrator"] = orchestrator
         payload["task_state"] = dict((run_context.metadata.get("task_state") or {}))
@@ -4269,19 +4460,19 @@ class ChatApplicationService:
             "planner_was_authority": bool(runtime_compatibility.get("planner_was_authority")),
             "legacy_capability_path_used": bool(runtime_compatibility.get("legacy_capability_path_used")),
             "routing_mode": str(runtime_compatibility.get("routing_mode") or ""),
-            "legacy_analytics_fallback_disabled": bool(cleanup_guard.get("legacy_analytics_fallback_disabled")),
-            "blocked_legacy_fallback": bool(cleanup_guard.get("blocked_legacy_fallback")),
+            "legacy_analytics_fallback_disabled": bool(execution_meta.get("legacy_analytics_fallback_disabled")),
+            "blocked_legacy_fallback": bool(execution_meta.get("blocked_legacy_fallback")),
             "analytics_router_decision": str(
                 execution_meta.get("analytics_router_decision")
                 or cleanup_guard.get("analytics_router_decision")
                 or ""
             ),
-            "legacy_analytics_isolated": bool(cleanup_guard.get("legacy_analytics_isolated")),
-            "blocked_tool_ausentismo_service": bool(cleanup_guard.get("blocked_tool_ausentismo_service")),
-            "blocked_run_legacy_for_analytics": bool(cleanup_guard.get("blocked_run_legacy_for_analytics")),
-            "runtime_only_fallback_reason": str(cleanup_guard.get("runtime_only_fallback_reason") or ""),
-            "fallback_reason": str(cleanup_guard.get("fallback_reason") or ""),
-            "cleanup_phase": str(cleanup_guard.get("cleanup_phase") or ""),
+            "legacy_analytics_isolated": bool(execution_meta.get("legacy_analytics_isolated")),
+            "blocked_tool_ausentismo_service": bool(execution_meta.get("blocked_tool_ausentismo_service")),
+            "blocked_run_legacy_for_analytics": bool(execution_meta.get("blocked_run_legacy_for_analytics")),
+            "runtime_only_fallback_reason": str(execution_meta.get("runtime_only_fallback_reason") or ""),
+            "fallback_reason": str(execution_meta.get("fallback_reason") or ""),
+            "cleanup_phase": str(execution_meta.get("cleanup_phase") or ""),
             "compiler_used": str(
                 execution_meta.get("compiler")
                 or execution_meta.get("compiler_used")

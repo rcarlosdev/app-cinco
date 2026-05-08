@@ -1492,6 +1492,37 @@ class QuerySemanticResolversTests(SimpleTestCase):
         )
         self.assertIn("cargo", list(resolved.intent.group_by or []))
 
+    def test_semantic_business_resolver_keeps_missing_supervisor_as_filter_without_inferred_group_by(self):
+        resolver = SemanticBusinessResolver(
+            registry=_FakeRegistry(_FakeDomain(raw_context={"tables": [], "columns": [], "relationships": [], "flags": {}})),
+            dictionary_tool=_FakeDictionaryTool(),
+        )
+        intent = StructuredQueryIntent(
+            raw_query="Que empleados activos no tienen supervisor registrado",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={
+                "supervisor": {"operator": "is_missing", "match_mode": "null_or_empty"},
+                "estado": "ACTIVO",
+            },
+            group_by=[],
+            metrics=["count"],
+            confidence=0.9,
+        )
+        resolved = resolver.resolve_query(
+            message=intent.raw_query,
+            intent=intent,
+            base_classification={"domain": "empleados"},
+        )
+        self.assertEqual(str(resolved.intent.operation or ""), "detail")
+        self.assertEqual(list(resolved.intent.group_by or []), [])
+        self.assertEqual(
+            dict(resolved.normalized_filters or {}).get("supervisor"),
+            {"operator": "is_missing", "match_mode": "null_or_empty"},
+        )
+        self.assertNotIn("conduce", dict(resolved.normalized_filters or {}))
+
     def test_relation_semantic_resolver_builds_relation_profiles(self):
         resolver = RelationSemanticResolver()
         profiles = resolver.build_relation_profiles(

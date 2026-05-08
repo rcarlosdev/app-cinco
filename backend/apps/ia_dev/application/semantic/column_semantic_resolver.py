@@ -46,6 +46,30 @@ class ColumnSemanticResolver:
         parsed = [item.strip().upper() for item in text.split(",") if item.strip()]
         return sorted(dict.fromkeys(parsed))
 
+    @staticmethod
+    def _parse_semantic_tags(text: Any) -> dict[str, str]:
+        payload: dict[str, str] = {}
+        for key, value in re.findall(r"\[([a-zA-Z0-9_]+)=(.*?)\](?=\[|$)", str(text or "")):
+            clean_key = str(key or "").strip().lower()
+            clean_value = str(value or "").strip()
+            if clean_key and clean_value:
+                payload[clean_key] = clean_value
+        return payload
+
+    @classmethod
+    def _parse_list_tag(cls, value: Any) -> list[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return []
+        normalized = raw
+        for separator in (";", ","):
+            normalized = normalized.replace(separator, "|")
+        return [
+            str(item or "").strip()
+            for item in normalized.split("|")
+            if str(item or "").strip()
+        ]
+
     def build_column_profiles(
         self,
         *,
@@ -61,6 +85,9 @@ class ColumnSemanticResolver:
             column_name = self._normalize_text(row.get("column_name"))
             if not logical and not column_name:
                 continue
+            semantic_tags = self._parse_semantic_tags(
+                row.get("definicion_negocio") or row.get("definition") or row.get("descripcion")
+            )
             profiles.append(
                 {
                     "logical_name": logical or column_name,
@@ -75,6 +102,12 @@ class ColumnSemanticResolver:
                     "is_chart_dimension": self._to_bool(row.get("es_group_by")),
                     "is_chart_measure": self._to_bool(row.get("es_metrica")),
                     "allowed_values": [],
+                    "allowed_operators": self._parse_list_tag(semantic_tags.get("allowed_missing_operators")),
+                    "supports_missingness": self._to_bool(semantic_tags.get("supports_missingness")),
+                    "empty_equivalent_values": self._parse_list_tag(semantic_tags.get("empty_equivalent_values")),
+                    "json_path": str(semantic_tags.get("json_path") or "").strip(),
+                    "privacy": str(semantic_tags.get("privacy") or "").strip().lower(),
+                    "missing_fallback_fields": self._parse_list_tag(semantic_tags.get("missing_fallback_fields")),
                     "confidence": 0.75,
                 }
             )
@@ -87,6 +120,9 @@ class ColumnSemanticResolver:
             if not logical and not column_name:
                 continue
             allowed_values = self._parse_allowed_values(row.get("valores_permitidos"))
+            semantic_tags = self._parse_semantic_tags(
+                row.get("definicion_negocio") or row.get("definition") or row.get("descripcion")
+            )
             supports_filter = self._to_bool(row.get("es_filtro")) or bool(allowed_values)
             supports_group_by = self._to_bool(row.get("es_group_by"))
             supports_metric = self._to_bool(row.get("es_metrica"))
@@ -97,6 +133,11 @@ class ColumnSemanticResolver:
             is_identifier = self._to_bool(row.get("is_identifier")) or (
                 any(token in logical for token in self._IDENTIFIER_HINTS)
                 or column_name in {"cedula", "identificacion"}
+            )
+            supports_missingness = self._to_bool(semantic_tags.get("supports_missingness")) or (
+                "missing_value_alert" in semantic_tags
+                or "empty_value" in semantic_tags
+                or bool(semantic_tags.get("json_path"))
             )
             profile = {
                 "logical_name": logical or column_name,
@@ -111,6 +152,14 @@ class ColumnSemanticResolver:
                 "is_chart_dimension": self._to_bool(row.get("is_chart_dimension")) or supports_group_by,
                 "is_chart_measure": self._to_bool(row.get("is_chart_measure")) or supports_metric,
                 "allowed_values": allowed_values,
+                "allowed_operators": self._parse_list_tag(
+                    row.get("allowed_operators") or semantic_tags.get("allowed_missing_operators")
+                ),
+                "supports_missingness": supports_missingness,
+                "empty_equivalent_values": self._parse_list_tag(semantic_tags.get("empty_equivalent_values")),
+                "json_path": str(semantic_tags.get("json_path") or "").strip(),
+                "privacy": str(semantic_tags.get("privacy") or "").strip().lower(),
+                "missing_fallback_fields": self._parse_list_tag(semantic_tags.get("missing_fallback_fields")),
                 "confidence": 0.92,
             }
             profiles.append(profile)
@@ -147,6 +196,33 @@ class ColumnSemanticResolver:
             base["is_chart_dimension"] = bool(current.get("is_chart_dimension")) or bool(profile.get("is_chart_dimension"))
             base["is_chart_measure"] = bool(current.get("is_chart_measure")) or bool(profile.get("is_chart_measure"))
             base["allowed_values"] = allowed_values
+            base["allowed_operators"] = list(
+                dict.fromkeys(
+                    [
+                        *self._parse_list_tag(current.get("allowed_operators")),
+                        *self._parse_list_tag(profile.get("allowed_operators")),
+                    ]
+                )
+            )
+            base["supports_missingness"] = bool(current.get("supports_missingness")) or bool(profile.get("supports_missingness"))
+            base["empty_equivalent_values"] = list(
+                dict.fromkeys(
+                    [
+                        *self._parse_list_tag(current.get("empty_equivalent_values")),
+                        *self._parse_list_tag(profile.get("empty_equivalent_values")),
+                    ]
+                )
+            )
+            base["json_path"] = str(base.get("json_path") or current.get("json_path") or profile.get("json_path") or "")
+            base["privacy"] = str(base.get("privacy") or current.get("privacy") or profile.get("privacy") or "")
+            base["missing_fallback_fields"] = list(
+                dict.fromkeys(
+                    [
+                        *self._parse_list_tag(current.get("missing_fallback_fields")),
+                        *self._parse_list_tag(profile.get("missing_fallback_fields")),
+                    ]
+                )
+            )
             base["confidence"] = max(current_confidence, incoming_confidence)
             deduped[key] = base
 

@@ -207,7 +207,7 @@ def _heights_sql_response() -> dict:
                 "interpretacion": "La vigencia anual del certificado de alturas impacta la habilitacion operativa.",
                 "riesgo": "Tecnicos con certificado vencido no deberian ser asignados a trabajos en alturas.",
                 "recomendacion": "Priorizar renovacion de vencidos y programar renovacion de proximos a vencer.",
-                "siguiente_accion": "Muestrame el detalle por empleado, area o supervisor.",
+                "siguiente_accion": "Muestrame el detalle por empleado, area, supervisor o movil.",
             },
             "table": {
                 "columns": ["certificados_vencidos", "certificados_proximos_vencer"],
@@ -219,7 +219,7 @@ def _heights_sql_response() -> dict:
             {
                 "id": "heights-followup",
                 "type": "followup",
-                "label": "Muestrame el detalle por empleado, area o supervisor.",
+                "label": "Muestrame el detalle por empleado, area, supervisor o movil.",
                 "payload": {"metric_used": "certificado_alturas_vigencia"},
             }
         ],
@@ -707,7 +707,7 @@ class SimulateIADevChatCommandTests(SimpleTestCase):
         self.assertIn("priorizar renovacion", str(business_response.get("recomendacion") or "").lower())
         self.assertEqual(
             str(business_response.get("siguiente_accion") or ""),
-            "Muestrame el detalle por empleado, area o supervisor.",
+            "Muestrame el detalle por empleado, area, supervisor o movil.",
         )
 
     def test_management_command_module_does_not_import_legacy_adapter(self):

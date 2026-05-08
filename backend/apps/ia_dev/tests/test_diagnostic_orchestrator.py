@@ -88,3 +88,35 @@ class DiagnosticOrchestratorTests(SimpleTestCase):
         signatures = {str(item.get("signature") or "") for item in diagnostics.get("items") or []}
         self.assertIn("ask_context_despite_identifier", signatures)
 
+    def test_valid_sql_assisted_authority_does_not_emit_semantic_runtime_divergence(self):
+        orchestrator = DiagnosticOrchestrator()
+        diagnostics = orchestrator.analyze(
+            message="personal con certificado de alturas proximo a vencer",
+            resolved_query=self._resolved_query(),
+            execution_plan=QueryExecutionPlan(
+                strategy="sql_assisted",
+                reason="employee_heights_certificate_summary_json",
+                domain_code="empleados",
+                capability_id="empleados.count.active.v1",
+                sql_query="SELECT 1",
+                constraints={"filters": {"estado": "ACTIVO"}},
+                policy={"allowed": True},
+            ),
+            response={"orchestrator": {"classifier_source": "query_intelligence_sql_assisted"}},
+            planned_capability={"capability_id": "empleados.count.active.v1"},
+            route={
+                "reason": "query_execution_planner_sql_assisted_authority",
+                "execute_capability": False,
+                "runtime_authority": "query_execution_planner",
+            },
+            execution_meta={"ok": True, "satisfied": True, "used_legacy": False},
+            memory_hints={},
+            query_intelligence={
+                "canonical_resolution": {"comparison": {"differences_count": 1, "differences": ["capability_shadow"]}},
+                "semantic_normalization": {"comparison": {"differences_count": 1, "differences": ["capability_shadow"]}},
+            },
+        )
+
+        signatures = {str(item.get("signature") or "") for item in diagnostics.get("items") or []}
+        self.assertNotIn("semantic_runtime_divergence", signatures)
+

@@ -591,6 +591,7 @@ class SemanticBusinessResolver:
                 normalized_filters=normalized_filters,
             )
             self._apply_executable_filter_aliases(normalized_filters=normalized_filters)
+            self._prune_missingness_literal_siblings(normalized_filters=normalized_filters)
         normalized_filters = EmployeeIdentifierService.prune_redundant_search_filter(normalized_filters)
         resolved_group_by, group_resolutions = self.column_resolver.resolve_group_by(
             requested_group_by=list(intent.group_by or []),
@@ -607,6 +608,12 @@ class SemanticBusinessResolver:
         )
         if inferred_group_by:
             resolved_group_by = list(dict.fromkeys([*list(resolved_group_by or []), *list(inferred_group_by or [])]))
+        if (
+            domain_code in {"empleados", "rrhh"}
+            and QueryIntentResolver._has_missingness_filter(filters=dict(normalized_filters or {}))
+            and not re.search(r"\bpor\s+[a-z0-9_]+\b", self._normalize_text(message))
+        ):
+            resolved_group_by = []
         if domain_code in {"empleados", "rrhh"}:
             resolved_group_by = self._prune_employee_group_by_filters(
                 resolved_group_by=resolved_group_by,
@@ -688,6 +695,7 @@ class SemanticBusinessResolver:
         if (
             domain_code in {"empleados", "rrhh"}
             and not is_birthday_query
+            and not QueryIntentResolver._has_missingness_filter(filters=dict(normalized_filters or {}))
             and status_value
             and (
                 str(intent.operation or "").strip().lower() == "count"
@@ -1439,6 +1447,12 @@ class SemanticBusinessResolver:
         canonicalize_term,
     ) -> list[str]:
         normalized_message = self._normalize_text(message)
+        if (
+            domain_code in {"empleados", "rrhh"}
+            and QueryIntentResolver._has_missingness_filter(filters=dict(intent.filters or {}))
+            and not re.search(r"\bpor\s+[a-z0-9_]+\b", normalized_message)
+        ):
+            return []
         entity_hint = self._normalize_text(getattr(intent, "entity_type", "") or "")
         candidate_dimensions = self._candidate_group_dimensions_from_context(
             domain_code=domain_code,
@@ -1604,6 +1618,15 @@ class SemanticBusinessResolver:
     ) -> None:
         for key in [str(item or "").strip().lower() for item in list(resolved_group_by or []) if str(item or "").strip()]:
             normalized_filters.pop(key, None)
+
+    @staticmethod
+    def _prune_missingness_literal_siblings(*, normalized_filters: dict[str, Any]) -> None:
+        if not QueryIntentResolver._has_missingness_filter(filters=dict(normalized_filters or {})):
+            return
+        if isinstance(normalized_filters.get("documento_identidad"), dict):
+            for key in ("documento_identidad_lado_a", "documento_identidad_lado_b"):
+                if key in normalized_filters and not isinstance(normalized_filters.get(key), dict):
+                    normalized_filters.pop(key, None)
 
     @classmethod
     def _normalize_period(cls, *, message: str, intent: StructuredQueryIntent) -> dict[str, Any]:
@@ -1920,6 +1943,8 @@ class SemanticBusinessResolver:
     @classmethod
     def _resolve_attendance_reason_from_message(cls, *, message: str) -> str:
         normalized = cls._normalize_text(message)
+        if re.search(r"\bpermiso\s+de\s+trabajo\b", normalized):
+            return ""
         reason_signals = {
             "vacaciones": "VACACIONES",
             "vacacion": "VACACIONES",
@@ -2226,6 +2251,7 @@ class SemanticBusinessResolver:
             if not isinstance(profile, dict):
                 continue
             logical_name = str(profile.get("logical_name") or profile.get("column_name") or "").strip().lower()
+            column_name = str(profile.get("column_name") or "").strip().lower()
             if not logical_name or logical_name in {"estado", "estado_empleado"}:
                 continue
             if str((normalized_filters or {}).get(logical_name) or "").strip():
@@ -2239,9 +2265,21 @@ class SemanticBusinessResolver:
             ]
             if not allowed_values:
                 continue
+            logical_markers = {
+                self._normalize_text(logical_name),
+                self._normalize_text(column_name),
+                self._normalize_text(logical_name.replace("_", " ")),
+                self._normalize_text(column_name.replace("_", " ")) if column_name else "",
+            }
+            column_explicitly_named = any(
+                marker and re.search(rf"\b{re.escape(marker)}\b", normalized_message)
+                for marker in logical_markers
+            )
             for candidate in allowed_values:
                 normalized_candidate = self._normalize_text(candidate)
                 if not normalized_candidate:
+                    continue
+                if normalized_candidate in {"si", "no"} and not column_explicitly_named:
                     continue
                 candidate_aliases = {
                     normalized_candidate,

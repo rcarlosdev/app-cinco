@@ -263,6 +263,66 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertIn("movil", list(intent.group_by or []))
         self.assertEqual(str((intent.filters or {}).get("tipo_labor") or ""), "OPERATIVO")
 
+    def test_query_intent_resolver_detects_identity_document_missingness_as_general_operator(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="Que documentos de identidad faltan",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "analytics_query",
+                    "needs_database": True,
+                },
+                semantic_context={
+                    "column_profiles": [
+                        {"logical_name": "documento_identidad_lado_a", "column_name": "datos", "supports_filter": True},
+                        {"logical_name": "documento_identidad_lado_b", "column_name": "datos", "supports_filter": True},
+                    ],
+                    "synonym_index": {"documento de identidad": "documento_identidad_lado_a"},
+                },
+            )
+        self.assertEqual(str(intent.domain_code or ""), "empleados")
+        self.assertEqual(
+            dict(intent.filters or {}).get("documento_identidad"),
+            {"operator": "is_incomplete", "match_mode": "null_or_empty"},
+        )
+
+    def test_query_intent_resolver_merge_preserves_missingness_filters_over_llm_noise(self):
+        resolver = QueryIntentResolver()
+        fallback = StructuredQueryIntent(
+            raw_query="Que empleados activos no tienen supervisor registrado",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={"supervisor": {"operator": "is_missing", "match_mode": "null_or_empty"}},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.8,
+            source="rules",
+        )
+        llm = StructuredQueryIntent(
+            raw_query=fallback.raw_query,
+            domain_code="empleados",
+            operation="aggregate",
+            template_id="aggregate_by_group_and_period",
+            filters={"conduce": "NO", "estado": "ACTIVO"},
+            period={},
+            group_by=["supervisor"],
+            metrics=["count"],
+            confidence=0.9,
+            source="openai",
+        )
+        merged = resolver._merge_intents(fallback=fallback, llm=llm)
+        self.assertEqual(str(merged.operation or ""), "detail")
+        self.assertEqual(str(merged.template_id or ""), "detail_by_entity_and_period")
+        self.assertEqual(list(merged.group_by or []), [])
+        self.assertEqual(
+            dict(merged.filters or {}).get("supervisor"),
+            {"operator": "is_missing", "match_mode": "null_or_empty"},
+        )
+        self.assertNotIn("conduce", dict(merged.filters or {}))
+
     def test_query_intent_resolver_does_not_convert_group_dimension_into_tipo_labor_filter(self):
         resolver = QueryIntentResolver()
         with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
@@ -1293,6 +1353,8 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertIn("e.tipo_labor = 'OPERATIVO'", str(plan.sql_query or ""))
         self.assertEqual(str((plan.metadata or {}).get("compiler") or ""), "employee_semantic_sql")
         self.assertEqual(str((plan.metadata or {}).get("metric_used") or ""), "certificado_alturas_vigencia")
+        self.assertEqual(str((plan.constraints or {}).get("result_shape") or ""), "kpi")
+        self.assertFalse(bool((plan.constraints or {}).get("chart_requested")))
 
     def test_query_execution_planner_prioritizes_employee_group_by_over_generic_count_template(self):
         planner = QueryExecutionPlanner()
@@ -1707,6 +1769,30 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         )
         self.assertFalse(validation.satisfied)
         self.assertEqual(validation.reason, "group_count_requested_but_result_is_not_aggregated")
+
+    def test_result_satisfaction_validator_accepts_grouped_count_with_generic_numeric_alias(self):
+        validator = ResultSatisfactionValidator()
+        response = {
+            "reply": "Personal activo agrupado por area.",
+            "data": {
+                "kpis": {"rowcount": 3},
+                "table": {
+                    "columns": ["area", "total_registros"],
+                    "rows": [
+                        {"area": "OPERACIONES", "total_registros": 120},
+                        {"area": "MANTENIMIENTO", "total_registros": 87},
+                    ],
+                    "rowcount": 2,
+                },
+            },
+        }
+        validation = validator.validate(
+            message="Cantidad de personal activo por area",
+            response=response,
+            resolved_query=None,
+        )
+        self.assertTrue(validation.satisfied)
+        self.assertEqual(validation.reason, "ok")
 
     def test_result_satisfaction_validator_respects_explicit_empty_group_by_from_planner_for_heights_kpi(self):
         validator = ResultSatisfactionValidator()

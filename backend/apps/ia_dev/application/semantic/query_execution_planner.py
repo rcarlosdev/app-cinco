@@ -20,6 +20,7 @@ from apps.ia_dev.application.semantic.join_aware_sql_service import JoinAwarePil
 
 class QueryExecutionPlanner:
     SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_\.]+$")
+    TRAILING_LIMIT_RE = re.compile(r"\s+LIMIT\s+(\d+)\s*;?\s*$", re.IGNORECASE)
     CLEANUP_PHASE = "phase_7"
     PILOT_PHASE = "phase_9"
     ANALYTICS_ROUTER_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh"}
@@ -96,6 +97,7 @@ class QueryExecutionPlanner:
                         effective_constraints["group_by"] = []
                         effective_constraints["result_shape"] = "kpi"
                         effective_constraints["operation"] = "count"
+                        effective_constraints["chart_requested"] = False
                     return QueryExecutionPlan(
                         strategy="sql_assisted",
                         reason=sql_reason,
@@ -479,6 +481,12 @@ class QueryExecutionPlanner:
                 {columns[idx]: row[idx] for idx in range(len(columns))}
                 for row in rows
             ]
+            result_metadata = self._resolve_sql_result_metadata(
+                db_alias=db_alias,
+                sql_query=sql_query,
+                returned_records=len(rows_payload),
+                execution_plan=execution_plan,
+            )
             response = self._build_sql_response(
                 run_context=run_context,
                 resolved_query=resolved_query,
@@ -488,6 +496,7 @@ class QueryExecutionPlanner:
                 columns=columns,
                 duration_ms=duration_ms,
                 db_alias=db_alias,
+                result_metadata=result_metadata,
             )
             self._record_event(
                 observability=observability,
@@ -501,6 +510,10 @@ class QueryExecutionPlanner:
                     "domain_code": resolved_query.intent.domain_code,
                     "template_id": resolved_query.intent.template_id,
                     "rowcount": len(rows_payload),
+                    "total_records": int(result_metadata.get("total_records") or len(rows_payload)),
+                    "returned_records": int(result_metadata.get("returned_records") or len(rows_payload)),
+                    "truncated": bool(result_metadata.get("truncated")),
+                    "limit": int(result_metadata.get("limit") or 0),
                     "query": sql_query,
                     "pilot_enabled": self._productive_pilot_enabled_for_domain(
                         domain_code=str(resolved_query.intent.domain_code or "")
@@ -541,6 +554,66 @@ class QueryExecutionPlanner:
                 },
             )
             return {"ok": False, "error": f"sql_execution_error:{exc}"}
+
+    def _resolve_sql_result_metadata(
+        self,
+        *,
+        db_alias: str,
+        sql_query: str,
+        returned_records: int,
+        execution_plan: QueryExecutionPlan,
+    ) -> dict[str, Any]:
+        limit = self._extract_trailing_limit(sql_query)
+        result_shape = str((execution_plan.constraints or {}).get("result_shape") or "").strip().lower()
+        aggregation = str((execution_plan.metadata or {}).get("aggregation_used") or "").strip().lower()
+        should_count_total = bool(
+            limit
+            and (
+                result_shape in {"table", "list", "detail"}
+                or aggregation in {"list", "detail"}
+            )
+            and aggregation in {"list", "detail", ""}
+        )
+        total_records = int(returned_records)
+        count_query = ""
+        count_error = ""
+        if should_count_total:
+            count_query = self._build_limited_detail_count_query(sql_query=sql_query)
+            if count_query:
+                try:
+                    with connections[db_alias].cursor() as cursor:
+                        cursor.execute(count_query)
+                        row = cursor.fetchone()
+                    total_records = int((row or [returned_records])[0] or 0)
+                except Exception as exc:
+                    count_error = str(exc)
+                    total_records = int(returned_records)
+
+        return {
+            "total_records": int(total_records),
+            "returned_records": int(returned_records),
+            "truncated": bool(limit and total_records > returned_records),
+            "limit": int(limit or 0),
+            "count_query": count_query,
+            "count_error": count_error,
+        }
+
+    @classmethod
+    def _extract_trailing_limit(cls, sql_query: str) -> int:
+        match = cls.TRAILING_LIMIT_RE.search(str(sql_query or "").strip())
+        if not match:
+            return 0
+        try:
+            return max(0, int(match.group(1)))
+        except Exception:
+            return 0
+
+    @classmethod
+    def _build_limited_detail_count_query(cls, *, sql_query: str) -> str:
+        base_query = cls.TRAILING_LIMIT_RE.sub("", str(sql_query or "").strip()).strip().rstrip(";").strip()
+        if not base_query:
+            return ""
+        return f"SELECT COUNT(*) AS total_records FROM ({base_query}) AS sql_assisted_total LIMIT 1"
 
     def build_missing_context_response(
         self,
@@ -1152,7 +1225,7 @@ class QueryExecutionPlanner:
         target_selects = [
             str(item.get("select_sql") or "").strip()
             for item in targets
-            if str(item.get("select_sql") or "").strip()
+            if str(item.get("select_sql") or "").strip() and bool(item.get("include_in_detail_select"))
         ]
         select_columns = list(detail_columns or [])
         for select_sql in target_selects:
@@ -1173,6 +1246,11 @@ class QueryExecutionPlanner:
                 str(item.get("logical_name") or "").strip().lower()
                 for item in targets
                 if str(item.get("logical_name") or "").strip()
+            ],
+            "data_quality_target_operators": [
+                str(item.get("operator") or "").strip().lower()
+                for item in targets
+                if str(item.get("operator") or "").strip()
             ],
             "data_quality_target_labels": target_labels,
             "insights": [
@@ -1549,44 +1627,35 @@ class QueryExecutionPlanner:
         for logical_name, raw_value in dict(filters or {}).items():
             if not self._is_data_quality_filter_spec(raw_value):
                 continue
+            logical_target = str(logical_name or "").strip().lower()
+            operator = self._normalize_data_quality_operator(raw_value)
+            if logical_target == "documento_identidad":
+                for document_side in ("documento_identidad_lado_a", "documento_identidad_lado_b"):
+                    profile = self._find_context_profile(
+                        context=context,
+                        logical_names=(document_side,),
+                    )
+                    target = self._build_data_quality_target(
+                        logical_name=document_side,
+                        operator=operator,
+                        profile=profile,
+                        context=context,
+                    )
+                    if target:
+                        targets.append(target)
+                continue
             profile = self._find_context_profile(
                 context=context,
-                logical_names=(str(logical_name or "").strip().lower(),),
+                logical_names=(logical_target,),
             )
-            if not profile:
-                continue
-            definition = str(
-                profile.get("definicion_negocio")
-                or profile.get("definition")
-                or profile.get("descripcion")
-                or ""
-            ).strip()
-            semantic_tags = self._parse_semantic_tags(text=definition)
-            source_column = str(profile.get("column_name") or "").strip().lower()
-            if not source_column:
-                continue
-            json_path = str(semantic_tags.get("json_path") or "").strip()
-            if json_path:
-                select_sql = (
-                    f"JSON_UNQUOTE(JSON_EXTRACT({source_column}, '{self._escape_literal(json_path)}')) "
-                    f"AS {str(logical_name).strip().lower()}"
-                )
-                where_sql = (
-                    f"JSON_UNQUOTE(JSON_EXTRACT({source_column}, '{self._escape_literal(json_path)}')) IS NULL "
-                    f"OR JSON_UNQUOTE(JSON_EXTRACT({source_column}, '{self._escape_literal(json_path)}')) = ''"
-                )
-            else:
-                select_sql = source_column
-                where_sql = f"{source_column} IS NULL OR {source_column} = ''"
-            targets.append(
-                {
-                    "logical_name": str(logical_name or "").strip().lower(),
-                    "source_column": source_column,
-                    "select_sql": select_sql,
-                    "where_sql": where_sql,
-                    "label": self._data_quality_label(logical_name=str(logical_name or "").strip().lower()),
-                }
+            target = self._build_data_quality_target(
+                logical_name=logical_target,
+                operator=operator,
+                profile=profile,
+                context=context,
             )
+            if target:
+                targets.append(target)
         return targets
 
     @staticmethod
@@ -1594,7 +1663,170 @@ class QueryExecutionPlanner:
         if not isinstance(value, dict):
             return False
         operator = str(value.get("operator") or "").strip().lower()
-        return operator in {"is_missing", "is_incomplete"}
+        return operator in {
+            "is_missing",
+            "is_incomplete",
+            "missing",
+            "empty",
+            "incomplete",
+            "not_registered",
+            "not_available",
+            "no_tiene",
+            "sin",
+        }
+
+    @staticmethod
+    def _normalize_data_quality_operator(value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        operator = str(value.get("operator") or "").strip().lower()
+        if operator in {"is_incomplete", "incomplete"}:
+            return "incomplete"
+        if operator in {"empty"}:
+            return "empty"
+        if operator in {"not_registered"}:
+            return "not_registered"
+        if operator in {"not_available"}:
+            return "not_available"
+        if operator in {"no_tiene"}:
+            return "no_tiene"
+        if operator in {"sin"}:
+            return "sin"
+        return "missing"
+
+    def _build_data_quality_target(
+        self,
+        *,
+        logical_name: str,
+        operator: str,
+        profile: dict[str, Any] | None,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not profile:
+            return {}
+        definition = str(
+            profile.get("definicion_negocio")
+            or profile.get("definition")
+            or profile.get("descripcion")
+            or ""
+        ).strip()
+        semantic_tags = self._parse_semantic_tags(text=definition)
+        source_column = str(profile.get("column_name") or "").strip().lower()
+        if not source_column:
+            return {}
+        json_path = str(profile.get("json_path") or semantic_tags.get("json_path") or "").strip()
+        privacy = str(profile.get("privacy") or semantic_tags.get("privacy") or "").strip().lower()
+        empty_equivalent_values = self._normalize_semantic_list(
+            profile.get("empty_equivalent_values") or semantic_tags.get("empty_equivalent_values")
+        )
+        fallback_fields = self._normalize_semantic_list(
+            profile.get("missing_fallback_fields") or semantic_tags.get("missing_fallback_fields")
+        )
+        select_sql = ""
+        where_sql = self._build_missingness_where_sql(
+            source_column=source_column,
+            json_path=json_path,
+            empty_equivalent_values=empty_equivalent_values,
+            fallback_fields=fallback_fields,
+            context=context,
+        )
+        if not where_sql:
+            return {}
+        if json_path and privacy not in {"high"}:
+            select_sql = (
+                f"JSON_UNQUOTE(JSON_EXTRACT({source_column}, '{self._escape_literal(json_path)}')) "
+                f"AS {str(logical_name).strip().lower()}"
+            )
+        return {
+            "logical_name": str(logical_name or "").strip().lower(),
+            "source_column": source_column,
+            "select_sql": select_sql,
+            "where_sql": where_sql,
+            "label": self._data_quality_label(logical_name=str(logical_name or "").strip().lower()),
+            "operator": str(operator or "missing"),
+            "include_in_detail_select": False,
+        }
+
+    def _build_missingness_where_sql(
+        self,
+        *,
+        source_column: str,
+        json_path: str,
+        empty_equivalent_values: list[str],
+        fallback_fields: list[str],
+        context: dict[str, Any],
+    ) -> str:
+        primary_clause = self._missing_expression_clause(
+            source_column=source_column,
+            json_path=json_path,
+            empty_equivalent_values=empty_equivalent_values,
+        )
+        if not primary_clause:
+            return ""
+        fallback_clauses: list[str] = []
+        for fallback_logical in list(fallback_fields or []):
+            profile = self._find_context_profile(
+                context=context,
+                logical_names=(str(fallback_logical or "").strip().lower(),),
+            )
+            if not profile:
+                continue
+            fallback_definition = str(
+                profile.get("definicion_negocio")
+                or profile.get("definition")
+                or profile.get("descripcion")
+                or ""
+            ).strip()
+            fallback_tags = self._parse_semantic_tags(text=fallback_definition)
+            fallback_source = str(profile.get("column_name") or "").strip().lower()
+            if not fallback_source:
+                continue
+            clause = self._missing_expression_clause(
+                source_column=fallback_source,
+                json_path=str(profile.get("json_path") or fallback_tags.get("json_path") or "").strip(),
+                empty_equivalent_values=self._normalize_semantic_list(
+                    profile.get("empty_equivalent_values") or fallback_tags.get("empty_equivalent_values")
+                ),
+            )
+            if clause:
+                fallback_clauses.append(f"({clause})")
+        if not fallback_clauses:
+            return primary_clause
+        return f"(({primary_clause}) AND {' AND '.join(fallback_clauses)})"
+
+    def _missing_expression_clause(
+        self,
+        *,
+        source_column: str,
+        json_path: str,
+        empty_equivalent_values: list[str],
+    ) -> str:
+        expression = (
+            f"JSON_UNQUOTE(JSON_EXTRACT({source_column}, '{self._escape_literal(json_path)}'))"
+            if json_path
+            else source_column
+        )
+        conditions = [
+            f"{expression} IS NULL",
+            f"TRIM({expression}) = ''",
+        ]
+        for token in list(empty_equivalent_values or []):
+            clean = str(token or "").strip()
+            if clean:
+                conditions.append(f"{expression} = '{self._escape_literal(clean)}'")
+        return " OR ".join(conditions)
+
+    @staticmethod
+    def _normalize_semantic_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item or "").strip() for item in value if str(item or "").strip()]
+        text = str(value or "").strip()
+        if not text:
+            return []
+        normalized = text
+        for separator in (";", ","):
+            normalized = normalized.replace(separator, "|")
+        return [str(item or "").strip() for item in normalized.split("|") if str(item or "").strip()]
 
     @staticmethod
     def _data_quality_label(*, logical_name: str) -> str:
@@ -1604,11 +1836,14 @@ class QueryExecutionPlanner:
             "celular_personal": "celular personal",
             "eps": "EPS",
             "arl": "ARL",
+            "permiso_trabajo": "permiso de trabajo",
             "talla_botas": "tallas",
             "talla_camisa": "tallas",
             "talla_chaqueta": "tallas",
             "talla_guerrera": "tallas",
             "talla_pantalon": "tallas",
+            "documento_identidad_lado_a": "documento de identidad",
+            "documento_identidad_lado_b": "documento de identidad",
         }
         return str(labels.get(str(logical_name or "").strip().lower()) or logical_name)
 
@@ -1623,8 +1858,12 @@ class QueryExecutionPlanner:
             return "La ausencia de celular personal dificulta contacto operativo y actualizacion de datos del colaborador."
         if normalized & {"eps", "arl"}:
             return "La falta de EPS o ARL expone riesgos de cumplimiento laboral y cobertura del personal."
+        if "permiso de trabajo" in normalized:
+            return "La ausencia de permiso de trabajo expone riesgos legales, migratorios y de continuidad contractual."
         if "tallas" in normalized:
             return "La informacion de tallas incompleta afecta planeacion, compra y entrega correcta de dotacion."
+        if "documento de identidad" in normalized:
+            return "La documentacion de identidad incompleta afecta validacion administrativa, trazabilidad y soportes de auditoria."
         return "La informacion faltante reduce control operativo y confiabilidad del maestro de personal."
 
     @staticmethod
@@ -1638,8 +1877,12 @@ class QueryExecutionPlanner:
             return "Actualizar el celular personal principal y reforzar la captura obligatoria del dato."
         if normalized & {"eps", "arl"}:
             return "Regularizar EPS y ARL faltantes con validacion documental y seguimiento de cumplimiento."
+        if "permiso de trabajo" in normalized:
+            return "Validar autorizacion de consulta y completar el soporte legal o migratorio faltante."
         if "tallas" in normalized:
             return "Completar tallas oficiales desde datos.tallas antes de programar dotacion o reposiciones."
+        if "documento de identidad" in normalized:
+            return "Completar ambos lados del documento de identidad sin exponer URLs completas en la salida operativa."
         return "Depurar el dato faltante y establecer responsables de calidad por area."
 
     def _employee_sql_metadata(
@@ -2154,6 +2397,7 @@ class QueryExecutionPlanner:
         columns: list[str],
         duration_ms: int,
         db_alias: str,
+        result_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         template_id = str(resolved_query.intent.template_id or "").strip().lower()
         kpis: dict[str, Any] = {}
@@ -2165,6 +2409,14 @@ class QueryExecutionPlanner:
         if not kpis:
             kpis["rowcount"] = int(len(rows))
         metadata = dict(execution_plan.metadata or {})
+        result_meta = {
+            "total_records": int((result_metadata or {}).get("total_records") or len(rows)),
+            "returned_records": int((result_metadata or {}).get("returned_records") or len(rows)),
+            "truncated": bool((result_metadata or {}).get("truncated")),
+            "limit": int((result_metadata or {}).get("limit") or 0),
+        }
+        kpis.setdefault("returned_records", result_meta["returned_records"])
+        kpis.setdefault("total_records", result_meta["total_records"])
         compiler = str(metadata.get("compiler") or "default_sql_builder")
         metric_used = str(metadata.get("metric_used") or "")
         relations_used = list(metadata.get("relations_used") or [])
@@ -2241,7 +2493,10 @@ class QueryExecutionPlanner:
             ]
             distinct_labels = list(dict.fromkeys(target_labels))
             label_text = " o ".join(distinct_labels[:2]) if len(distinct_labels) <= 2 else ", ".join(distinct_labels[:-1]) + f" y {distinct_labels[-1]}"
-            total = int(kpis.get("total") or kpis.get("rowcount") or len(rows) or 0)
+            total = int(result_meta.get("total_records") or kpis.get("total") or kpis.get("rowcount") or len(rows) or 0)
+            returned = int(result_meta.get("returned_records") or len(rows) or 0)
+            truncated = bool(result_meta.get("truncated"))
+            limit = int(result_meta.get("limit") or 0)
             operation = str(resolved_query.intent.operation or "").strip().lower()
             missing_phrase = (
                 f"sin {label_text}"
@@ -2251,12 +2506,27 @@ class QueryExecutionPlanner:
             if operation == "count":
                 reply = f"Se identificaron {total} empleados activos {missing_phrase}."
             else:
-                reply = f"Se listan {len(rows)} empleados activos {missing_phrase}."
+                reply = f"Se identificaron {total} empleados activos {missing_phrase}."
+                if truncated:
+                    reply += f" Estoy mostrando los primeros {returned} registros debido al limite operativo de {limit}."
+                else:
+                    reply += f" Se muestran {returned} registros."
             hallazgo = f"Hay empleados activos con informacion faltante o incompleta en {label_text}."
+            if truncated:
+                hallazgo += f" El detalle esta truncado: {returned} de {total} registros encontrados."
             riesgo = self._data_quality_risk_text(targets=distinct_labels)
             recomendacion = self._data_quality_recommendation_text(targets=distinct_labels)
+            if truncated:
+                recomendacion = (
+                    f"{recomendacion} Segmenta por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+                ).strip()
             insights = [
                 f"Dato principal: {total} empleados activos con {label_text} faltante o incompleto.",
+                *(
+                    [f"Truncamiento: se muestran {returned} de {total} registros por limite operativo."]
+                    if truncated
+                    else []
+                ),
                 f"Riesgo: {riesgo}",
                 f"Recomendacion: {recomendacion}",
             ]
@@ -2267,7 +2537,11 @@ class QueryExecutionPlanner:
                 "interpretacion": "La consulta evidencia brechas de calidad de dato sobre atributos operativos y administrativos del personal activo.",
                 "riesgo": riesgo,
                 "recomendacion": recomendacion,
-                "siguiente_accion": "Priorizar depuracion del dato y asignar responsables por area o supervisor.",
+                "siguiente_accion": (
+                    "Filtra por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+                    if truncated
+                    else "Priorizar depuracion del dato y asignar responsables por area o supervisor."
+                ),
             }
             actions = [
                 {
@@ -2306,9 +2580,9 @@ class QueryExecutionPlanner:
                 {
                     "id": f"task-followup-{run_context.run_id}",
                     "type": "followup",
-                    "label": "Muestrame el detalle por empleado, area o supervisor.",
+                    "label": "Muestrame el detalle por empleado, area, supervisor o movil.",
                     "payload": {
-                        "suggested_dimensions": ["empleado", "area", "supervisor"],
+                        "suggested_dimensions": ["empleado", "area", "supervisor", "movil"],
                         "current_strategy": "sql_assisted",
                         "metric_used": metric_used,
                     },
@@ -2324,7 +2598,7 @@ class QueryExecutionPlanner:
                 "interpretacion": "La vigencia de 18 meses del certificado de alturas impacta la habilitacion operativa del personal de campo.",
                 "riesgo": "Tecnicos con certificado vencido no deberian ser asignados a trabajos en alturas.",
                 "recomendacion": "Priorizar renovacion de vencidos y programar renovacion de proximos a vencer.",
-                "siguiente_accion": "Muestrame el detalle por empleado, area o supervisor.",
+                "siguiente_accion": "Muestrame el detalle por empleado, area, supervisor o movil.",
             }
         return {
             "session_id": str(run_context.session_id or ""),
@@ -2348,6 +2622,13 @@ class QueryExecutionPlanner:
                     "columns": list(columns or []),
                     "rows": list(rows or []),
                     "rowcount": len(rows),
+                    "total_records": result_meta["total_records"],
+                    "returned_records": result_meta["returned_records"],
+                    "truncated": result_meta["truncated"],
+                    "limit": result_meta["limit"],
+                },
+                "meta": {
+                    "result_set": dict(result_meta),
                 },
                 "charts": (
                     [
@@ -2378,6 +2659,11 @@ class QueryExecutionPlanner:
                     "metric_used": metric_used,
                     "aggregation_used": str(metadata.get("aggregation_used") or ""),
                     "dimensions_used": list(metadata.get("dimensions_used") or []),
+                    "result_set": dict(result_meta),
+                    "total_records": result_meta["total_records"],
+                    "returned_records": result_meta["returned_records"],
+                    "truncated": result_meta["truncated"],
+                    "limit": result_meta["limit"],
                     "declared_metric_source": str(metadata.get("declared_metric_source") or ""),
                     "declared_dimensions_source": str(metadata.get("declared_dimensions_source") or ""),
                 }
@@ -2391,6 +2677,7 @@ class QueryExecutionPlanner:
                         "execution_plan": execution_plan.as_dict(),
                         "duration_ms": duration_ms,
                         "rowcount": len(rows),
+                        "result_set": dict(result_meta),
                     },
                     "active_nodes": ["q", "gpt", "route", "sql", "result"],
                 }

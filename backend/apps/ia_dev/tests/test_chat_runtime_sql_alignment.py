@@ -99,19 +99,23 @@ def _employee_data_quality_context() -> dict:
             {"table_name": "cinco_base_de_personal", "logical_name": "estado_empleado", "column_name": "estado", "supports_filter": True, "allowed_values": ["ACTIVO", "INACTIVO"]},
             {"table_name": "cinco_base_de_personal", "logical_name": "supervisor", "column_name": "supervisor", "supports_filter": True, "supports_group_by": True, "supports_dimension": True},
             {"table_name": "cinco_base_de_personal", "logical_name": "correo_corporativo", "column_name": "correo", "supports_filter": True},
-            {"table_name": "cinco_base_de_personal", "logical_name": "celular_personal", "column_name": "celular_personal", "supports_filter": True},
+            {"table_name": "cinco_base_de_personal", "logical_name": "celular_personal", "column_name": "celular_personal", "supports_filter": True, "definicion_negocio": "Celular principal. [missing_fallback_fields=celular_alterno]"},
+            {"table_name": "cinco_base_de_personal", "logical_name": "celular_alterno", "column_name": "celular_alterno", "supports_filter": True},
             {"table_name": "cinco_base_de_personal", "logical_name": "eps", "column_name": "eps", "supports_filter": True},
             {"table_name": "cinco_base_de_personal", "logical_name": "arl", "column_name": "arl", "supports_filter": True},
+            {"table_name": "cinco_base_de_personal", "logical_name": "permiso_trabajo", "column_name": "permiso_trabajo", "supports_filter": True},
             {"table_name": "cinco_base_de_personal", "logical_name": "talla_botas", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Talla de botas. [json_path=$.tallas.botas]"},
             {"table_name": "cinco_base_de_personal", "logical_name": "talla_camisa", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Talla de camisa. [json_path=$.tallas.camisa]"},
             {"table_name": "cinco_base_de_personal", "logical_name": "talla_chaqueta", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Talla de chaqueta. [json_path=$.tallas.chaqueta]"},
             {"table_name": "cinco_base_de_personal", "logical_name": "talla_guerrera", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Talla de guerrera. [json_path=$.tallas.guerrera]"},
             {"table_name": "cinco_base_de_personal", "logical_name": "talla_pantalon", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Talla de pantalon. [json_path=$.tallas.pantalon]"},
+            {"table_name": "cinco_base_de_personal", "logical_name": "documento_identidad_lado_a", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Documento identidad lado A. [json_path=$.documento_identidad.lado_a][privacy=high]"},
+            {"table_name": "cinco_base_de_personal", "logical_name": "documento_identidad_lado_b", "column_name": "datos", "supports_filter": True, "definicion_negocio": "Documento identidad lado B. [json_path=$.documento_identidad.lado_b][privacy=high]"},
         ],
         "allowed_tables": ["bd_c3nc4s1s.cinco_base_de_personal", "cinco_base_de_personal"],
         "allowed_columns": [
             "cedula", "nombre", "apellido", "cargo", "zona_nodo", "area", "carpeta", "movil",
-            "estado", "supervisor", "correo", "celular_personal", "eps", "arl", "datos",
+            "estado", "supervisor", "correo", "celular_personal", "celular_alterno", "eps", "arl", "permiso_trabajo", "datos",
         ],
         "aliases": {
             "jefe directo": "supervisor",
@@ -120,12 +124,17 @@ def _employee_data_quality_context() -> dict:
             "celular": "celular_personal",
             "celular personal": "celular_personal",
             "tallas": "talla_botas",
+            "permiso de trabajo": "permiso_trabajo",
+            "documento de identidad": "documento_identidad_lado_a",
+            "documentos de identidad": "documento_identidad_lado_a",
         },
         "synonym_index": {
             "jefe": "supervisor",
             "correo corporativo": "correo_corporativo",
             "celular": "celular_personal",
             "tallas": "talla_botas",
+            "permiso de trabajo": "permiso_trabajo",
+            "documento de identidad": "documento_identidad_lado_a",
         },
         "dictionary": {"relations": []},
         "source_of_truth": {"pilot_sql_assisted_enabled": True, "used_dictionary": True, "used_yaml": True},
@@ -429,7 +438,7 @@ class ChatRuntimeSqlAlignmentTests(SimpleTestCase):
 
         self.assertEqual(plan.strategy, "sql_assisted")
         self.assertIn("estado = 'ACTIVO'", str(plan.sql_query or ""))
-        self.assertIn("(supervisor IS NULL OR supervisor = '')", str(plan.sql_query or ""))
+        self.assertIn("(supervisor IS NULL OR TRIM(supervisor) = '')", str(plan.sql_query or ""))
         self.assertEqual(str((plan.metadata or {}).get("compiler") or ""), "employee_semantic_sql")
 
     def test_employee_missing_eps_or_arl_uses_or_null_or_empty_filters(self):
@@ -461,8 +470,8 @@ class ChatRuntimeSqlAlignmentTests(SimpleTestCase):
             )
 
         self.assertEqual(plan.strategy, "sql_assisted")
-        self.assertIn("eps IS NULL OR eps = ''", str(plan.sql_query or ""))
-        self.assertIn("arl IS NULL OR arl = ''", str(plan.sql_query or ""))
+        self.assertIn("eps IS NULL OR TRIM(eps) = ''", str(plan.sql_query or ""))
+        self.assertIn("arl IS NULL OR TRIM(arl) = ''", str(plan.sql_query or ""))
         self.assertIn(" OR ", str(plan.sql_query or ""))
 
     def test_employee_missing_corporate_email_uses_correo_column(self):
@@ -494,7 +503,7 @@ class ChatRuntimeSqlAlignmentTests(SimpleTestCase):
             )
 
         self.assertEqual(plan.strategy, "sql_assisted")
-        self.assertIn("(correo IS NULL OR correo = '')", str(plan.sql_query or ""))
+        self.assertIn("(correo IS NULL OR TRIM(correo) = '')", str(plan.sql_query or ""))
 
     def test_employee_missing_personal_phone_uses_celular_personal_column(self):
         with patch.dict(
@@ -525,7 +534,8 @@ class ChatRuntimeSqlAlignmentTests(SimpleTestCase):
             )
 
         self.assertEqual(plan.strategy, "sql_assisted")
-        self.assertIn("(celular_personal IS NULL OR celular_personal = '')", str(plan.sql_query or ""))
+        self.assertIn("(celular_personal IS NULL OR TRIM(celular_personal) = '')", str(plan.sql_query or ""))
+        self.assertIn("(celular_alterno IS NULL OR TRIM(celular_alterno) = '')", str(plan.sql_query or ""))
 
     def test_employee_incomplete_sizes_use_datos_tallas_json_paths(self):
         with patch.dict(
@@ -557,7 +567,70 @@ class ChatRuntimeSqlAlignmentTests(SimpleTestCase):
 
         self.assertEqual(plan.strategy, "sql_assisted")
         self.assertIn("JSON_UNQUOTE(JSON_EXTRACT(datos, '$.tallas.botas')) IS NULL", str(plan.sql_query or ""))
-        self.assertIn("JSON_UNQUOTE(JSON_EXTRACT(datos, '$.tallas.camisa')) IS NULL", str(plan.sql_query or ""))
+        self.assertIn("TRIM(JSON_UNQUOTE(JSON_EXTRACT(datos, '$.tallas.camisa'))) = ''", str(plan.sql_query or ""))
+
+    def test_employee_missing_work_permit_uses_governed_column(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_USE_OPENAI_CLASSIFIER": "0",
+                "IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            resolved_intent = QueryIntentResolver().resolve(
+                message="Empleados sin permiso de trabajo",
+                base_classification={"domain": "empleados", "intent": "analytics_query"},
+                semantic_context=_employee_data_quality_context(),
+            )
+            resolved_query = ResolvedQuerySpec(
+                intent=resolved_intent,
+                semantic_context=_employee_data_quality_context(),
+                normalized_filters={**dict(resolved_intent.filters or {}), "estado": "ACTIVO"},
+                normalized_period={},
+            )
+            plan = QueryExecutionPlanner().plan(
+                run_context=RunContext.create(message="Empleados sin permiso de trabajo", session_id="dq-permiso", reset_memory=False),
+                resolved_query=resolved_query,
+            )
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertIn("permiso_trabajo IS NULL OR TRIM(permiso_trabajo) = ''", str(plan.sql_query or ""))
+
+    def test_employee_missing_identity_document_uses_both_json_sides(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_USE_OPENAI_CLASSIFIER": "0",
+                "IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            resolved_intent = QueryIntentResolver().resolve(
+                message="Que documentos de identidad faltan",
+                base_classification={"domain": "empleados", "intent": "analytics_query"},
+                semantic_context=_employee_data_quality_context(),
+            )
+            resolved_query = ResolvedQuerySpec(
+                intent=resolved_intent,
+                semantic_context=_employee_data_quality_context(),
+                normalized_filters={**dict(resolved_intent.filters or {}), "estado": "ACTIVO"},
+                normalized_period={},
+            )
+            plan = QueryExecutionPlanner().plan(
+                run_context=RunContext.create(message="Que documentos de identidad faltan", session_id="dq-docid", reset_memory=False),
+                resolved_query=resolved_query,
+            )
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertIn("JSON_UNQUOTE(JSON_EXTRACT(datos, '$.documento_identidad.lado_a')) IS NULL", str(plan.sql_query or ""))
+        self.assertIn("TRIM(JSON_UNQUOTE(JSON_EXTRACT(datos, '$.documento_identidad.lado_b'))) = ''", str(plan.sql_query or ""))
 
     def test_employee_data_quality_response_includes_business_response(self):
         planner = QueryExecutionPlanner()
@@ -624,6 +697,102 @@ class ChatRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertTrue(bool(str(business_response.get("hallazgo") or "").strip()))
         self.assertTrue(bool(str(business_response.get("riesgo") or "").strip()))
         self.assertTrue(bool(str(business_response.get("recomendacion") or "").strip()))
+
+    def test_employee_data_quality_detail_exposes_total_vs_returned_when_truncated(self):
+        planner = QueryExecutionPlanner()
+        intent = StructuredQueryIntent(
+            raw_query="Que empleados no tienen ARL registrada",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={"estado": "ACTIVO", "arl": {"operator": "is_missing", "match_mode": "null_or_empty"}},
+            metrics=["count"],
+            confidence=0.9,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context=_employee_data_quality_context(),
+            normalized_filters=dict(intent.filters or {}),
+            normalized_period={},
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = planner.plan(
+                run_context=RunContext.create(message=intent.raw_query, session_id="dq-truncated", reset_memory=False),
+                resolved_query=resolved_query,
+            )
+
+        class _FakeCursor:
+            def __init__(self):
+                self.description = [
+                    ("cedula",),
+                    ("nombre",),
+                    ("apellido",),
+                    ("cargo",),
+                    ("zona_nodo",),
+                    ("area",),
+                    ("carpeta",),
+                    ("movil",),
+                    ("supervisor",),
+                    ("arl",),
+                ]
+                self._count_query = False
+
+            def execute(self, query):
+                self._count_query = "COUNT(*) AS total_records" in str(query)
+                if self._count_query:
+                    self.description = [("total_records",)]
+                return None
+
+            def fetchall(self):
+                return [
+                    (str(idx), "Ana", "Lopez", "Tecnico", "Norte", "Operaciones", "A1", "MOV-1", "Sup", "")
+                    for idx in range(500)
+                ]
+
+            def fetchone(self):
+                return (1243,)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _FakeConnection:
+            def cursor(self):
+                return _FakeCursor()
+
+        with patch("apps.ia_dev.application.semantic.query_execution_planner.connections", {"default": _FakeConnection()}):
+            result = planner.execute_sql_assisted(
+                run_context=RunContext.create(message=intent.raw_query, session_id="dq-truncated", reset_memory=False),
+                resolved_query=resolved_query,
+                execution_plan=plan,
+            )
+
+        self.assertTrue(bool(result.get("ok")))
+        payload = dict(result.get("response") or {})
+        data = dict(payload.get("data") or {})
+        table = dict(data.get("table") or {})
+        result_set = dict((dict(data.get("meta") or {}).get("result_set") or {}))
+        business_response = dict(data.get("business_response") or {})
+        self.assertEqual(int(result_set.get("total_records") or 0), 1243)
+        self.assertEqual(int(result_set.get("returned_records") or 0), 500)
+        self.assertTrue(bool(result_set.get("truncated")))
+        self.assertEqual(int(result_set.get("limit") or 0), 500)
+        self.assertEqual(int(table.get("rowcount") or 0), 500)
+        self.assertIn("1.243", f"{int(result_set.get('total_records') or 0):,}".replace(",", "."))
+        self.assertIn("primeros 500", str(payload.get("reply") or "").lower())
+        self.assertIn("truncado", str(business_response.get("hallazgo") or "").lower())
+        self.assertIn("filtra por sede", str(business_response.get("siguiente_accion") or "").lower())
 
     def test_pilot_report_counts_sql_assisted_and_physical_columns(self):
         observability = MagicMock()

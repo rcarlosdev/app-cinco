@@ -64,6 +64,73 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             "Muestrame el detalle por empleado, area o supervisor.",
         )
 
+    def test_response_assembler_builds_heights_business_response_from_sql_kpis(self):
+        assembler = ResponseAssembler()
+        response = {
+            "reply": "97 certificados de alturas vencidos y 78 proximos a vencer en personal activo de labor operativa.",
+            "data": {
+                "kpis": {
+                    "certificados_vencidos": 97,
+                    "certificados_proximos_vencer": 78,
+                },
+                "table": {
+                    "columns": ["certificados_vencidos", "certificados_proximos_vencer"],
+                    "rows": [{"certificados_vencidos": 97, "certificados_proximos_vencer": 78}],
+                    "rowcount": 1,
+                },
+                "insights": [],
+                "findings": [],
+            },
+            "actions": [],
+            "trace": [],
+            "data_sources": {},
+        }
+
+        assembled = assembler.assemble(
+            legacy_response=response,
+            run_context=RunContext.create(message="certificados de alturas", session_id="heights-kpi", reset_memory=False),
+            planned_capability={},
+            route={},
+            policy_decision=None,  # type: ignore[arg-type]
+            divergence={},
+            memory_effects={},
+        )
+
+        business_response = dict((assembled.get("data") or {}).get("business_response") or {})
+        self.assertIn("certificados de alturas vencidos", str(business_response.get("dato") or "").lower())
+        self.assertIn("riesgo documental", str(business_response.get("hallazgo") or "").lower())
+        self.assertIn("trabajos en alturas", str(business_response.get("riesgo") or "").lower())
+        self.assertIn("priorizar renovacion", str(business_response.get("recomendacion") or "").lower())
+
+    def test_intent_arbitration_does_not_fallback_governed_heights_certificate_sql(self):
+        plan = QueryExecutionPlan(
+            strategy="sql_assisted",
+            reason="employee_heights_certificate_summary_json",
+            domain_code="empleados",
+            sql_query="SELECT 1 AS certificados_proximos_vencer LIMIT 1",
+            constraints={"result_shape": "kpi"},
+            policy={"allowed": True, "reason": "sql_validated"},
+            metadata={
+                "compiler": "employee_semantic_sql",
+                "metric_used": "certificado_alturas_vigencia",
+                "aggregation_used": "count_by_validity",
+            },
+        )
+
+        resolved = ChatApplicationService._apply_intent_arbitration_to_execution_plan(
+            execution_plan=plan,
+            arbitration={
+                "final_intent": "analytics_query",
+                "final_domain": "empleados",
+                "should_fallback": True,
+                "confidence": 0.65,
+            },
+        )
+
+        self.assertEqual(resolved.strategy, "sql_assisted")
+        self.assertEqual(str(resolved.sql_query or ""), str(plan.sql_query or ""))
+        self.assertTrue(bool((resolved.policy or {}).get("allowed")))
+
     def test_resolve_query_intelligence_keeps_planner_payload_for_personal_activo_hoy(self):
         service = ChatApplicationService()
         run_context = RunContext.create(message="personal activo hoy", session_id="sess-qi", reset_memory=False)
@@ -310,6 +377,9 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         }
         run_context.metadata["query_intelligence"] = {
             "execution_plan": {
+                "strategy": "sql_assisted",
+                "sql_query": "SELECT area, COUNT(*) AS total_registros FROM demo GROUP BY area",
+                "policy": {"allowed": True},
                 "metadata": {
                     "compiler": "join_aware_pilot",
                     "analytics_router_decision": "join_aware_sql",
@@ -346,8 +416,8 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         self.assertEqual(str((response.get("orchestrator") or {}).get("final_intent") or ""), "analytics_query")
         self.assertEqual(str((response.get("orchestrator") or {}).get("final_domain") or ""), "ausentismo")
         self.assertEqual(str((response.get("orchestrator") or {}).get("compiler_used") or ""), "join_aware_pilot")
-        self.assertEqual(str((response.get("orchestrator") or {}).get("analytics_router_decision") or ""), "join_aware_sql")
-        self.assertEqual(str((response.get("orchestrator") or {}).get("fallback_reason") or ""), "pilot_relation_missing")
+        self.assertEqual(str((response.get("orchestrator") or {}).get("analytics_router_decision") or ""), "sql_assisted")
+        self.assertEqual(str((response.get("orchestrator") or {}).get("fallback_reason") or ""), "")
         self.assertEqual(str((response.get("task_state") or {}).get("workflow_key") or ""), "task_runtime:run-1")
         self.assertEqual(str(((response.get("data_sources") or {}).get("runtime") or {}).get("flow") or ""), "sql_assisted")
         self.assertEqual(
@@ -355,15 +425,15 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             "query_execution_planner",
         )
         self.assertTrue(bool(((response.get("data_sources") or {}).get("runtime") or {}).get("planner_was_authority")))
-        self.assertTrue(bool(((response.get("data_sources") or {}).get("runtime") or {}).get("blocked_legacy_fallback")))
+        self.assertFalse(bool(((response.get("data_sources") or {}).get("runtime") or {}).get("blocked_legacy_fallback")))
         self.assertEqual(
             str(((response.get("data_sources") or {}).get("runtime") or {}).get("analytics_router_decision") or ""),
-            "join_aware_sql",
+            "sql_assisted",
         )
         self.assertEqual(str(((response.get("data_sources") or {}).get("runtime") or {}).get("final_domain") or ""), "ausentismo")
         self.assertEqual(
             str(((response.get("data_sources") or {}).get("runtime") or {}).get("fallback_reason") or ""),
-            "pilot_relation_missing",
+            "",
         )
 
     def test_attach_runtime_metadata_promotes_employee_sql_assisted_fallback_to_analytics_intent(self):
@@ -480,6 +550,64 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             "legacy_fallback",
         )
 
+    def test_resolve_runtime_response_flow_prioritizes_valid_sql_assisted_authority(self):
+        self.assertEqual(
+            ChatApplicationService._resolve_runtime_response_flow(
+                query_intelligence={
+                    "execution_plan": {
+                        "strategy": "sql_assisted",
+                        "sql_query": "SELECT 1",
+                        "policy": {"allowed": True},
+                    },
+                    "execution_result": {
+                        "ok": True,
+                        "response": {"orchestrator": {"classifier_source": "query_intelligence_sql_assisted"}},
+                        "satisfied": True,
+                        "used_legacy": False,
+                    },
+                },
+                route={"execute_capability": True, "runtime_authority": "query_execution_planner"},
+                response={"orchestrator": {"classifier_source": "handler_runtime"}},
+                execution_meta={
+                    "response": {"orchestrator": {"classifier_source": "query_intelligence_sql_assisted"}},
+                    "satisfied": True,
+                    "used_legacy": False,
+                },
+            ),
+            "sql_assisted",
+        )
+
+    def test_planner_valid_sql_result_wins_disables_capability_execution(self):
+        route = ChatApplicationService._enforce_planner_sql_authority_route(
+            route={
+                "routing_mode": "capability",
+                "selected_capability_id": "empleados.count.active.v1",
+                "execute_capability": True,
+                "use_legacy": False,
+            },
+            query_intelligence={
+                "execution_plan": {
+                    "strategy": "sql_assisted",
+                    "sql_query": "SELECT 1",
+                    "policy": {"allowed": True},
+                    "metadata": {"capability_id": "empleados.count.active.v1"},
+                },
+                "execution_result": {
+                    "ok": True,
+                    "response": {"reply": "sql ok"},
+                    "satisfied": True,
+                    "used_legacy": False,
+                },
+            },
+            execution_meta={"response": {"reply": "sql ok"}, "satisfied": True, "used_legacy": False},
+        )
+
+        self.assertFalse(bool(route.get("execute_capability")))
+        self.assertFalse(bool(route.get("use_legacy")))
+        self.assertEqual(str(route.get("runtime_authority") or ""), "query_execution_planner")
+        self.assertTrue(bool(route.get("planner_was_authority")))
+        self.assertEqual(str(route.get("reason") or ""), "query_execution_planner_sql_assisted_authority")
+
     def test_record_runtime_resolution_event_includes_compiler_and_satisfaction(self):
         observability = _ObservabilityStub()
         run_context = RunContext.create(message="x", session_id="sess-1", reset_memory=False)
@@ -489,6 +617,9 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             run_context=run_context,
             query_intelligence={
                 "execution_plan": {
+                    "strategy": "sql_assisted",
+                    "sql_query": "SELECT area, SUM(dias_perdidos) AS total_dias FROM demo GROUP BY area",
+                    "policy": {"allowed": True},
                     "metadata": {
                         "compiler": "join_aware_pilot",
                         "relations_used": ["gestionh_ausentismo.cedula = cinco_base_de_personal.cedula"],
@@ -549,6 +680,6 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         self.assertEqual(str(meta.get("aggregation_used") or ""), "sum")
         self.assertEqual(list(meta.get("dimensions_used") or []), ["area"])
         self.assertTrue(bool((meta.get("satisfaction_review") or {}).get("satisfied")))
-        self.assertEqual(str(meta.get("analytics_router_decision") or ""), "join_aware_sql")
-        self.assertTrue(bool(meta.get("legacy_analytics_isolated")))
-        self.assertEqual(str(meta.get("cleanup_phase") or ""), "phase_7")
+        self.assertEqual(str(meta.get("analytics_router_decision") or ""), "sql_assisted")
+        self.assertFalse(bool(meta.get("legacy_analytics_isolated")))
+        self.assertEqual(str(meta.get("cleanup_phase") or ""), "")

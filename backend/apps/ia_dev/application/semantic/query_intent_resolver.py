@@ -42,8 +42,8 @@ class QueryIntentResolver:
         r"este\s+ano|ano\s+actual|ano\s+pasado|\d{4}-\d{2}-\d{2})\b"
     )
     _MISSINGNESS_OPERATOR_RE = re.compile(
-        r"\b(sin|no\s+tiene(?:n)?|vaci[oa]s?|incomplet[oa]s?|faltante(?:s)?|"
-        r"no\s+registrad[oa]s?|pendiente(?:s)?\s+de\s+dato)\b"
+        r"\b(sin|no\s+tiene(?:n)?|vaci[oa]s?|incomplet[oa]s?|faltante(?:s)?|falta(?:n)?|"
+        r"no\s+registrad[oa]s?|no\s+disponible(?:s)?|pendiente(?:s)?\s+de\s+dato)\b"
     )
 
     def __init__(self):
@@ -366,11 +366,23 @@ class QueryIntentResolver:
     def _merge_intents(*, fallback: StructuredQueryIntent, llm: StructuredQueryIntent) -> StructuredQueryIntent:
         llm_filters = dict(llm.filters or {})
         fallback_filters = dict(fallback.filters or {})
+        fallback_has_missingness = QueryIntentResolver._has_missingness_filter(filters=fallback_filters)
         merged_filters = dict(fallback_filters)
-        for key, value in llm_filters.items():
-            if value in (None, ""):
-                continue
-            merged_filters[str(key)] = value
+        if fallback_has_missingness:
+            for key, value in llm_filters.items():
+                normalized_key = str(key or "").strip().lower()
+                if value in (None, "") or isinstance(value, dict):
+                    continue
+                if normalized_key not in {"estado", "estado_empleado", "tipo_labor", "area", "cargo", "carpeta", "movil"}:
+                    continue
+                if normalized_key in merged_filters and isinstance(merged_filters.get(normalized_key), dict):
+                    continue
+                merged_filters.setdefault(normalized_key, value)
+        else:
+            for key, value in llm_filters.items():
+                if value in (None, ""):
+                    continue
+                merged_filters[str(key)] = value
         merged_filters = EmployeeIdentifierService.prune_redundant_search_filter(merged_filters)
         llm_period = dict(llm.period or {})
         fallback_period = dict(fallback.period or {})
@@ -402,13 +414,31 @@ class QueryIntentResolver:
         if fallback_domain in {"empleados", "rrhh"}:
             for noisy_key in ("rol", "tipo_personal"):
                 merged_filters.pop(noisy_key, None)
+        if fallback_has_missingness:
+            merged_group_by = list(fallback_group_by)
+            asks_summary_count = any(token in normalized_raw_query for token in ("cantidad", "cuantos", "cuantas", "total", "numero"))
+            operation = "aggregate" if merged_group_by else ("count" if asks_summary_count else "detail")
+            template_id = "aggregate_by_group_and_period" if merged_group_by else (
+                "count_entities_by_status" if asks_summary_count else "detail_by_entity_and_period"
+            )
+            resolved_domain = fallback_domain or resolved_domain
         merged_group_by = QueryIntentResolver._normalize_group_by_for_domain(
             domain_code=resolved_domain or fallback_domain,
             group_by=merged_group_by,
         )
-        if operation == "detail" and not has_entity and str(fallback.operation or "").strip().lower() != "detail":
+        if (
+            operation == "detail"
+            and not fallback_has_missingness
+            and not has_entity
+            and str(fallback.operation or "").strip().lower() != "detail"
+        ):
             operation = str(fallback.operation or "summary").strip().lower()
-        if template_id == "detail_by_entity_and_period" and not has_entity and str(fallback.template_id or "").strip():
+        if (
+            template_id == "detail_by_entity_and_period"
+            and not fallback_has_missingness
+            and not has_entity
+            and str(fallback.template_id or "").strip()
+        ):
             template_id = str(fallback.template_id or "").strip().lower()
         if (
             fallback_domain == "ausentismo"
@@ -439,6 +469,8 @@ class QueryIntentResolver:
                 or (llm_label == "hoy" and llm_start == llm_end)
             )
         ):
+            llm_period = fallback_period
+        if fallback_has_missingness and fallback_period:
             llm_period = fallback_period
 
         merged_metrics = list(dict.fromkeys([*list(llm.metrics or []), *list(fallback.metrics or [])]))
@@ -560,13 +592,13 @@ class QueryIntentResolver:
                 semantic_context=semantic_context or {},
             )
         )
-        filters.update(
-            QueryIntentResolver._extract_semantic_allowed_value_filters(
+        if not QueryIntentResolver._has_missingness_filter(filters=filters):
+            for key, value in QueryIntentResolver._extract_semantic_allowed_value_filters(
                 normalized=normalized,
                 semantic_context=semantic_context or {},
                 existing_filters=filters,
-            )
-        )
+            ).items():
+                filters.setdefault(key, value)
         employee_name = QueryIntentResolver._extract_employee_name_filter(normalized=normalized)
         if employee_name:
             filters["nombre"] = employee_name
@@ -620,7 +652,7 @@ class QueryIntentResolver:
             if str(profile.get("logical_name") or profile.get("column_name") or "").strip().lower().startswith("talla_")
         ]
         uses_incomplete_operator = bool(
-            re.search(r"\b(vaci[oa]s?|incomplet[oa]s?|faltante(?:s)?|pendiente(?:s)?\s+de\s+dato)\b", normalized)
+            re.search(r"\b(vaci[oa]s?|incomplet[oa]s?|faltante(?:s)?|falta(?:n)?|pendiente(?:s)?\s+de\s+dato)\b", normalized)
         )
 
         filters: dict[str, Any] = {}
@@ -658,11 +690,14 @@ class QueryIntentResolver:
         }
         allowed_targets = {
             "supervisor",
+            "correo",
             "correo_corporativo",
             "celular_personal",
             "eps",
             "arl",
             "tallas",
+            "permiso_trabajo",
+            "documento_identidad",
         }
         for profile in profiles:
             logical_name = str(profile.get("logical_name") or profile.get("column_name") or "").strip().lower()
@@ -672,6 +707,8 @@ class QueryIntentResolver:
             target = logical_name
             if logical_name.startswith("talla_"):
                 target = "tallas"
+            elif logical_name.startswith("documento_identidad_"):
+                target = "documento_identidad"
             if target not in allowed_targets:
                 continue
             candidates = {
@@ -690,6 +727,10 @@ class QueryIntentResolver:
                 candidates.update({"eps", "salud"})
             elif logical_name == "arl":
                 candidates.update({"arl", "riesgos laborales"})
+            elif logical_name == "permiso_trabajo":
+                candidates.update({"permiso de trabajo", "permiso trabajo"})
+            elif target == "documento_identidad":
+                candidates.update({"documento identidad", "documento de identidad", "documentos de identidad", "identidad"})
             elif target == "tallas":
                 candidates.update({"tallas", "dotacion"})
             for alias in candidates:
@@ -700,8 +741,31 @@ class QueryIntentResolver:
             target = canonical
             if canonical.startswith("talla_"):
                 target = "tallas"
+            elif canonical.startswith("documento_identidad_"):
+                target = "documento_identidad"
             if target in allowed_targets:
                 index.setdefault(alias, target)
+        default_business_aliases = {
+            "supervisor": "supervisor",
+            "jefe directo": "supervisor",
+            "correo": "correo",
+            "correo corporativo": "correo",
+            "celular": "celular_personal",
+            "celular registrado": "celular_personal",
+            "celular personal": "celular_personal",
+            "arl": "arl",
+            "eps": "eps",
+            "permiso de trabajo": "permiso_trabajo",
+            "permiso trabajo": "permiso_trabajo",
+            "documento identidad": "documento_identidad",
+            "documento de identidad": "documento_identidad",
+            "documentos de identidad": "documento_identidad",
+            "identidad": "documento_identidad",
+            "talla": "tallas",
+            "tallas": "tallas",
+        }
+        for alias, target in default_business_aliases.items():
+            index.setdefault(cls._normalize_text(alias), target)
         return index
 
     @staticmethod
@@ -710,7 +774,17 @@ class QueryIntentResolver:
             if not isinstance(value, dict):
                 continue
             operator = str(value.get("operator") or "").strip().lower()
-            if operator in {"is_missing", "is_incomplete"}:
+            if operator in {
+                "is_missing",
+                "is_incomplete",
+                "missing",
+                "empty",
+                "incomplete",
+                "not_registered",
+                "not_available",
+                "no_tiene",
+                "sin",
+            }:
                 return True
         return False
 
@@ -1338,6 +1412,8 @@ class QueryIntentResolver:
     @classmethod
     def _extract_attendance_reason_filter(cls, *, normalized: str) -> str:
         text = str(normalized or "")
+        if re.search(r"\bpermiso\s+de\s+trabajo\b", text):
+            return ""
         for token, canonical in cls._ATTENDANCE_REASON_SIGNALS.items():
             if re.search(rf"\b{re.escape(token)}\b", text):
                 return canonical
@@ -1465,6 +1541,7 @@ class QueryIntentResolver:
             if not bool(profile.get("supports_filter")):
                 continue
             logical_name = cls._normalize_text(profile.get("logical_name") or profile.get("column_name"))
+            column_name = cls._normalize_text(profile.get("column_name"))
             if not logical_name or str(existing_filters.get(logical_name) or "").strip():
                 continue
             allowed_values = [
@@ -1474,9 +1551,21 @@ class QueryIntentResolver:
             ]
             if not allowed_values:
                 continue
+            logical_markers = {
+                logical_name,
+                column_name,
+                logical_name.replace("_", " "),
+                column_name.replace("_", " ") if column_name else "",
+            }
+            column_explicitly_named = any(
+                marker and re.search(rf"\b{re.escape(marker)}\b", text)
+                for marker in logical_markers
+            )
             for candidate in allowed_values:
                 normalized_candidate = cls._normalize_text(candidate)
                 if normalized_candidate in protected_dimension_tokens:
+                    continue
+                if normalized_candidate in {"si", "no"} and not column_explicitly_named:
                     continue
                 if normalized_candidate and re.search(rf"\b{re.escape(normalized_candidate)}\b", text):
                     resolved[logical_name] = candidate
