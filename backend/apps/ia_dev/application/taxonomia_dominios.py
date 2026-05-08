@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-DOMINIOS_OPERATIVOS_CANONICOS = frozenset({"empleados", "ausentismo", "transporte"})
+DOMINIOS_OPERATIVOS_CANONICOS = frozenset({"empleados", "ausentismo", "transporte", "inventario_logistica"})
 DOMINIOS_META = frozenset({"general", "legacy", "knowledge"})
 
 _ALIAS_DOMINIOS = {
@@ -18,6 +18,10 @@ _ALIAS_DOMINIOS = {
     "personal": "empleados",
     "transport": "transporte",
     "transporte": "transporte",
+    "inventario_logistica": "inventario_logistica",
+    "inventario": "inventario_logistica",
+    "inventario_materiales": "inventario_logistica",
+    "logistica": "inventario_logistica",
     "knowledge": "knowledge",
     "legacy": "legacy",
     "general": "general",
@@ -27,6 +31,7 @@ _AGENTES_POR_DOMINIO = {
     "ausentismo": "ausentismo_agent",
     "empleados": "empleados_agent",
     "transporte": "transport_agent",
+    "inventario_logistica": "inventario_logistica_agent",
     "knowledge": "analista_agent",
     "general": "analista_agent",
     "legacy": "analista_agent",

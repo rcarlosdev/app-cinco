@@ -9,6 +9,9 @@ from typing import Any
 
 from apps.ia_dev.application.contracts.query_intelligence_contracts import StructuredQueryIntent
 from apps.ia_dev.application.taxonomia_dominios import normalizar_codigo_dominio
+from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import (
+    InventorySemanticResolver,
+)
 from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 
 
@@ -23,7 +26,7 @@ class IntentArbitrationService:
         "action_request",
         "fallback",
     }
-    ANALYTICS_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh"}
+    ANALYTICS_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica", "inventario_materiales"}
 
     def __init__(self):
         self.enable_openai = str(
@@ -282,7 +285,7 @@ class IntentArbitrationService:
             "should_use_sql_assisted": (
                 final_intent == "analytics_query"
                 and bool(dictionary_payload.get("has_real_data"))
-                and normalized_domain in {"ausentismo", "attendance", "empleados", "rrhh"}
+                and normalized_domain in {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
             ),
             "should_use_handler": (
                 final_intent == "analytics_query"
@@ -349,7 +352,7 @@ class IntentArbitrationService:
             should_use_sql_assisted = (
                 should_execute_query
                 and has_real_data
-                and final_domain in {"ausentismo", "attendance", "empleados", "rrhh"}
+                and final_domain in {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
             )
             should_use_handler = (
                 should_execute_query
@@ -439,6 +442,15 @@ class IntentArbitrationService:
         }:
             return True
         if heuristic_intent in {"ausentismo_query", "empleados_query"}:
+            return True
+        if domain_code == "inventario_logistica" and llm_operation in {
+            "list",
+            "group",
+            "summary",
+            "trace",
+            "stock_balance",
+            "top",
+        }:
             return True
         return any(
             str(item.get("capability_id") or "").startswith(("attendance.", "empleados."))
@@ -577,6 +589,16 @@ class IntentArbitrationService:
         llm_payload: dict[str, Any],
         dictionary_context: dict[str, Any],
     ) -> dict[str, Any]:
+        normalized_candidate_domain = normalizar_codigo_dominio(
+            llm_payload.get("domain")
+            or candidate_domain
+            or ""
+        )
+        if normalized_candidate_domain == "inventario_logistica":
+            return InventorySemanticResolver().infer_for_arbitration(
+                message=original_question,
+                dictionary_context=dictionary_context,
+            )
         normalized_query = cls._normalize_text(original_question)
         fields = [item for item in list(dictionary_context.get("fields") or []) if isinstance(item, dict)]
         tables = [item for item in list(dictionary_context.get("tables") or []) if isinstance(item, dict)]
