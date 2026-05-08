@@ -36,6 +36,7 @@ class QueryExecutionPolicy:
         r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=|>=|<=|<>|!=|>|<|like|in|between)\b",
         re.IGNORECASE,
     )
+    SQL_TABLE_FUNCTIONS = {"json_table"}
 
     def __init__(self, *, runtime: PolicyRuntime | None = None):
         self.runtime = runtime or PolicyRuntime()
@@ -51,10 +52,12 @@ class QueryExecutionPolicy:
         run_context: RunContext,
         resolved_query: ResolvedQuerySpec,
     ) -> QueryExecutionPolicyDecision:
+        domain_status = str((resolved_query.semantic_context or {}).get("domain_status") or "planned").strip().lower()
+        pilot_enabled = bool((resolved_query.semantic_context or {}).get("source_of_truth", {}).get("pilot_sql_assisted_enabled"))
         runtime_context = {
             "execution_strategy": "sql_assisted",
             "requires_context": False,
-            "domain_status": str((resolved_query.semantic_context or {}).get("domain_status") or "planned").strip().lower(),
+            "domain_status": domain_status,
         }
         runtime = self.runtime.evaluate(
             policy_name="query_execution_policy.yaml",
@@ -64,10 +67,19 @@ class QueryExecutionPolicy:
             fallback_reason="query_execution_policy_runtime_fallback",
         )
         runtime_action = str(runtime.action or "allow").strip().lower()
+        runtime_policy_id = str(runtime.policy_id or "").strip().lower()
+        runtime_reason = str(runtime.reason or "").strip()
+        if (
+            pilot_enabled
+            and runtime_action in {"deny", "require_approval"}
+            and runtime_policy_id == "query_sql_assisted.domain_status_not_allowed"
+            and domain_status == "active"
+        ):
+            runtime_action = "allow"
         if runtime_action in {"deny", "require_approval"}:
             return QueryExecutionPolicyDecision(
                 allowed=False,
-                reason=str(runtime.reason or "query_execution_policy_runtime_denied"),
+                reason=runtime_reason or "query_execution_policy_runtime_denied",
                 metadata={
                     "policy_id": str(runtime.policy_id or ""),
                     "runtime_action": runtime_action,
@@ -88,12 +100,11 @@ class QueryExecutionPolicy:
                 metadata={"flag": "IA_DEV_QUERY_INTELLIGENCE_ENABLED"},
             )
 
-        domain_status = str((resolved_query.semantic_context or {}).get("domain_status") or "planned").strip().lower()
-        if domain_status not in {"planned", "partial"}:
+        if domain_status not in {"planned", "partial"} and not pilot_enabled:
             return QueryExecutionPolicyDecision(
                 allowed=False,
                 reason="sql_assisted_only_for_planned_or_partial",
-                metadata={"domain_status": domain_status},
+                metadata={"domain_status": domain_status, "pilot_enabled": pilot_enabled},
             )
 
         if not bool((resolved_query.semantic_context or {}).get("supports_sql_assisted")):
@@ -119,6 +130,9 @@ class QueryExecutionPolicy:
         query: str,
         allowed_tables: list[str],
         allowed_columns: list[str],
+        allowed_relations: list[str] | None = None,
+        declared_columns: list[str] | None = None,
+        declared_relations: list[str] | None = None,
         max_limit: int = 500,
     ) -> QueryExecutionPolicyDecision:
         normalized = re.sub(r"\s+", " ", str(query or "").strip(), flags=re.MULTILINE).strip().lower()
@@ -153,7 +167,11 @@ class QueryExecutionPolicy:
                     )
 
         column_set = {self._normalize_identifier(item) for item in list(allowed_columns or []) if item}
-        query_columns = self._extract_relevant_columns(normalized)
+        query_columns = [
+            self._normalize_identifier(item)
+            for item in list(declared_columns or self._extract_relevant_columns(normalized))
+            if str(item or "").strip()
+        ]
         if query_columns and column_set:
             for column in query_columns:
                 if self._normalize_identifier(column) not in column_set:
@@ -163,12 +181,32 @@ class QueryExecutionPolicy:
                         {"column": column},
                     )
 
+        allowed_relation_set = {
+            self._normalize_relation(item)
+            for item in list(allowed_relations or [])
+            if str(item or "").strip()
+        }
+        query_relations = [
+            self._normalize_relation(item)
+            for item in list(declared_relations or [])
+            if str(item or "").strip()
+        ]
+        if query_relations and allowed_relation_set:
+            for relation in query_relations:
+                if relation not in allowed_relation_set:
+                    return QueryExecutionPolicyDecision(
+                        False,
+                        "sql_uses_unregistered_relation",
+                        {"relation": relation},
+                    )
+
         return QueryExecutionPolicyDecision(
             True,
             "sql_validated",
             {
                 "declared_tables": declared_tables,
                 "declared_columns_count": len(query_columns),
+                "declared_relations_count": len(query_relations),
                 "limit": limit_value,
             },
         )
@@ -178,7 +216,7 @@ class QueryExecutionPolicy:
         values: list[str] = []
         for match in cls.TABLE_REF_RE.finditer(query):
             token = str(match.group(1) or "").strip().strip("`")
-            if token:
+            if token and token.lower() not in cls.SQL_TABLE_FUNCTIONS:
                 values.append(token.lower())
         return values
 
@@ -209,3 +247,7 @@ class QueryExecutionPolicy:
     @staticmethod
     def _normalize_identifier(value: str) -> str:
         return str(value or "").strip().lower().strip("`")
+
+    @staticmethod
+    def _normalize_relation(value: str) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip().lower())

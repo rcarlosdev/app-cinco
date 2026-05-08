@@ -1,0 +1,16 @@
+reglas_negocio:
+  - codigo: transporte_programacion_por_dimension
+    prioridad: alta
+    descripcion: "Si la consulta usa por ciudad, region, proyecto, estado o tecnico, interpretar aggregate/group_by sobre nokia_base_ruta_programacion."
+  - codigo: transporte_fecha_programacion_oficial
+    prioridad: alta
+    descripcion: "La fecha principal del slice es fprogramacion; fecha_edit solo se usa como auditoria de actualizacion."
+  - codigo: transporte_tecnico_desde_cedula
+    prioridad: alta
+    descripcion: "Tecnico o tecnico asignado se resuelve inicialmente desde nokia_base_ruta_programacion.cedula; el enriquecimiento nominal se hace via cinco_base_de_personal."
+  - codigo: transporte_join_organizacional
+    prioridad: alta
+    descripcion: "Supervisor, area, cargo y sede se obtienen unicamente por join declarado con cinco_base_de_personal usando cedula."
+  - codigo: transporte_alertas_operativas
+    prioridad: media
+    descripcion: "Estado y razon se priorizan para alertas operativas, cumplimiento de programacion y analisis de carga."

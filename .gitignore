@@ -61,6 +61,7 @@ build/
 # Pipenv and virtualenv
 Pipfile.lock
 .pipenv/
+.venv/
 
 # Coverage reports
 htmlcov/

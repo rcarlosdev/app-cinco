@@ -1,71 +1,47 @@
 contexto_agente:
   descripcion: >
-    Dominio de personal interno de la empresa. Cuando el usuario diga
-    personal, empleados o colaboradores, se refiere al maestro
-    cinco_base_de_personal y no a clientes.
-  criterio_principal: >
-    Priorizar la tabla cinco_base_de_personal como fuente principal para
-    identidad, estado laboral, estructura organizacional y atributos
-    operativos del empleado.
-  defaults_negocio:
-    - "Si la consulta pide empleados y no especifica estado, asumir ACTIVO."
-    - "Cedula es el identificador principal y debe resolverse por coincidencia exacta."
-    - "Movil identifica una cuadrilla o grupo operativo, no una persona unica."
-    - "Labor, tipo labor o tipo de labor se interpretan como tipo_labor."
-    - "Supervisor se interpreta como jefe directo del empleado."
-    - "Carpeta es una subdivision operativa del area y puede usarse como filtro o agrupacion."
-    - "Las areas y carpetas oficiales se validan contra infraestructura_parametros: tipo AREA/CARPETA y estado ACTIVO; en empleados se filtran contra cinco_base_de_personal.area y cinco_base_de_personal.carpeta."
-    - "Si el usuario nombra una sigla o area raiz como I&M sin decir carpeta, interpretarla como area; si dice carpeta o el valor coincide claramente con una carpeta activa, usar carpeta."
-    - "Centro de costo o CC se obtiene desde infraestructura_parametros.datos; para area usar datos.centros_costo y para carpeta usar datos.centro_costo/subcentro_costo."
-    - "Si se pregunta por fecha de retiro, interpretar fecha_egreso; si se pregunta por fecha de ingreso, interpretar fecha_ingreso."
-    - "Rotacion de personal o tasa de rotacion se interpreta como egresos inactivos del periodo / planta promedio estimada * 100; en este maestro, usar fecha_egreso para egresos, estado ACTIVO como planta fin e ingresos/egresos del periodo para estimar planta inicio."
-    - "Si la consulta habla de un empleado especifico, priorizar detalle individual; si usa 'por area', 'por cargo', 'por supervisor', 'por carpeta' o 'por labor', interpretar aggregate/group_by."
+    Dominio de empleados y personal interno de la empresa. Atiende consultas
+    sobre informacion personal, laboral, operativa, documental y HSEQ del
+    colaborador desde la perspectiva de negocio.
+  enfoque_respuesta: >
+    Responder con lenguaje de negocio, priorizando claridad sobre estado
+    laboral, estructura operativa, supervisor, certificados, contacto y
+    consistencia de informacion.
+  tono: >
+    Profesional, directo y explicativo. Si detecta inconsistencias o datos
+    incompletos, debe señalarlos como alertas operativas o administrativas.
+  pautas_narrativas:
+    - "Si la consulta no pide detalle sensible, priorizar resumen de negocio."
+    - "Cuando haya inconsistencias, explicar que son alertas y no asumir retiros, suspensiones o aptitudes no confirmadas."
+    - "Hablar de sede, area, carpeta y movil como estructura organizacional y operativa del empleado."
+    - "Distinguir certificados de alturas para ejecutar trabajo y certificados de coordinador para coordinar o firmar permisos."
 
 vocabulario_negocio:
-  - personal
   - empleados
+  - personal
   - colaboradores
-  - cedula
-  - nombre
-  - apellido
-  - estado
+  - estado laboral
   - activo
   - inactivo
   - supervisor
   - jefe directo
-  - cargo
+  - sede
   - area
   - carpeta
-  - centro de costo
-  - cc
   - movil
-  - labor
-  - tipo_labor
+  - cuadrilla
+  - brigada
   - tipo de labor
-  - fecha_ingreso
-  - fecha_retiro
-  - fecha_egreso
-  - fecha_nacimiento
-  - rotacion
-  - rotacion de personal
-  - tasa de rotacion
-
-tablas_prioritarias:
-  - cinco_base_de_personal
-
-columnas_prioritarias:
-  - cedula
-  - nombre
-  - apellido
-  - estado
-  - supervisor
-  - area
-  - cargo
-  - carpeta
-  - movil
-  - tipo_labor
-  - fecha_ingreso
-  - fecha_egreso
-  - fecha_nacimiento
-  - rotacion_personal
-  - centro_costo
+  - operativo
+  - administrativo
+  - transversal
+  - certificado de alturas
+  - coordinador de alturas
+  - arl
+  - eps
+  - permiso de trabajo
+  - tallas
+  - contrato
+  - correo corporativo
+  - correo personal
+  - privacidad

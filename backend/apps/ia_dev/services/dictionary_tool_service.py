@@ -73,6 +73,77 @@ class DictionaryToolService:
         parsed = [item.strip().upper() for item in text.split(",") if item.strip()]
         return sorted(dict.fromkeys(parsed))
 
+    @staticmethod
+    def _semantic_role_for_field(*, logical_name: str, column_name: str) -> str:
+        key = str(logical_name or column_name or "").strip().lower()
+        if key in {"fecha_nacimiento", "fnacimiento"}:
+            return "person_birth_date"
+        if key in {"fecha_ingreso", "fingreso"}:
+            return "employment_start_date"
+        if key in {"fecha_egreso", "fecha_retiro", "fretiro"}:
+            return "employment_end_date"
+        if key in {
+            "area",
+            "cargo",
+            "supervisor",
+            "sede",
+            "zona_nodo",
+            "carpeta",
+            "tipo_labor",
+            "tipo",
+            "centro_costo",
+        }:
+            return "organizational_dimension"
+        return ""
+
+    @classmethod
+    def _business_concepts_for_role(cls, role: str, *, logical_name: str) -> list[str]:
+        normalized_role = str(role or "").strip().lower()
+        normalized_logical = str(logical_name or "").strip().lower()
+        if normalized_role == "person_birth_date":
+            return ["birthday", "age"]
+        if normalized_role == "employment_start_date":
+            return ["tenure"]
+        if normalized_role == "employment_end_date":
+            return ["turnover"]
+        if normalized_role == "organizational_dimension":
+            return [normalized_logical] if normalized_logical else ["organizational_dimension"]
+        return []
+
+    @classmethod
+    def _allowed_operations_for_profile(
+        cls,
+        *,
+        logical_name: str,
+        column_name: str,
+        supports_filter: bool,
+        supports_group_by: bool,
+        supports_metric: bool,
+        is_date: bool,
+    ) -> list[str]:
+        role = cls._semantic_role_for_field(logical_name=logical_name, column_name=column_name)
+        if role == "person_birth_date":
+            operations = ["list", "count", "filter_by_month", "group_by_month"]
+            if supports_filter:
+                operations.append("filter")
+            return operations
+        if role in {"employment_start_date", "employment_end_date"}:
+            operations = ["list", "count", "filter_by_month", "group_by_month"]
+            if supports_filter:
+                operations.append("filter")
+            return operations
+        operations: list[str] = []
+        if supports_filter:
+            operations.append("filter")
+            operations.append("select")
+        if supports_group_by:
+            operations.append("group_by")
+        if supports_metric:
+            operations.extend(["aggregate", "metric"])
+        if is_date:
+            operations.append("date_part")
+        return list(dict.fromkeys(operations))
+
     def _table_exists(self, *, cursor, schema: str, table_name: str) -> bool:
         cursor.execute(
             """
@@ -220,6 +291,8 @@ class DictionaryToolService:
         code_map = {
             "ausentismo": "AUSENTISMOS",
             "empleados": "EMPLEADOS",
+            "transport": "TRANSPORTE",
+            "transporte": "TRANSPORTE",
             "general": "GENERAL",
             "knowledge": "GENERAL",
             "legacy": "GENERAL",
@@ -301,12 +374,13 @@ class DictionaryToolService:
                 ORDER BY prioridad, codigo
                 LIMIT %s
                 """,
-                [dominio_id, safe_limit],
+                [dominio_id, safe_limit * 20],
             )
             rule_rows = cursor.fetchall()
 
             field_rows: list[tuple[Any, ...]] = []
             relation_rows: list[tuple[Any, ...]] = []
+            related_table_rows: list[tuple[Any, ...]] = []
             if table_ids:
                 in_clause = ", ".join(["%s"] * len(table_ids))
                 join_profile = ""
@@ -339,6 +413,7 @@ class DictionaryToolService:
                 cursor.execute(
                     f"""
                     SELECT
+                        t.schema_name AS schema_name,
                         t.table_name AS table_name,
                         c.id AS campo_id,
                         {fexpr("campo_logico", "campo_logico")},
@@ -392,6 +467,31 @@ class DictionaryToolService:
                     [*table_ids, *table_ids, safe_limit],
                 )
                 relation_rows = cursor.fetchall()
+                if domain_key in {"ausentismo", "attendance"}:
+                    cursor.execute(
+                        f"""
+                        SELECT DISTINCT t.id, t.schema_name, t.table_name, t.alias_negocio, t.clave_negocio, t.descripcion
+                        FROM {schema}.dd_relaciones AS r
+                        JOIN {schema}.dd_tablas AS t
+                          ON t.id = CASE
+                            WHEN r.tabla_origen_id IN ({in_clause}) THEN r.tabla_destino_id
+                            ELSE r.tabla_origen_id
+                          END
+                        WHERE {relations_active_filter}
+                          AND (
+                            r.tabla_origen_id IN ({in_clause})
+                            OR r.tabla_destino_id IN ({in_clause})
+                          )
+                        ORDER BY t.table_name, t.id
+                        LIMIT %s
+                        """,
+                        [*table_ids, *table_ids, *table_ids, safe_limit],
+                    )
+                    related_table_rows = [
+                        row
+                        for row in cursor.fetchall()
+                        if int(row[0] or 0) not in table_ids
+                    ]
 
             synonyms_active_filter = self._active_filter(alias="s", available_columns=synonyms_columns)
             cursor.execute(
@@ -418,23 +518,47 @@ class DictionaryToolService:
             }
             for row in table_rows
         ]
+        tables.extend(
+            [
+                {
+                    "id": int(row[0]),
+                    "schema_name": str(row[1] or ""),
+                    "table_name": str(row[2] or ""),
+                    "alias_negocio": str(row[3] or ""),
+                    "clave_negocio": str(row[4] or ""),
+                    "descripcion": str(row[5] or ""),
+                }
+                for row in related_table_rows
+            ]
+        )
         fields: list[dict[str, Any]] = []
         field_profiles: list[dict[str, Any]] = []
         for row in field_rows:
-            allowed_values = self._parse_allowed_values(row[8])
-            supports_filter = self._to_bool(row[12]) or self._to_bool(row[9]) or bool(allowed_values)
-            supports_group_by = self._to_bool(row[13]) or self._to_bool(row[10])
-            supports_metric = self._to_bool(row[14]) or self._to_bool(row[11])
+            allowed_values = self._parse_allowed_values(row[9])
+            supports_filter = self._to_bool(row[13]) or self._to_bool(row[10]) or bool(allowed_values)
+            supports_group_by = self._to_bool(row[14]) or self._to_bool(row[11])
+            supports_metric = self._to_bool(row[15]) or self._to_bool(row[12])
+            schema_name = str(row[0] or "")
+            table_name = str(row[1] or "")
+            logical_name = str(row[3] or "")
+            column_name = str(row[4] or "")
+            table_fqn = f"{schema_name}.{table_name}" if schema_name and table_name else table_name
+            semantic_role = self._semantic_role_for_field(
+                logical_name=logical_name,
+                column_name=column_name,
+            )
             profile = {
-                "table_name": str(row[0] or ""),
-                "campo_id": int(row[1] or 0),
-                "campo_logico": str(row[2] or ""),
-                "column_name": str(row[3] or ""),
-                "tipo_campo": str(row[4] or ""),
-                "tipo_dato_tecnico": str(row[5] or ""),
-                "definicion_negocio": str(row[6] or ""),
-                "es_clave": self._to_bool(row[7]),
-                "valores_permitidos": str(row[8] or ""),
+                "schema_name": schema_name,
+                "table_name": table_name,
+                "table_fqn": table_fqn,
+                "campo_id": int(row[2] or 0),
+                "campo_logico": logical_name,
+                "column_name": column_name,
+                "tipo_campo": str(row[5] or ""),
+                "tipo_dato_tecnico": str(row[6] or ""),
+                "definicion_negocio": str(row[7] or ""),
+                "es_clave": self._to_bool(row[8]),
+                "valores_permitidos": str(row[9] or ""),
                 "allowed_values": allowed_values,
                 "es_filtro": supports_filter,
                 "es_group_by": supports_group_by,
@@ -442,15 +566,28 @@ class DictionaryToolService:
                 "supports_filter": supports_filter,
                 "supports_group_by": supports_group_by,
                 "supports_metric": supports_metric,
-                "supports_dimension": self._to_bool(row[15]) or supports_group_by,
-                "is_date": self._to_bool(row[16]),
-                "is_identifier": self._to_bool(row[17]),
-                "is_chart_dimension": self._to_bool(row[18]) or supports_group_by,
-                "is_chart_measure": self._to_bool(row[19]) or supports_metric,
-                "allowed_operators": self._to_json(row[20], []),
-                "allowed_aggregations": self._to_json(row[21], []),
-                "normalization_strategy": str(row[22] or ""),
-                "priority": int(row[23] or 0),
+                "supports_dimension": self._to_bool(row[16]) or supports_group_by,
+                "is_date": self._to_bool(row[17]),
+                "is_identifier": self._to_bool(row[18]),
+                "is_chart_dimension": self._to_bool(row[19]) or supports_group_by,
+                "is_chart_measure": self._to_bool(row[20]) or supports_metric,
+                "allowed_operators": self._to_json(row[21], []),
+                "allowed_aggregations": self._to_json(row[22], []),
+                "normalization_strategy": str(row[23] or ""),
+                "priority": int(row[24] or 0),
+                "semantic_role": semantic_role,
+                "business_concepts": self._business_concepts_for_role(
+                    semantic_role,
+                    logical_name=logical_name,
+                ),
+                "allowed_operations": self._allowed_operations_for_profile(
+                    logical_name=logical_name,
+                    column_name=column_name,
+                    supports_filter=supports_filter,
+                    supports_group_by=supports_group_by,
+                    supports_metric=supports_metric,
+                    is_date=self._to_bool(row[17]),
+                ),
             }
             fields.append(profile)
             field_profiles.append(profile)
@@ -517,9 +654,19 @@ class DictionaryToolService:
             for item in list(table_names or [])
             if str(item or "").strip()
         ]
-        requested = list(dict.fromkeys([item for item in requested if _SAFE_IDENTIFIER_RE.match(item)]))
+        requested = list(
+            dict.fromkeys(
+                [
+                    item
+                    for item in requested
+                    if all(_SAFE_IDENTIFIER_RE.match(part) for part in item.split("."))
+                ]
+            )
+        )
         if not requested:
             return []
+        requested_fqns = {item for item in requested if "." in item}
+        requested_table_names = {item.split(".")[-1] for item in requested}
 
         safe_limit = max(1, min(int(limit), 500))
         with connections[self.db_alias].cursor() as cursor:
@@ -554,10 +701,11 @@ class DictionaryToolService:
                         return f"p.{item} AS {alias_name}"
                 return f"NULL AS {alias_name}"
 
-            in_clause = ", ".join(["%s"] * len(requested))
+            in_clause = ", ".join(["%s"] * len(requested_table_names))
             cursor.execute(
                 f"""
                 SELECT
+                    t.schema_name AS schema_name,
                     t.table_name AS table_name,
                     c.id AS campo_id,
                     {fexpr("campo_logico", "campo_logico")},
@@ -591,27 +739,45 @@ class DictionaryToolService:
                 ORDER BY t.table_name, c.id
                 LIMIT %s
                 """,
-                [*requested, safe_limit],
+                [*sorted(requested_table_names), safe_limit],
             )
             rows = cursor.fetchall()
 
         profiles: list[dict[str, Any]] = []
         for row in rows:
-            allowed_values = self._parse_allowed_values(row[8])
-            supports_filter = self._to_bool(row[12]) or self._to_bool(row[9]) or bool(allowed_values)
-            supports_group_by = self._to_bool(row[13]) or self._to_bool(row[10])
-            supports_metric = self._to_bool(row[14]) or self._to_bool(row[11])
+            allowed_values = self._parse_allowed_values(row[9])
+            supports_filter = self._to_bool(row[13]) or self._to_bool(row[10]) or bool(allowed_values)
+            supports_group_by = self._to_bool(row[14]) or self._to_bool(row[11])
+            supports_metric = self._to_bool(row[15]) or self._to_bool(row[12])
+            schema_name = str(row[0] or "")
+            table_name = str(row[1] or "")
+            logical_name = str(row[3] or "")
+            column_name = str(row[4] or "")
+            table_fqn = f"{schema_name}.{table_name}" if schema_name and table_name else table_name
+            normalized_table_fqn = table_fqn.strip().lower()
+            normalized_table_name = table_name.strip().lower()
+            if requested_fqns:
+                if normalized_table_fqn not in requested_fqns:
+                    continue
+            elif normalized_table_name not in requested_table_names:
+                continue
+            semantic_role = self._semantic_role_for_field(
+                logical_name=logical_name,
+                column_name=column_name,
+            )
             profiles.append(
                 {
-                    "table_name": str(row[0] or ""),
-                    "campo_id": int(row[1] or 0),
-                    "campo_logico": str(row[2] or ""),
-                    "column_name": str(row[3] or ""),
-                    "tipo_campo": str(row[4] or ""),
-                    "tipo_dato_tecnico": str(row[5] or ""),
-                    "definicion_negocio": str(row[6] or ""),
-                    "es_clave": self._to_bool(row[7]),
-                    "valores_permitidos": str(row[8] or ""),
+                    "schema_name": schema_name,
+                    "table_name": table_name,
+                    "table_fqn": table_fqn,
+                    "campo_id": int(row[2] or 0),
+                    "campo_logico": logical_name,
+                    "column_name": column_name,
+                    "tipo_campo": str(row[5] or ""),
+                    "tipo_dato_tecnico": str(row[6] or ""),
+                    "definicion_negocio": str(row[7] or ""),
+                    "es_clave": self._to_bool(row[8]),
+                    "valores_permitidos": str(row[9] or ""),
                     "allowed_values": allowed_values,
                     "es_filtro": supports_filter,
                     "es_group_by": supports_group_by,
@@ -619,15 +785,28 @@ class DictionaryToolService:
                     "supports_filter": supports_filter,
                     "supports_group_by": supports_group_by,
                     "supports_metric": supports_metric,
-                    "supports_dimension": self._to_bool(row[15]) or supports_group_by,
-                    "is_date": self._to_bool(row[16]),
-                    "is_identifier": self._to_bool(row[17]),
-                    "is_chart_dimension": self._to_bool(row[18]) or supports_group_by,
-                    "is_chart_measure": self._to_bool(row[19]) or supports_metric,
-                    "allowed_operators": self._to_json(row[20], []),
-                    "allowed_aggregations": self._to_json(row[21], []),
-                    "normalization_strategy": str(row[22] or ""),
-                    "priority": int(row[23] or 0),
+                    "supports_dimension": self._to_bool(row[16]) or supports_group_by,
+                    "is_date": self._to_bool(row[17]),
+                    "is_identifier": self._to_bool(row[18]),
+                    "is_chart_dimension": self._to_bool(row[19]) or supports_group_by,
+                    "is_chart_measure": self._to_bool(row[20]) or supports_metric,
+                    "allowed_operators": self._to_json(row[21], []),
+                    "allowed_aggregations": self._to_json(row[22], []),
+                    "normalization_strategy": str(row[23] or ""),
+                    "priority": int(row[24] or 0),
+                    "semantic_role": semantic_role,
+                    "business_concepts": self._business_concepts_for_role(
+                        semantic_role,
+                        logical_name=logical_name,
+                    ),
+                    "allowed_operations": self._allowed_operations_for_profile(
+                        logical_name=logical_name,
+                        column_name=column_name,
+                        supports_filter=supports_filter,
+                        supports_group_by=supports_group_by,
+                        supports_metric=supports_metric,
+                        is_date=self._to_bool(row[17]),
+                    ),
                 }
             )
         return profiles
@@ -639,14 +818,52 @@ class DictionaryToolService:
         """
         schema = self._safe_schema()
         synonyms_seed = [
+            ("empleados", "personal"),
+            ("empleado", "colaborador"),
+            ("empleados", "colaboradores"),
+            ("empleados", "personas"),
+            ("empleado", "persona"),
+            ("empleado", "trabajador"),
+            ("empleados", "trabajadores"),
+            ("empleados", "dotacion"),
+            ("empleados", "nomina"),
+            ("empleados", "plantilla"),
+            ("empleados", "planta"),
             ("activo", "habilitado"),
             ("activo", "habilitados"),
             ("activo", "habilitada"),
             ("activo", "habilitadas"),
+            ("activo", "vigente"),
+            ("activo", "vigentes"),
+            ("activo", "disponible"),
+            ("activo", "disponibles"),
             ("inactivo", "deshabilitado"),
             ("inactivo", "deshabilitados"),
             ("inactivo", "deshabilitada"),
             ("inactivo", "deshabilitadas"),
+            ("fecha_nacimiento", "nacimiento"),
+            ("fecha_nacimiento", "fecha de nacimiento"),
+            ("fecha_nacimiento", "cumpleanos"),
+            ("fecha_nacimiento", "cumpleanos de empleados"),
+            ("fecha_nacimiento", "cumple"),
+            ("fecha_nacimiento", "cumple anos"),
+            ("fecha_nacimiento", "cumpleaneros"),
+            ("fecha_ingreso", "antiguedad"),
+            ("fecha_ingreso", "fecha de ingreso"),
+            ("fecha_egreso", "retiro"),
+            ("fecha_egreso", "salida"),
+            ("fecha_egreso", "fecha de retiro"),
+            ("area", "dependencia"),
+            ("area", "dependencias"),
+            ("area", "departamento"),
+            ("area", "departamentos"),
+            ("area", "unidad"),
+            ("area", "unidades"),
+            ("cargo", "puesto"),
+            ("cargo", "puestos"),
+            ("cargo", "rol"),
+            ("supervisor", "jefe"),
+            ("supervisor", "lider"),
         ]
         result: dict[str, Any] = {
             "ok": True,

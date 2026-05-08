@@ -57,6 +57,11 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         role=MODEL_ROLE_FAST,
         legacy_env="IA_DEV_INTENT_MODEL",
     ),
+    "intent_arbitration": ModelRoute(
+        component="intent_arbitration",
+        role=MODEL_ROLE_BALANCED,
+        legacy_env="IA_DEV_INTENT_ARBITRATION_MODEL",
+    ),
     "query_intent": ModelRoute(
         component="query_intent",
         role=MODEL_ROLE_BALANCED,

@@ -39,7 +39,10 @@ class IntentClassifierService:
 
     def _contains_attendance_domain(self, message: str) -> bool:
         msg = self._normalize_text(message)
-        return any(token in msg for token in ("ausent", "asistenc", "injustific", "justific"))
+        return any(
+            token in msg
+            for token in ("ausent", "ausenc", "asistenc", "injustific", "justific", "incapacid")
+        )
 
     def _contains_count_request(self, message: str) -> bool:
         msg = self._normalize_text(message)
@@ -358,7 +361,7 @@ class IntentClassifierService:
                 "confidence": 0.85,
             }
 
-        if any(token in msg for token in ("ausent", "asistencia", "injustific", "justific")):
+        if any(token in msg for token in ("ausent", "ausenc", "ausencia", "ausencias", "asistencia", "injustific", "justific", "incapacidad", "incapacidades")):
             domain = "ausentismo"
             intent = "ausentismo_query"
             needs_database = True

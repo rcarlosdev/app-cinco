@@ -95,11 +95,7 @@ class ResultSatisfactionValidator:
         asks_grouped_count = asks_count and bool(expected_group_by)
         if asks_grouped_count and rows:
             detail_like = any("fecha_ausentismo" in row and "cedula" in row for row in rows if isinstance(row, dict))
-            has_group_metric = any(
-                any(metric in row for metric in ("total_injustificados", "total_ausentismos", "total_eventos", "cantidad"))
-                for row in rows
-                if isinstance(row, dict)
-            )
+            has_group_metric = self._has_group_metric(rows=rows, expected_group_by=expected_group_by)
             checks["grouped_count"] = {
                 "detail_like": detail_like,
                 "has_group_metric": has_group_metric,
@@ -219,9 +215,13 @@ class ResultSatisfactionValidator:
         execution_plan: QueryExecutionPlan | None,
         message: str,
     ) -> list[str]:
-        values = [str(item).strip().lower() for item in list((execution_plan.constraints if execution_plan else {}).get("group_by") or []) if str(item).strip()]
-        if values:
-            return values
+        plan_constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+        if "group_by" in plan_constraints:
+            return [
+                str(item).strip().lower()
+                for item in list(plan_constraints.get("group_by") or [])
+                if str(item).strip()
+            ]
         if resolved_query is not None:
             values = [str(item).strip().lower() for item in list(resolved_query.intent.group_by or []) if str(item).strip()]
             if values:
@@ -306,6 +306,7 @@ class ResultSatisfactionValidator:
             "supervisor": {"supervisor"},
             "area": {"area"},
             "cargo": {"cargo"},
+            "birth_month": {"birth_month", "mes", "month"},
             "carpeta": {"carpeta"},
             "justificacion": {"justificacion", "motivo", "causa"},
             "estado": {"estado", "estado_justificacion"},
@@ -319,6 +320,33 @@ class ResultSatisfactionValidator:
                 if option in keys:
                     return option
         return ""
+
+    @classmethod
+    def _has_group_metric(cls, *, rows: list[dict[str, Any]], expected_group_by: list[str]) -> bool:
+        group_aliases = set(expected_group_by)
+        aliases = {
+            "supervisor": {"supervisor"},
+            "area": {"area"},
+            "cargo": {"cargo"},
+            "birth_month": {"birth_month", "mes", "month"},
+            "carpeta": {"carpeta"},
+            "justificacion": {"justificacion", "motivo", "causa"},
+            "estado": {"estado", "estado_justificacion"},
+            "estado_justificacion": {"estado", "estado_justificacion"},
+            "periodo": {"periodo", "fecha", "mes"},
+        }
+        for item in list(expected_group_by or []):
+            group_aliases.update(aliases.get(str(item or "").strip().lower(), set()))
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for key, value in row.items():
+                normalized_key = str(key or "").strip().lower()
+                if normalized_key in group_aliases or isinstance(value, bool):
+                    continue
+                if isinstance(value, (int, float)):
+                    return True
+        return False
 
     @staticmethod
     def _resolve_expected_cedula(message: str, *, resolved_query: ResolvedQuerySpec | None) -> str:

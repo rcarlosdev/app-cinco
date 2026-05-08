@@ -1,0 +1,1695 @@
+﻿{
+  "session_id": "fase1-empleados-q3c",
+  "reply": "Consulta analitica ejecutada en modo SQL asistido restringido para empleados en el periodo 2026-05-07 al 2026-05-07: 56 filas.",
+  "orchestrator": {
+    "intent": "aggregate",
+    "domain": "empleados",
+    "selected_agent": "analista_agent",
+    "classifier_source": "query_intelligence_sql_assisted",
+    "needs_database": true,
+    "output_mode": "table",
+    "used_tools": [
+      "query_sql_assisted_executor"
+    ],
+    "response_flow": "sql_assisted",
+    "runtime_flow": "sql_assisted",
+    "arbitrated_intent": "analytics_query",
+    "final_intent": "analytics_query",
+    "final_domain": "empleados",
+    "compiler_used": "employee_semantic_sql",
+    "analytics_router_decision": "join_aware_sql",
+    "fallback_reason": ""
+  },
+  "data": {
+    "kpis": {
+      "rowcount": 56
+    },
+    "series": [
+      {
+        "name": "total_registros",
+        "data": [
+          29,
+          26,
+          25,
+          25,
+          24,
+          23,
+          23,
+          21,
+          21,
+          20,
+          19,
+          19,
+          19,
+          19,
+          18,
+          18,
+          18,
+          16,
+          16,
+          16
+        ]
+      }
+    ],
+    "labels": [
+      "71384534",
+      "8102546",
+      "71740175",
+      "16070665",
+      "1128481962",
+      "1000873735",
+      "20386375",
+      "71370564",
+      "1038806968",
+      "1192718118",
+      "8126258",
+      "8061045",
+      "1077452344",
+      "1067928175",
+      "1001617810",
+      "13513602",
+      "1017189043",
+      "98778519",
+      "98713812",
+      "1002439285"
+    ],
+    "insights": [
+      "Resultado obtenido con SQL asistido restringido (solo lectura).",
+      "La consulta se resolvio por inferencia semantica validada contra ai_dictionary."
+    ],
+    "table": {
+      "columns": [
+        "supervisor",
+        "total_registros"
+      ],
+      "rows": [
+        {
+          "supervisor": "71384534",
+          "total_registros": 29
+        },
+        {
+          "supervisor": "8102546",
+          "total_registros": 26
+        },
+        {
+          "supervisor": "71740175",
+          "total_registros": 25
+        },
+        {
+          "supervisor": "16070665",
+          "total_registros": 25
+        },
+        {
+          "supervisor": "1128481962",
+          "total_registros": 24
+        },
+        {
+          "supervisor": "1000873735",
+          "total_registros": 23
+        },
+        {
+          "supervisor": "20386375",
+          "total_registros": 23
+        },
+        {
+          "supervisor": "71370564",
+          "total_registros": 21
+        },
+        {
+          "supervisor": "1038806968",
+          "total_registros": 21
+        },
+        {
+          "supervisor": "1192718118",
+          "total_registros": 20
+        },
+        {
+          "supervisor": "8126258",
+          "total_registros": 19
+        },
+        {
+          "supervisor": "8061045",
+          "total_registros": 19
+        },
+        {
+          "supervisor": "1077452344",
+          "total_registros": 19
+        },
+        {
+          "supervisor": "1067928175",
+          "total_registros": 19
+        },
+        {
+          "supervisor": "1001617810",
+          "total_registros": 18
+        },
+        {
+          "supervisor": "13513602",
+          "total_registros": 18
+        },
+        {
+          "supervisor": "1017189043",
+          "total_registros": 18
+        },
+        {
+          "supervisor": "98778519",
+          "total_registros": 16
+        },
+        {
+          "supervisor": "98713812",
+          "total_registros": 16
+        },
+        {
+          "supervisor": "1002439285",
+          "total_registros": 16
+        },
+        {
+          "supervisor": "71365308",
+          "total_registros": 16
+        },
+        {
+          "supervisor": "1020447249",
+          "total_registros": 15
+        },
+        {
+          "supervisor": "8432436",
+          "total_registros": 14
+        },
+        {
+          "supervisor": "1128480287",
+          "total_registros": 14
+        },
+        {
+          "supervisor": "15386986",
+          "total_registros": 14
+        },
+        {
+          "supervisor": "71905449",
+          "total_registros": 13
+        },
+        {
+          "supervisor": "71366475",
+          "total_registros": 13
+        },
+        {
+          "supervisor": "71271066",
+          "total_registros": 13
+        },
+        {
+          "supervisor": "71268185",
+          "total_registros": 12
+        },
+        {
+          "supervisor": "71783273",
+          "total_registros": 12
+        },
+        {
+          "supervisor": "1017198900",
+          "total_registros": 12
+        },
+        {
+          "supervisor": "1036670828",
+          "total_registros": 12
+        },
+        {
+          "supervisor": "1067890913",
+          "total_registros": 12
+        },
+        {
+          "supervisor": "1152688324",
+          "total_registros": 11
+        },
+        {
+          "supervisor": "71378051",
+          "total_registros": 11
+        },
+        {
+          "supervisor": "1030588973",
+          "total_registros": 10
+        },
+        {
+          "supervisor": "8064239",
+          "total_registros": 10
+        },
+        {
+          "supervisor": "1020420820",
+          "total_registros": 10
+        },
+        {
+          "supervisor": "1037573773",
+          "total_registros": 8
+        },
+        {
+          "supervisor": "1128407558",
+          "total_registros": 6
+        },
+        {
+          "supervisor": "92548184",
+          "total_registros": 5
+        },
+        {
+          "supervisor": "1023895514",
+          "total_registros": 4
+        },
+        {
+          "supervisor": "1017217077",
+          "total_registros": 4
+        },
+        {
+          "supervisor": "1128433086",
+          "total_registros": 3
+        },
+        {
+          "supervisor": "1037668574",
+          "total_registros": 3
+        },
+        {
+          "supervisor": "8060928",
+          "total_registros": 3
+        },
+        {
+          "supervisor": "1017162440",
+          "total_registros": 2
+        },
+        {
+          "supervisor": "1040743763",
+          "total_registros": 2
+        },
+        {
+          "supervisor": "1036616749",
+          "total_registros": 2
+        },
+        {
+          "supervisor": "1017186083",
+          "total_registros": 2
+        },
+        {
+          "supervisor": "1128462999",
+          "total_registros": 2
+        },
+        {
+          "supervisor": "1017202116",
+          "total_registros": 1
+        },
+        {
+          "supervisor": "1017172211",
+          "total_registros": 1
+        },
+        {
+          "supervisor": "1152189904",
+          "total_registros": 1
+        },
+        {
+          "supervisor": "98694584",
+          "total_registros": 1
+        },
+        {
+          "supervisor": "1020464185",
+          "total_registros": 1
+        }
+      ],
+      "rowcount": 56
+    },
+    "charts": [
+      {
+        "type": "bar",
+        "title": "Distribucion analitica",
+        "labels": [
+          "71384534",
+          "8102546",
+          "71740175",
+          "16070665",
+          "1128481962",
+          "1000873735",
+          "20386375",
+          "71370564",
+          "1038806968",
+          "1192718118",
+          "8126258",
+          "8061045",
+          "1077452344",
+          "1067928175",
+          "1001617810",
+          "13513602",
+          "1017189043",
+          "98778519",
+          "98713812",
+          "1002439285"
+        ],
+        "series": [
+          {
+            "name": "total_registros",
+            "data": [
+              29,
+              26,
+              25,
+              25,
+              24,
+              23,
+              23,
+              21,
+              21,
+              20,
+              19,
+              19,
+              19,
+              19,
+              18,
+              18,
+              18,
+              16,
+              16,
+              16
+            ]
+          }
+        ]
+      }
+    ],
+    "findings": [
+      {
+        "title": "Top hallazgo",
+        "detail": "Se obtuvieron 56 filas usando employee_semantic_sql."
+      }
+    ],
+    "cause_generation_meta": {},
+    "chart": {
+      "engine": "amcharts5",
+      "chart_library": "amcharts5",
+      "type": "bar",
+      "title": "Consulta analitica ejecutada en modo SQL asistido restringido para empleados en el periodo 2026-",
+      "labels": [
+        "71384534",
+        "8102546",
+        "71740175",
+        "16070665",
+        "1128481962",
+        "1000873735",
+        "20386375",
+        "71370564",
+        "1038806968",
+        "1192718118",
+        "8126258",
+        "8061045",
+        "1077452344",
+        "1067928175",
+        "1001617810",
+        "13513602",
+        "1017189043",
+        "98778519",
+        "98713812",
+        "1002439285"
+      ],
+      "series": [
+        29.0,
+        26.0,
+        25.0,
+        25.0,
+        24.0,
+        23.0,
+        23.0,
+        21.0,
+        21.0,
+        20.0,
+        19.0,
+        19.0,
+        19.0,
+        19.0,
+        18.0,
+        18.0,
+        18.0,
+        16.0,
+        16.0,
+        16.0
+      ],
+      "meta": {
+        "source": "response_assembler",
+        "inferred_from": "labels_series"
+      }
+    },
+    "meta": {
+      "presentation": {
+        "primary": "chart",
+        "has_kpis": true,
+        "has_table": true,
+        "has_chart_inputs": true
+      }
+    },
+    "business_response": {
+      "dato": "rowcount: 56",
+      "hallazgo": "Se obtuvieron 56 filas usando employee_semantic_sql.",
+      "interpretacion": "La consulta arroja un conjunto de datos util para priorizar revision por segmentos.",
+      "riesgo": "El volumen de resultados puede requerir priorizacion para una lectura ejecutiva.",
+      "recomendacion": "La consulta se resolvio por inferencia semantica validada contra ai_dictionary.",
+      "siguiente_accion": "Profundizar analisis"
+    }
+  },
+  "actions": [
+    {
+      "id": "task-followup-run_2411dde976f845f3",
+      "type": "followup",
+      "label": "Profundizar analisis",
+      "payload": {
+        "suggested_dimensions": [
+          "sede",
+          "area",
+          "cargo"
+        ],
+        "current_strategy": "sql_assisted"
+      }
+    }
+  ],
+  "data_sources": {
+    "query_intelligence": {
+      "ok": true,
+      "strategy": "sql_assisted",
+      "query": "SELECT supervisor AS supervisor, COUNT(*) AS total_registros FROM bd_c3nc4s1s.cinco_base_de_personal WHERE estado = 'ACTIVO' AND tipo_labor = 'OPERATIVO' GROUP BY supervisor ORDER BY total_registros DESC LIMIT 500",
+      "db_alias": "default",
+      "compiler": "employee_semantic_sql",
+      "relations_used": [],
+      "metric_used": "employees",
+      "aggregation_used": "count",
+      "dimensions_used": [
+        "supervisor"
+      ],
+      "declared_metric_source": "ai_dictionary.dd_campos",
+      "declared_dimensions_source": "ai_dictionary.dd_campos",
+      "mode": "active",
+      "semantic_diagnostics": {
+        "mode": "active",
+        "domain_code": "empleados",
+        "operation": "aggregate",
+        "template_id": "aggregate_by_group_and_period",
+        "strategy": "sql_assisted",
+        "synonyms_applied": [
+          {
+            "scope": "filter",
+            "requested_term": "jefes directos",
+            "canonical_term": "supervisor",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "supervisor",
+            "source": "ai_dictionary.dd_sinonimos_or_aliases"
+          },
+          {
+            "scope": "filter",
+            "requested_term": "estado",
+            "canonical_term": "estado_empleado",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "estado",
+            "source": "ai_dictionary.dd_sinonimos_or_aliases"
+          }
+        ],
+        "column_actions": [
+          {
+            "scope": "filter",
+            "action": "mapped_filter",
+            "requested_term": "jefes directos",
+            "canonical_term": "supervisor",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "supervisor",
+            "supports_filter": true,
+            "supports_group_by": true,
+            "supports_metric": false,
+            "is_identifier": false,
+            "is_chart_dimension": true,
+            "is_chart_measure": false
+          },
+          {
+            "scope": "filter",
+            "action": "mapped_filter",
+            "requested_term": "estado",
+            "canonical_term": "estado_empleado",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "estado",
+            "supports_filter": true,
+            "supports_group_by": true,
+            "supports_metric": false,
+            "is_identifier": false,
+            "is_chart_dimension": true,
+            "is_chart_measure": false
+          },
+          {
+            "scope": "filter",
+            "action": "mapped_filter",
+            "requested_term": "tipo_labor",
+            "canonical_term": "tipo_labor",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "tipo_labor",
+            "supports_filter": true,
+            "supports_group_by": true,
+            "supports_metric": false,
+            "is_identifier": false,
+            "is_chart_dimension": true,
+            "is_chart_measure": false
+          },
+          {
+            "scope": "filter",
+            "action": "mapped_filter",
+            "requested_term": "supervisor",
+            "canonical_term": "supervisor",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "supervisor",
+            "supports_filter": true,
+            "supports_group_by": true,
+            "supports_metric": false,
+            "is_identifier": false,
+            "is_chart_dimension": true,
+            "is_chart_measure": false
+          },
+          {
+            "scope": "group_by",
+            "action": "mapped_group_by",
+            "requested_term": "supervisor",
+            "canonical_term": "supervisor",
+            "table_name": "cinco_base_de_personal",
+            "column_name": "supervisor",
+            "supports_filter": true,
+            "supports_group_by": true,
+            "supports_metric": false,
+            "is_identifier": false,
+            "is_chart_dimension": true,
+            "is_chart_measure": false
+          }
+        ],
+        "unresolved_terms": [
+          {
+            "scope": "filter",
+            "requested_term": "estado_empleado",
+            "reason": "no_semantic_column_match",
+            "searched_in": [
+              "ai_dictionary.dd_sinonimos",
+              "ai_dictionary.dd_campos",
+              "domain_runtime.column_profiles"
+            ]
+          }
+        ],
+        "search_bases": {
+          "ai_dictionary": {
+            "database_alias": "default",
+            "dictionary_table": "ai_dictionary.dd_dominios",
+            "schema": "ai_dictionary",
+            "domain_code": "EMPLEADOS",
+            "domain_name": "Empleados",
+            "domain_matched": true,
+            "searched_tables": [
+              "dd_dominios",
+              "dd_tablas",
+              "dd_campos",
+              "dd_relaciones",
+              "dd_reglas",
+              "dd_sinonimos"
+            ]
+          },
+          "operational_context": {
+            "tables_considered": [
+              "bd_c3nc4s1s.cinco_base_de_personal"
+            ],
+            "databases_detected": [
+              "bd_c3nc4s1s"
+            ],
+            "filters_normalized": {
+              "estado_empleado": "ACTIVO",
+              "tipo_labor": "OPERATIVO",
+              "estado": "ACTIVO"
+            },
+            "mapped_columns": {
+              "estado_empleado": "estado",
+              "tipo_labor": "tipo_labor",
+              "estado": "estado"
+            }
+          }
+        },
+        "warnings": []
+      }
+    },
+    "runtime": {
+      "ok": true,
+      "flow": "sql_assisted",
+      "arbitrated_intent": "analytics_query",
+      "final_intent": "analytics_query",
+      "final_domain": "empleados",
+      "task_state_key": "task_runtime:run_2411dde976f845f3",
+      "runtime_authority": "query_execution_planner",
+      "planner_was_authority": true,
+      "legacy_capability_path_used": false,
+      "routing_mode": "capability",
+      "legacy_analytics_fallback_disabled": false,
+      "blocked_legacy_fallback": false,
+      "analytics_router_decision": "join_aware_sql",
+      "legacy_analytics_isolated": true,
+      "blocked_tool_ausentismo_service": false,
+      "blocked_run_legacy_for_analytics": false,
+      "runtime_only_fallback_reason": "",
+      "fallback_reason": "",
+      "cleanup_phase": "phase_7",
+      "compiler_used": "employee_semantic_sql",
+      "structural_source": "ai_dictionary",
+      "yaml_role": "narrative_only",
+      "yaml_structural_ignored": true,
+      "pilot_enabled": true,
+      "pilot_phase": "phase_9"
+    }
+  },
+  "trace": [
+    {
+      "phase": "query_intelligence_execution",
+      "status": "ok",
+      "at": "2026-05-07T06:41:56.121189+00:00",
+      "detail": {
+        "execution_plan": {
+          "strategy": "sql_assisted",
+          "reason": "employee_birthdays_aggregate",
+          "domain_code": "empleados",
+          "capability_id": null,
+          "sql_query": "SELECT supervisor AS supervisor, COUNT(*) AS total_registros FROM bd_c3nc4s1s.cinco_base_de_personal WHERE estado = 'ACTIVO' AND tipo_labor = 'OPERATIVO' GROUP BY supervisor ORDER BY total_registros DESC LIMIT 500",
+          "requires_context": false,
+          "missing_context": [],
+          "constraints": {
+            "entity_scope": {
+              "entity_type": "",
+              "entity_id": "",
+              "has_entity_filter": false
+            },
+            "filters": {
+              "estado_empleado": "ACTIVO",
+              "tipo_labor": "OPERATIVO",
+              "estado": "ACTIVO"
+            },
+            "period_scope": {
+              "label": "hoy",
+              "start_date": "2026-05-07",
+              "end_date": "2026-05-07"
+            },
+            "temporal_scope": {},
+            "group_by": [
+              "supervisor"
+            ],
+            "metrics": [
+              "count"
+            ],
+            "result_shape": "table",
+            "joins": [
+              {
+                "from_entity": "",
+                "to_entity": "",
+                "relation_name": "empleado_supervisor",
+                "join_sql": "cinco_base_de_personal.supervisor = cinco_base_de_personal.cedula",
+                "cardinality": "many_to_one",
+                "valid": true,
+                "confidence": 0.92
+              }
+            ],
+            "chart_requested": true,
+            "operation": "aggregate",
+            "template_id": "aggregate_by_group_and_period"
+          },
+          "policy": {
+            "allowed": true,
+            "reason": "sql_validated",
+            "metadata": {
+              "declared_tables": [
+                "bd_c3nc4s1s.cinco_base_de_personal"
+              ],
+              "declared_columns_count": 3,
+              "declared_relations_count": 0,
+              "limit": 500
+            }
+          },
+          "metadata": {
+            "template_id": "aggregate_by_group_and_period",
+            "operation": "aggregate",
+            "capability_id": "empleados.count.active.v1",
+            "compiler": "employee_semantic_sql",
+            "compiler_used": "employee_semantic_sql",
+            "tables_detected": [
+              "cinco_base_de_personal"
+            ],
+            "columns_detected": [
+              "estado",
+              "fnacimiento",
+              "supervisor"
+            ],
+            "physical_columns_used": [
+              "estado",
+              "fnacimiento",
+              "supervisor"
+            ],
+            "relations_used": [],
+            "metric_used": "employees",
+            "aggregation_used": "count",
+            "dimensions_used": [
+              "supervisor"
+            ],
+            "concept_field": "employees",
+            "declared_metric_source": "ai_dictionary.dd_campos",
+            "declared_dimensions_source": "ai_dictionary.dd_campos",
+            "insights": [
+              "La consulta se resolvio por inferencia semantica validada contra ai_dictionary."
+            ],
+            "raw_query_fallback_used": false,
+            "raw_query_fallback_reason": "",
+            "analytics_router_decision": "join_aware_sql",
+            "legacy_analytics_isolated": true,
+            "cleanup_phase": "phase_7",
+            "heuristic_intent": "empleados_query",
+            "llm_intent": "aggregate",
+            "arbitrated_intent": "analytics_query",
+            "arbitration_confidence": 0.97,
+            "arbitration_reason": "La solicitud pide un conteo/agrupación analítica de empleados activos por supervisor (jefes directos) con filtro de tipo_labor OPERATIVO, no un cambio de conocimiento ni una acción de escritura. Encaja en analytics de RRHH sobre empleados, usando la equivalencia supervisor=jefe d",
+            "kpro_blocked_by_arbitration": true,
+            "sql_assisted_selected_by_arbitration": true
+          }
+        },
+        "duration_ms": 36,
+        "rowcount": 56
+      },
+      "active_nodes": [
+        "q",
+        "gpt",
+        "route",
+        "sql",
+        "result"
+      ]
+    },
+    {
+      "phase": "reasoning_diagnostics",
+      "status": "warning",
+      "at": "2026-05-07T06:41:59.414273+00:00",
+      "detail": {
+        "run_id": "run_2411dde976f845f3",
+        "trace_id": "trace_2c56e42ec438475c",
+        "diagnostic_count": 1,
+        "signatures": [
+          "semantic_runtime_divergence"
+        ]
+      },
+      "active_nodes": [
+        "q",
+        "gpt",
+        "route"
+      ]
+    }
+  ],
+  "memory": {
+    "used_messages": 0,
+    "capacity_messages": 20,
+    "usage_ratio": 0.0,
+    "trim_events": 0,
+    "saturated": false
+  },
+  "observability": {
+    "enabled": true,
+    "duration_ms": 36,
+    "tool_latencies_ms": {
+      "query_sql_assisted_executor": 36
+    },
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "estimated_cost_usd": 0.0
+  },
+  "active_nodes": [
+    "q",
+    "gpt",
+    "route",
+    "sql",
+    "result"
+  ],
+  "memory_candidates": [
+    {
+      "scope": "user",
+      "candidate_key": "reasoning.pattern.user.semantic_runtime_divergence",
+      "candidate_value": {
+        "signature": "semantic_runtime_divergence",
+        "family": "alignment",
+        "severity": "warning",
+        "stage": "resolution",
+        "domain_code": "empleados",
+        "capability_id": "empleados.count.active.v1",
+        "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+        "recommended_action": "Comparar dominio, intencion y filtros canonicos antes de ejecutar para evitar rutas inconsistentes.",
+        "pattern_strength": 0.81,
+        "evidence_signature": {
+          "response_rowcount": 56,
+          "severity": "warning",
+          "family": "alignment",
+          "stage": "resolution"
+        }
+      },
+      "reason": "reasoning_learning_pattern",
+      "decision": "propose",
+      "proposal_id": "MPRO-58472CB9D4",
+      "result_ok": true
+    },
+    {
+      "scope": "business",
+      "candidate_key": "reasoning.pattern.domain.empleados.semantic_runtime_divergence",
+      "candidate_value": {
+        "signature": "semantic_runtime_divergence",
+        "family": "alignment",
+        "severity": "warning",
+        "stage": "resolution",
+        "domain_code": "empleados",
+        "capability_id": "empleados.count.active.v1",
+        "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+        "recommended_action": "Comparar dominio, intencion y filtros canonicos antes de ejecutar para evitar rutas inconsistentes.",
+        "pattern_strength": 0.81,
+        "evidence_signature": {
+          "response_rowcount": 56,
+          "severity": "warning",
+          "family": "alignment",
+          "stage": "resolution"
+        }
+      },
+      "reason": "reasoning_learning_pattern",
+      "decision": "propose",
+      "proposal_id": "MPRO-0B42F50B48",
+      "result_ok": true
+    }
+  ],
+  "pending_proposals": [
+    {
+      "proposal_id": "MPRO-F4D38E2331",
+      "scope": "user",
+      "status": "applied",
+      "proposer_user_key": "session:fase1-empleados-q3c",
+      "source_run_id": "run_2411dde976f845f3",
+      "candidate_key": "query.pattern.empleados.aggregate_by_group_and_period",
+      "candidate_value": {
+        "domain_code": "EMPLEADOS",
+        "template_id": "aggregate_by_group_and_period",
+        "operation": "aggregate",
+        "entity_type": "",
+        "surface_pattern": {
+          "normalized_query": "que jefes directos tienen mas tecnicos activos",
+          "query_shape_key": "que jefes directos tienen mas tecnicos activos"
+        },
+        "semantic_pattern": {
+          "filters": {
+            "estado_empleado": "ACTIVO",
+            "tipo_labor": "OPERATIVO",
+            "estado": "ACTIVO"
+          },
+          "group_by": [
+            "supervisor"
+          ],
+          "metrics": [
+            "count"
+          ],
+          "period": {
+            "label": "hoy",
+            "start_date": "2026-05-07",
+            "end_date": "2026-05-07"
+          },
+          "semantic_signature": {
+            "synonyms": [],
+            "columns": [],
+            "relations": [
+              {
+                "from_entity": "",
+                "to_entity": "",
+                "relation_name": "empleado_supervisor",
+                "join_sql": "cinco_base_de_personal.supervisor = cinco_base_de_personal.cedula",
+                "cardinality": "many_to_one",
+                "valid": true,
+                "confidence": 0.92
+              }
+            ]
+          }
+        },
+        "execution_pattern": {
+          "strategy": "sql_assisted",
+          "capability_id": "",
+          "constraints": {
+            "entity_scope": {
+              "entity_type": "",
+              "entity_id": "",
+              "has_entity_filter": false
+            },
+            "filters": {
+              "estado_empleado": "ACTIVO",
+              "tipo_labor": "OPERATIVO",
+              "estado": "ACTIVO"
+            },
+            "period_scope": {
+              "label": "hoy",
+              "start_date": "2026-05-07",
+              "end_date": "2026-05-07"
+            },
+            "temporal_scope": {},
+            "group_by": [
+              "supervisor"
+            ],
+            "metrics": [
+              "count"
+            ],
+            "result_shape": "table",
+            "joins": [
+              {
+                "from_entity": "",
+                "to_entity": "",
+                "relation_name": "empleado_supervisor",
+                "join_sql": "cinco_base_de_personal.supervisor = cinco_base_de_personal.cedula",
+                "cardinality": "many_to_one",
+                "valid": true,
+                "confidence": 0.92
+              }
+            ],
+            "chart_requested": true,
+            "operation": "aggregate",
+            "template_id": "aggregate_by_group_and_period"
+          }
+        },
+        "satisfaction": {
+          "satisfied": true,
+          "reason": "ok",
+          "score": 1.0,
+          "checks_excerpt": {
+            "expected_period": {
+              "start_date": "2026-05-07",
+              "end_date": "2026-05-07"
+            },
+            "expected_group_by": [
+              "supervisor"
+            ],
+            "expected_cedula": null,
+            "matched_group_dimension": "supervisor"
+          }
+        },
+        "response_signature": {
+          "kpi_keys": [
+            "rowcount"
+          ],
+          "table_columns": [
+            "supervisor",
+            "total_registros"
+          ],
+          "rowcount": 56
+        }
+      },
+      "reason": "query_intelligence_success_pattern",
+      "sensitivity": "low",
+      "domain_code": "EMPLEADOS",
+      "capability_id": "empleados.count.active.v1",
+      "policy_action": "allow",
+      "policy_id": "memory_write_policy.yaml.rule_2",
+      "idempotency_key": "qipattern-0a6853916e10c58e22fd5023",
+      "error": null,
+      "version": 3,
+      "created_at": 1778136116,
+      "updated_at": 1778136117,
+      "workflow": {
+        "id": 979,
+        "workflow_type": "memory_proposal",
+        "workflow_key": "memory_proposal:MPRO-F4D38E2331",
+        "status": "applied",
+        "state": {
+          "proposal_id": "MPRO-F4D38E2331",
+          "scope": "user",
+          "status": "applied",
+          "candidate_key": "query.pattern.empleados.aggregate_by_group_and_period",
+          "capability_id": "empleados.count.active.v1",
+          "domain_code": "EMPLEADOS",
+          "policy_action": "allow",
+          "proposer_user_key": "session:fase1-empleados-q3c",
+          "transition_history": [
+            {
+              "at": 1778136116,
+              "to": "pending",
+              "source": "proposal_create",
+              "actor_user_key": "session:fase1-empleados-q3c",
+              "actor_role": "user",
+              "comment": "proposal_created",
+              "error": null
+            },
+            {
+              "at": 1778136117,
+              "to": "approved",
+              "source": "proposal_approve",
+              "actor_user_key": "session:fase1-empleados-q3c",
+              "actor_role": "user",
+              "comment": "auto_apply_user_low_risk",
+              "error": null
+            },
+            {
+              "at": 1778136117,
+              "to": "applied",
+              "source": "proposal_apply",
+              "actor_user_key": "session:fase1-empleados-q3c",
+              "actor_role": "user",
+              "comment": "proposal_applied",
+              "error": null
+            }
+          ],
+          "last_transition": {
+            "at": 1778136117,
+            "to": "applied",
+            "source": "proposal_apply",
+            "actor_user_key": "session:fase1-empleados-q3c",
+            "actor_role": "user",
+            "comment": "proposal_applied",
+            "error": null
+          },
+          "updated_at": 1778136117,
+          "created_at": 1778136116
+        },
+        "retry_count": 0,
+        "lock_version": 3,
+        "next_retry_at": null,
+        "last_error": null,
+        "created_at": 1778136116,
+        "updated_at": 1778136117
+      },
+      "workflow_status": "applied",
+      "workflow_key": "memory_proposal:MPRO-F4D38E2331"
+    },
+    {
+      "proposal_id": "MPRO-58472CB9D4",
+      "scope": "user",
+      "status": "applied",
+      "proposer_user_key": "session:fase1-empleados-q3c",
+      "source_run_id": "run_2411dde976f845f3",
+      "candidate_key": "reasoning.pattern.user.semantic_runtime_divergence",
+      "candidate_value": {
+        "signature": "semantic_runtime_divergence",
+        "family": "alignment",
+        "severity": "warning",
+        "stage": "resolution",
+        "domain_code": "empleados",
+        "capability_id": "empleados.count.active.v1",
+        "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+        "recommended_action": "Comparar dominio, intencion y filtros canonicos antes de ejecutar para evitar rutas inconsistentes.",
+        "pattern_strength": 0.81,
+        "evidence_signature": {
+          "response_rowcount": 56,
+          "severity": "warning",
+          "family": "alignment",
+          "stage": "resolution"
+        }
+      },
+      "reason": "reasoning_diagnostic_pattern",
+      "sensitivity": "medium",
+      "domain_code": "EMPLEADOS",
+      "capability_id": "empleados.count.active.v1",
+      "policy_action": "allow",
+      "policy_id": "memory_write_policy.yaml.rule_2",
+      "idempotency_key": "reasoning-a046d6494e44299a6aad85dd",
+      "error": null,
+      "version": 3,
+      "created_at": 1778136118,
+      "updated_at": 1778136118,
+      "workflow": {
+        "id": 981,
+        "workflow_type": "memory_proposal",
+        "workflow_key": "memory_proposal:MPRO-58472CB9D4",
+        "status": "applied",
+        "state": {
+          "proposal_id": "MPRO-58472CB9D4",
+          "scope": "user",
+          "status": "applied",
+          "candidate_key": "reasoning.pattern.user.semantic_runtime_divergence",
+          "capability_id": "empleados.count.active.v1",
+          "domain_code": "EMPLEADOS",
+          "policy_action": "allow",
+          "proposer_user_key": "session:fase1-empleados-q3c",
+          "transition_history": [
+            {
+              "at": 1778136118,
+              "to": "pending",
+              "source": "proposal_create",
+              "actor_user_key": "session:fase1-empleados-q3c",
+              "actor_role": "user",
+              "comment": "proposal_created",
+              "error": null
+            },
+            {
+              "at": 1778136118,
+              "to": "approved",
+              "source": "proposal_approve",
+              "actor_user_key": "session:fase1-empleados-q3c",
+              "actor_role": "user",
+              "comment": "auto_apply_user_low_risk",
+              "error": null
+            },
+            {
+              "at": 1778136119,
+              "to": "applied",
+              "source": "proposal_apply",
+              "actor_user_key": "session:fase1-empleados-q3c",
+              "actor_role": "user",
+              "comment": "proposal_applied",
+              "error": null
+            }
+          ],
+          "last_transition": {
+            "at": 1778136119,
+            "to": "applied",
+            "source": "proposal_apply",
+            "actor_user_key": "session:fase1-empleados-q3c",
+            "actor_role": "user",
+            "comment": "proposal_applied",
+            "error": null
+          },
+          "updated_at": 1778136119,
+          "created_at": 1778136118
+        },
+        "retry_count": 0,
+        "lock_version": 3,
+        "next_retry_at": null,
+        "last_error": null,
+        "created_at": 1778136118,
+        "updated_at": 1778136119
+      },
+      "workflow_status": "applied",
+      "workflow_key": "memory_proposal:MPRO-58472CB9D4"
+    },
+    {
+      "proposal_id": "MPRO-0B42F50B48",
+      "scope": "business",
+      "status": "applied",
+      "proposer_user_key": "session:empleados-fase1",
+      "source_run_id": "run_b1ec7c581f124800",
+      "candidate_key": "reasoning.pattern.domain.empleados.semantic_runtime_divergence",
+      "candidate_value": {
+        "signature": "semantic_runtime_divergence",
+        "family": "alignment",
+        "severity": "warning",
+        "stage": "resolution",
+        "domain_code": "empleados",
+        "capability_id": "empleados.count.active.v1",
+        "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+        "recommended_action": "Comparar dominio, intencion y filtros canonicos antes de ejecutar para evitar rutas inconsistentes.",
+        "pattern_strength": 0.81,
+        "evidence_signature": {
+          "response_rowcount": 56,
+          "severity": "warning",
+          "family": "alignment",
+          "stage": "resolution"
+        }
+      },
+      "reason": "reasoning_collective_pattern",
+      "sensitivity": "medium",
+      "domain_code": "EMPLEADOS",
+      "capability_id": "empleados.count.active.v1",
+      "policy_action": "require_approval",
+      "policy_id": "memory_write_policy.yaml.rule_4",
+      "idempotency_key": "reasoning-e37f040497a966ad28c85cc7",
+      "error": null,
+      "version": 3,
+      "created_at": 1778126222,
+      "updated_at": 1778126223,
+      "workflow": {
+        "id": 896,
+        "workflow_type": "memory_proposal",
+        "workflow_key": "memory_proposal:MPRO-0B42F50B48",
+        "status": "applied",
+        "state": {
+          "proposal_id": "MPRO-0B42F50B48",
+          "scope": "business",
+          "status": "applied",
+          "candidate_key": "reasoning.pattern.domain.empleados.semantic_runtime_divergence",
+          "capability_id": "empleados.count.active.v1",
+          "domain_code": "EMPLEADOS",
+          "policy_action": "require_approval",
+          "proposer_user_key": "session:empleados-fase1",
+          "transition_history": [
+            {
+              "at": 1778126222,
+              "to": "pending",
+              "source": "proposal_create",
+              "actor_user_key": "session:empleados-fase1",
+              "actor_role": "user",
+              "comment": "proposal_created",
+              "error": null
+            },
+            {
+              "at": 1778126223,
+              "to": "approved",
+              "source": "proposal_approve",
+              "actor_user_key": "session:empleados-fase1",
+              "actor_role": "system",
+              "comment": "auto_apply_business_reasoning_pattern_low_risk",
+              "error": null
+            },
+            {
+              "at": 1778126223,
+              "to": "applied",
+              "source": "proposal_apply",
+              "actor_user_key": "session:empleados-fase1",
+              "actor_role": "system",
+              "comment": "proposal_applied",
+              "error": null
+            }
+          ],
+          "last_transition": {
+            "at": 1778126223,
+            "to": "applied",
+            "source": "proposal_apply",
+            "actor_user_key": "session:empleados-fase1",
+            "actor_role": "system",
+            "comment": "proposal_applied",
+            "error": null
+          },
+          "updated_at": 1778126223,
+          "created_at": 1778126222
+        },
+        "retry_count": 0,
+        "lock_version": 3,
+        "next_retry_at": null,
+        "last_error": null,
+        "created_at": 1778126222,
+        "updated_at": 1778126223
+      },
+      "workflow_status": "applied",
+      "workflow_key": "memory_proposal:MPRO-0B42F50B48"
+    }
+  ],
+  "working_updates": [
+    {
+      "stage": "intake",
+      "stage_label": "Consulta",
+      "status": "completed",
+      "summary": "Consulta recibida y lista para analisis.",
+      "display_text": "Consulta recibida y lista para analisis.",
+      "next_step": "clasificar dominio e intencion base",
+      "confidence": 0.4,
+      "at": "2026-05-07T06:41:50.238255+00:00"
+    },
+    {
+      "stage": "bootstrap",
+      "stage_label": "Lectura",
+      "status": "completed",
+      "summary": "Clasificacion base y dominio inicial resueltos.",
+      "display_text": "Ubique la consulta en empleados y asigne empleados_agent.",
+      "next_step": "cargar memoria relevante antes de la resolucion semantica",
+      "confidence": 0.6,
+      "at": "2026-05-07T06:41:50.239256+00:00"
+    },
+    {
+      "stage": "memory",
+      "stage_label": "Memoria",
+      "status": "completed",
+      "summary": "Memorias utiles cargadas para orientar la consulta.",
+      "display_text": "Recupere 3 patrones de consulta, 5 aprendizajes previos para orientar la respuesta.",
+      "next_step": "resolver la consulta con señales semanticas y patrones previos",
+      "confidence": 0.7,
+      "at": "2026-05-07T06:41:50.408726+00:00"
+    },
+    {
+      "stage": "query_intelligence",
+      "stage_label": "Resolucion",
+      "status": "completed",
+      "summary": "La consulta fue resuelta a un plan estructurado.",
+      "display_text": "Resolvi empleados con estrategia sql_assisted y plantilla aggregate_by_group_and_period.",
+      "next_step": "elegir la mejor capacidad y ejecutar la respuesta",
+      "confidence": 0.97,
+      "at": "2026-05-07T06:41:56.169692+00:00"
+    },
+    {
+      "stage": "planning",
+      "stage_label": "Ruta",
+      "status": "completed",
+      "summary": "Se generaron candidatos de capacidad para resolver la consulta.",
+      "display_text": "Elegi empleados.count.active.v1 como mejor ruta de ejecucion.",
+      "next_step": "ejecutar la ruta principal y validar el resultado",
+      "confidence": 0.72,
+      "at": "2026-05-07T06:41:56.507005+00:00"
+    },
+    {
+      "stage": "diagnostics",
+      "stage_label": "Hallazgo",
+      "status": "completed",
+      "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+      "display_text": "Detecte semantic runtime divergence y ajuste el razonamiento para no repetirlo.",
+      "next_step": "persistir aprendizajes utiles para futuras ejecuciones",
+      "confidence": 0.81,
+      "at": "2026-05-07T06:41:58.432736+00:00"
+    },
+    {
+      "stage": "response",
+      "stage_label": "Aprendizaje",
+      "status": "completed",
+      "summary": "La respuesta final fue ensamblada con diagnosticos y memoria de aprendizaje.",
+      "display_text": "Genere la respuesta y guarde 3 aprendizajes para futuras consultas.",
+      "next_step": "respuesta lista",
+      "confidence": 0.85,
+      "at": "2026-05-07T06:41:59.305854+00:00"
+    }
+  ],
+  "reasoning": {
+    "enabled": true,
+    "version": "ia_dev.reasoning.v1",
+    "status": "completed",
+    "working_goal": "Resolver la consulta \"Que jefes directos tienen mas tecnicos activos\" con la mejor evidencia disponible.",
+    "current_next_step": "respuesta lista",
+    "hypotheses": [
+      {
+        "key": "semantic_alignment_gap",
+        "text": "Existe una divergencia entre la resolucion canonica y la ejecucion final.",
+        "status": "supported",
+        "confidence": 0.74,
+        "evidence_refs": [
+          "ev_1",
+          "ev_2",
+          "ev_3"
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "signature": "semantic_runtime_divergence",
+        "family": "alignment",
+        "severity": "warning",
+        "stage": "resolution",
+        "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+        "recommended_action": "Comparar dominio, intencion y filtros canonicos antes de ejecutar para evitar rutas inconsistentes.",
+        "confidence": 0.81,
+        "domain_code": "empleados",
+        "capability_id": "empleados.count.active.v1",
+        "hypotheses": [
+          {
+            "key": "semantic_alignment_gap",
+            "text": "Existe una divergencia entre la resolucion canonica y la ejecucion final.",
+            "status": "supported",
+            "confidence": 0.74
+          }
+        ],
+        "evidence": [
+          {
+            "source": "canonical_resolution",
+            "finding": "Se detectaron diferencias entre canonical_resolution e intent.",
+            "confidence": 0.72,
+            "metadata": {
+              "differences": [
+                "domain_mismatch",
+                "intent_mismatch"
+              ]
+            }
+          },
+          {
+            "source": "semantic_normalization",
+            "finding": "La normalizacion semantica propuso señales distintas a la intencion final.",
+            "confidence": 0.68,
+            "metadata": {
+              "differences": []
+            }
+          },
+          {
+            "source": "memory",
+            "finding": "La firma ya existe en memoria colectiva o del usuario.",
+            "confidence": 0.83,
+            "metadata": {
+              "matches": 1
+            }
+          }
+        ],
+        "matched_memory_patterns": [
+          {
+            "scope": "business",
+            "memory_key": "reasoning.pattern.domain.empleados.semantic_runtime_divergence",
+            "signature": "semantic_runtime_divergence",
+            "family": "alignment",
+            "severity": "warning",
+            "stage": "resolution",
+            "domain_code": "empleados",
+            "capability_id": "empleados.count.active.v1",
+            "summary": "La resolucion semantica y la intencion final no quedaron completamente alineadas.",
+            "recommended_action": "Comparar dominio, intencion y filtros canonicos antes de ejecutar para evitar rutas inconsistentes.",
+            "pattern_strength": 0.81
+          }
+        ]
+      }
+    ],
+    "memory_summary": {
+      "user_key": "session:fase1-empleados-q3c",
+      "session_context": {
+        "last_domain": "",
+        "last_intent": "",
+        "last_output_mode": ""
+      },
+      "pre_query": {
+        "query_patterns": 3,
+        "reasoning_patterns": 5,
+        "output_mode": "",
+        "personal_status": ""
+      },
+      "execution": {
+        "query_patterns": 2,
+        "reasoning_patterns": 5,
+        "output_mode": "",
+        "personal_status": ""
+      },
+      "resolved": {
+        "query_patterns": 2,
+        "reasoning_patterns": 5,
+        "output_mode": "",
+        "personal_status": ""
+      }
+    },
+    "duration_ms": 9195
+  },
+  "task_state": {
+    "id": 978,
+    "workflow_type": "task_runtime",
+    "workflow_key": "task_runtime:run_2411dde976f845f3",
+    "status": "completed",
+    "state": {
+      "run_id": "run_2411dde976f845f3",
+      "task_status": "completed",
+      "original_question": "Que jefes directos tienen mas tecnicos activos",
+      "detected_domain": "empleados",
+      "plan": {
+        "planned_capability": {
+          "capability_id": "empleados.count.active.v1",
+          "reason": "runtime_resolved_query_capability"
+        },
+        "route": {
+          "routing_mode": "capability",
+          "selected_capability_id": "empleados.count.active.v1",
+          "execute_capability": false,
+          "use_legacy": false,
+          "shadow_enabled": true,
+          "runtime_authority": "query_execution_planner",
+          "planner_was_authority": true,
+          "planner_selected_strategy": "sql_assisted",
+          "legacy_capability_path_used": false,
+          "reason": "query_intelligence_active_precomputed_response",
+          "policy_action": "allow",
+          "policy_allowed": true,
+          "capability_exists": true,
+          "rollout_enabled": true
+        },
+        "query_intelligence": {
+          "mode": "active",
+          "execution_plan": {
+            "strategy": "sql_assisted",
+            "reason": "employee_birthdays_aggregate",
+            "domain_code": "empleados",
+            "capability_id": null,
+            "sql_query": "SELECT supervisor AS supervisor, COUNT(*) AS total_registros FROM bd_c3nc4s1s.cinco_base_de_personal WHERE estado = 'ACTIVO' AND tipo_labor = 'OPERATIVO' GROUP BY supervisor ORDER BY total_registros DESC LIMIT 500",
+            "requires_context": false,
+            "missing_context": [],
+            "constraints": {
+              "entity_scope": {
+                "entity_type": "",
+                "entity_id": "",
+                "has_entity_filter": false
+              },
+              "filters": {
+                "estado_empleado": "ACTIVO",
+                "tipo_labor": "OPERATIVO",
+                "estado": "ACTIVO"
+              },
+              "period_scope": {
+                "label": "hoy",
+                "start_date": "2026-05-07",
+                "end_date": "2026-05-07"
+              },
+              "temporal_scope": {},
+              "group_by": [
+                "supervisor"
+              ],
+              "metrics": [
+                "count"
+              ],
+              "result_shape": "table",
+              "joins": [
+                {
+                  "from_entity": "",
+                  "to_entity": "",
+                  "relation_name": "empleado_supervisor",
+                  "join_sql": "cinco_base_de_personal.supervisor = cinco_base_de_personal.cedula",
+                  "cardinality": "many_to_one",
+                  "valid": true,
+                  "confidence": 0.92
+                }
+              ],
+              "chart_requested": true,
+              "operation": "aggregate",
+              "template_id": "aggregate_by_group_and_period"
+            },
+            "policy": {
+              "allowed": true,
+              "reason": "sql_validated",
+              "metadata": {
+                "declared_tables": [
+                  "bd_c3nc4s1s.cinco_base_de_personal"
+                ],
+                "declared_columns_count": 3,
+                "declared_relations_count": 0,
+                "limit": 500
+              }
+            },
+            "metadata": {
+              "template_id": "aggregate_by_group_and_period",
+              "operation": "aggregate",
+              "capability_id": "empleados.count.active.v1",
+              "compiler": "employee_semantic_sql",
+              "compiler_used": "employee_semantic_sql",
+              "tables_detected": [
+                "cinco_base_de_personal"
+              ],
+              "columns_detected": [
+                "estado",
+                "fnacimiento",
+                "supervisor"
+              ],
+              "physical_columns_used": [
+                "estado",
+                "fnacimiento",
+                "supervisor"
+              ],
+              "relations_used": [],
+              "metric_used": "employees",
+              "aggregation_used": "count",
+              "dimensions_used": [
+                "supervisor"
+              ],
+              "concept_field": "employees",
+              "declared_metric_source": "ai_dictionary.dd_campos",
+              "declared_dimensions_source": "ai_dictionary.dd_campos",
+              "insights": [
+                "La consulta se resolvio por inferencia semantica validada contra ai_dictionary."
+              ],
+              "raw_query_fallback_used": false,
+              "raw_query_fallback_reason": "",
+              "analytics_router_decision": "join_aware_sql",
+              "legacy_analytics_isolated": true,
+              "cleanup_phase": "phase_7",
+              "heuristic_intent": "empleados_query",
+              "llm_intent": "aggregate",
+              "arbitrated_intent": "analytics_query",
+              "arbitration_confidence": 0.97,
+              "arbitration_reason": "La solicitud pide un conteo/agrupación analítica de empleados activos por supervisor (jefes directos) con filtro de tipo_labor OPERATIVO, no un cambio de conocimiento ni una acción de escritura. Encaja en analytics de RRHH sobre empleados, usando la equivalencia supervisor=jefe d",
+              "kpro_blocked_by_arbitration": true,
+              "sql_assisted_selected_by_arbitration": true
+            }
+          }
+        }
+      },
+      "source_used": {
+        "response_flow": "sql_assisted",
+        "query_intelligence_mode": "active",
+        "route_reason": "query_intelligence_active_precomputed_response",
+        "runtime_authority": "query_execution_planner",
+        "planner_selected_strategy": "sql_assisted",
+        "legacy_capability_path_used": false,
+        "used_ai_dictionary": true,
+        "used_yaml": true,
+        "structural_source": "ai_dictionary",
+        "narrative_source": "yaml_domain_context",
+        "structural_authority": "dictionary_first",
+        "yaml_role": "narrative_only",
+        "yaml_structural_ignored": true,
+        "runtime_structural_context": {
+          "tables": true,
+          "columns": true,
+          "relationships": true,
+          "status": "dictionary_runtime_context"
+        },
+        "legacy_analytics_fallback_disabled": false,
+        "blocked_legacy_fallback": false,
+        "analytics_router_decision": "join_aware_sql",
+        "legacy_analytics_isolated": true,
+        "blocked_tool_ausentismo_service": false,
+        "blocked_run_legacy_for_analytics": false,
+        "runtime_only_fallback_reason": "",
+        "fallback_reason": "",
+        "cleanup_phase": "phase_7"
+      },
+      "executed_query": "SELECT supervisor AS supervisor, COUNT(*) AS total_registros FROM bd_c3nc4s1s.cinco_base_de_personal WHERE estado = 'ACTIVO' AND tipo_labor = 'OPERATIVO' GROUP BY supervisor ORDER BY total_registros DESC LIMIT 500",
+      "validation_result": {
+        "satisfied": true,
+        "reason": "",
+        "gate_approved": true,
+        "gate_score": 0.0
+      },
+      "fallback_used": {
+        "used": false,
+        "reason": "query_intelligence_active_precomputed_response",
+        "flow": "",
+        "legacy_analytics_fallback_disabled": false,
+        "blocked_legacy_fallback": false,
+        "analytics_router_decision": "join_aware_sql",
+        "legacy_analytics_isolated": true,
+        "blocked_tool_ausentismo_service": false,
+        "blocked_run_legacy_for_analytics": false,
+        "runtime_only_fallback_reason": "",
+        "cleanup_phase": "phase_7"
+      },
+      "recommendations": [
+        "Explorar el mismo analisis por sede, area, cargo o fecha.",
+        "Resultado obtenido con SQL asistido restringido (solo lectura).",
+        "La consulta se resolvio por inferencia semantica validada contra ai_dictionary."
+      ],
+      "updated_at": 1778136119,
+      "created_at": 1778136116,
+      "history": [
+        {
+          "at": 1778136116,
+          "status": "planned",
+          "domain": "empleados",
+          "has_query": false,
+          "fallback": {}
+        },
+        {
+          "at": 1778136116,
+          "status": "planned",
+          "domain": "empleados",
+          "has_query": false,
+          "fallback": {}
+        },
+        {
+          "at": 1778136116,
+          "status": "executing",
+          "domain": "empleados",
+          "has_query": true,
+          "fallback": {}
+        },
+        {
+          "at": 1778136119,
+          "status": "completed",
+          "domain": "empleados",
+          "has_query": true,
+          "fallback": {
+            "used": false,
+            "reason": "query_intelligence_active_precomputed_response",
+            "flow": "",
+            "legacy_analytics_fallback_disabled": false,
+            "blocked_legacy_fallback": false,
+            "analytics_router_decision": "join_aware_sql",
+            "legacy_analytics_isolated": true,
+            "blocked_tool_ausentismo_service": false,
+            "blocked_run_legacy_for_analytics": false,
+            "runtime_only_fallback_reason": "",
+            "cleanup_phase": "phase_7"
+          }
+        }
+      ]
+    },
+    "retry_count": 0,
+    "lock_version": 1,
+    "next_retry_at": null,
+    "last_error": null,
+    "created_at": 1778136116,
+    "updated_at": 1778136119
+  }
+}

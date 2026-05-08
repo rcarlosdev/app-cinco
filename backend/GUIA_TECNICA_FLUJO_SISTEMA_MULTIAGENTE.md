@@ -41,24 +41,23 @@ La arquitectura favorece:
 
 Punto de entrada principal:
 
-- [orchestrator_service.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/services/orchestrator_service.py>)
+- [chat_application_service.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/application/orchestration/chat_application_service.py>)
 
 Clase principal:
 
-- `IADevOrchestratorService`
+- `ChatApplicationService`
 
 Metodo principal:
 
-- `IADevOrchestratorService.run()`
+- `ChatApplicationService.run()`
 
 Comportamiento:
 
-- intenta delegar a `ChatApplicationService`
-- si falla, cae al orquestador legacy
+- ejecuta el flujo capability-first, query intelligence y handlers modernos
+- si un caller HTTP necesita contingencia, el fallback legacy queda aislado en `RuntimeFallbackService`
 
 Ruta actual recomendada:
 
-- `IADevOrchestratorService.run()`
 - `ChatApplicationService.run()`
 
 ## Nucleo De Orquestacion
@@ -642,8 +641,7 @@ Recomendado cuando:
 
 ```text
 Usuario
-  -> IADevOrchestratorService.run
-    -> ChatApplicationService.run
+  -> ChatApplicationService.run
       -> bootstrap classification
       -> preload memory
       -> query intelligence
@@ -730,10 +728,64 @@ Revisar:
 - `semantic_business_resolver.py`
 - service/tool que hace el join
 
+## Inferencia Semantica De Conceptos De Negocio A Campos Estructurales
+
+Esta capa existe para que el usuario no tenga que nombrar columnas fisicas ni logicas.
+
+- GPT puede inferir conceptos de negocio como `cumpleanos`, `edad`, `antiguedad` o `retiro`.
+- Esa inferencia solo es valida cuando `ai_dictionary` confirma tabla, campo y operacion segura.
+- El planner nunca debe inventar SQL fuera de lo declarado en `dd_tablas`, `dd_campos`, `dd_relaciones` y capacidades de columna.
+
+Ejemplos canonicos:
+
+- `cumpleanos -> empleados.fecha_nacimiento`
+- `edad -> empleados.fecha_nacimiento`
+- `antiguedad -> empleados.fecha_ingreso`
+- `retiro -> empleados.fecha_egreso`
+
+Reglas de gobierno:
+
+1. si hay una sola columna candidata con alta confianza, `QueryExecutionPlanner` puede resolver por `sql_assisted`
+2. si hay varias columnas candidatas, el sistema debe elegir por confianza o pedir aclaracion
+3. si no hay columna declarada en `ai_dictionary`, la respuesta correcta es una limitacion de metadata, no SQL inventado
+4. la memoria debe aprender la forma canonica `concepto + dominio + campo + operacion`, no una frase rigida puntual
+
+Ejemplo operativo:
+
+- `Cumpleaños de mayo` puede resolverse si `ai_dictionary` declara `cinco_base_de_personal.fnacimiento` como `fecha_nacimiento`, con sinonimos de negocio y soporte para `filter_by_month`
+- `Cumpleaños por mes` puede resolverse si la columna fecha soporta `group_by_month`
+- `Cuantos cumplen años en mayo` puede resolverse como `count` sobre `fecha_nacimiento`
+
+## Dimensiones Agrupables Y Operador Semantico POR
+
+El usuario no necesita escribir `GROUP BY`.
+
+En lenguaje de negocio, expresiones como:
+
+- `por area`
+- `por cargo`
+- `por sede`
+- `por mes`
+
+son senales de agrupacion.
+
+Reglas tecnicas:
+
+1. GPT o la capa deterministica pueden proponer la agrupacion desde el lenguaje natural
+2. la ejecucion solo se permite si `ai_dictionary` confirma que la dimension existe y permite `group_by`
+3. si la dimension vive en otra tabla, el runtime debe usar una relacion declarada en `dd_relaciones`
+4. si no existe metadata estructural suficiente, la respuesta correcta es una limitacion estructural, no un fallback generico
+
+Ejemplos:
+
+- `cumpleanos de mayo por area` implica filtro por `fecha_nacimiento` y agrupacion por `area`
+- `empleados activos por cargo` implica conteo agrupado por `cargo`
+- `ausentismo por sede` implica agrupacion valida solo si la dimension esta declarada y el join esta gobernado
+
 ## Archivos Mas Importantes Del Sistema
 
-- [orchestrator_service.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/services/orchestrator_service.py>)
 - [chat_application_service.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/application/orchestration/chat_application_service.py>)
+- [runtime_fallback_service.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/services/runtime_fallback_service.py>)
 - [semantic_business_resolver.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/application/semantic/semantic_business_resolver.py>)
 - [query_intent_resolver.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/application/semantic/query_intent_resolver.py>)
 - [query_execution_planner.py](</c:/dev/agente_cinco/app-cinco/backend/apps/ia_dev/application/semantic/query_execution_planner.py>)

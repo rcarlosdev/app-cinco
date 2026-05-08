@@ -363,6 +363,75 @@ class EmpleadosHandlerTests(SimpleTestCase):
             },
         )
 
+    def test_handle_resuelve_conteo_simple_con_respuesta_empresarial(self):
+        handler = EmpleadosHandler(service=_FakeEmpleadoService())
+        intent = StructuredQueryIntent(
+            raw_query="personal activo hoy",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={"estado": "ACTIVO"},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.92,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={"resolved_semantic": {"temporal_scope": {}}},
+            normalized_filters={"estado": "ACTIVO"},
+            normalized_period={},
+            mapped_columns={"estado": "estado"},
+        )
+        execution_plan = QueryExecutionPlan(
+            strategy="capability",
+            reason="capability_selected_from_query_intelligence",
+            domain_code="empleados",
+            capability_id="empleados.count.active.v1",
+            constraints={
+                "filters": {"estado": "ACTIVO"},
+                "group_by": [],
+                "result_shape": "kpi",
+            },
+        )
+
+        with patch("apps.ia_dev.domains.empleados.handler.SessionMemoryStore.get_or_create", return_value=("sid-1", {})), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.update_context"
+        ), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.append_turn"
+        ), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.status",
+            return_value={"used_messages": 0},
+        ), patch.object(handler, "obtener_cantidad_por_estado", return_value=(866, {"estado": "ACTIVO"})):
+            result = handler.handle(
+                capability_id="empleados.count.active.v1",
+                message=intent.raw_query,
+                session_id="sid-1",
+                reset_memory=False,
+                run_context=RunContext.create(message=intent.raw_query, session_id="sid-1"),
+                planned_capability={"capability_id": "empleados.count.active.v1"},
+                resolved_query=resolved_query,
+                execution_plan=execution_plan,
+            )
+
+        self.assertTrue(result.ok)
+        response = dict(result.response or {})
+        self.assertEqual(
+            str(response.get("reply") or ""),
+            "Actualmente hay 866 empleados activos. Si lo necesitas, puedo desglosarlo por area, cargo o sede.",
+        )
+        first_action = dict((response.get("actions") or [{}])[0] or {})
+        self.assertEqual(str(first_action.get("label") or ""), "Muestrame empleados activos por area.")
+        self.assertEqual(str(first_action.get("type") or ""), "suggestion")
+        self.assertEqual(
+            list(((response.get("data") or {}).get("insights") or [])),
+            [
+                "La consulta fue interpretada como conteo del personal activo.",
+                "Puedes pedir el desglose por area, cargo o sede.",
+            ],
+        )
+
     def test_handle_resuelve_rotacion_con_period_scope_si_temporal_scope_viene_vacio(self):
         handler = EmpleadosHandler(service=_FakeEmpleadoService(), org_context=_FakeOrgContext())
         intent = StructuredQueryIntent(

@@ -6,9 +6,9 @@ default_action: allow
 rules:
   - id: capability.intent_mode.allow
     when:
-      routing_mode_in: [intent, capability_shadow]
+      routing_mode_in: [intent]
     action: allow
-    reason: Intent/shadow mode must preserve incremental compatibility.
+    reason: Intent mode must preserve incremental compatibility.
 
   - id: capability.execution.disabled
     when:

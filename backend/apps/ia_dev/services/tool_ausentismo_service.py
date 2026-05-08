@@ -2,12 +2,9 @@
 import re
 import unicodedata
 from datetime import date
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from django.db import connections
-else:
-    from django.db import connections
+from django.db import connections
 
 
 _SAFE_TABLE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
@@ -15,6 +12,12 @@ _SAFE_COLUMN_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 class AusentismoToolService:
+    """
+    Servicio legacy de analytics/consultas operativas de ausentismo.
+    Sigue activo como wrapper temporal de compatibilidad y no debe ser la ruta
+    primaria del piloto analytics cuando IA_DEV_DISABLE_LEGACY_ANALYTICS_FALLBACK=1.
+    """
+
     _ATTENDANCE_REASON_PATTERNS = {
         "VACACIONES": ("VACACION", "VACACIONES", "VACACIÓN", "VACACIONES"),
         "INCAPACIDAD": ("INCAPACIDAD", "INCAPACIDADES", "INCAP"),
@@ -996,6 +999,3 @@ class AusentismoToolService:
             "attendance_table_source": self.table_source,
             "truncated": len(rows) == safe_limit,
         }
-
-
-AttendanceToolService = AusentismoToolService

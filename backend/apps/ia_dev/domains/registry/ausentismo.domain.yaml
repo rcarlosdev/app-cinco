@@ -27,6 +27,33 @@ columnas_clave:
   - table_name: gestionh_ausentismo
     column_name: justificacion
     nombre_columna_logico: motivo_justificacion
+  - table_name: cinco_base_de_personal
+    column_name: nombre
+    nombre_columna_logico: nombre
+  - table_name: cinco_base_de_personal
+    column_name: apellido
+    nombre_columna_logico: apellido
+  - table_name: cinco_base_de_personal
+    column_name: supervisor
+    nombre_columna_logico: supervisor
+  - table_name: cinco_base_de_personal
+    column_name: area
+    nombre_columna_logico: area
+  - table_name: cinco_base_de_personal
+    column_name: cargo
+    nombre_columna_logico: cargo
+  - table_name: cinco_base_de_personal
+    column_name: carpeta
+    nombre_columna_logico: carpeta
+  - table_name: cinco_base_de_personal
+    column_name: movil
+    nombre_columna_logico: movil
+  - table_name: cinco_base_de_personal
+    column_name: tipo
+    nombre_columna_logico: tipo_labor
+  - table_name: cinco_base_de_personal
+    column_name: zona_nodo
+    nombre_columna_logico: sede
 joins_conocidos:
   - nombre_relacion: ausentismo_empleado
     condicion: gestionh_ausentismo.cedula = cinco_base_de_personal.cedula
@@ -42,6 +69,7 @@ group_by_soportados:
   - supervisor
   - area
   - cargo
+  - sede
   - periodo
 metricas_soportadas:
   - total_injustificados

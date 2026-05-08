@@ -111,15 +111,32 @@ def _legacy_response() -> dict:
 class ChatMemoryIntegrationTests(SimpleTestCase):
     def test_chat_includes_memory_candidates_and_pending_proposals(self):
         fake_runtime = _FakeMemoryRuntime()
-        fake_router = MagicMock()
-        fake_router.route.return_value = {
+        fake_adapter = MagicMock()
+        fake_adapter.build_bootstrap_plan.return_value = {
+            "capability_id": "attendance.summary.by_attribute.v1",
+            "capability_exists": True,
+            "rollout_enabled": True,
+            "handler_key": "attendance.summary.by_attribute",
+            "policy_tags": [],
+            "legacy_intents": [],
+            "reason": "test_bootstrap",
+            "source": {"intent": "attendance_query", "domain": "attendance", "output_mode": "table", "needs_database": True},
+            "dictionary_hints": {},
+            "query_constraints": {},
+            "candidate_rank": 1,
+            "candidate_score": 100,
+            "workflow_hints": {},
+        }
+        fake_adapter.build_candidate_plans.return_value = [dict(fake_adapter.build_bootstrap_plan.return_value)]
+        fake_adapter.build_candidate_hints.return_value = []
+        fake_adapter.build_route.return_value = {
             "execute_capability": False,
             "use_legacy": True,
             "selected_capability_id": "attendance.summary.by_attribute.v1",
             "reason": "test_forces_legacy_path",
-            "shadow_enabled": False,
+            "routing_mode": "intent",
         }
-        service = ChatApplicationService(memory_runtime=fake_runtime, router=fake_router)
+        service = ChatApplicationService(memory_runtime=fake_runtime, capability_runtime_adapter=fake_adapter)
 
         response = service.run(
             message="dame asistencia agrupada",
@@ -142,15 +159,32 @@ class ChatMemoryIntegrationTests(SimpleTestCase):
 
     def test_chat_uses_session_user_key_fallback_when_actor_not_provided(self):
         fake_runtime = _FakeMemoryRuntime()
-        fake_router = MagicMock()
-        fake_router.route.return_value = {
+        fake_adapter = MagicMock()
+        fake_adapter.build_bootstrap_plan.return_value = {
+            "capability_id": "general.answer.v1",
+            "capability_exists": True,
+            "rollout_enabled": True,
+            "handler_key": "general.answer",
+            "policy_tags": [],
+            "legacy_intents": [],
+            "reason": "test_bootstrap",
+            "source": {"intent": "general_question", "domain": "general", "output_mode": "summary", "needs_database": False},
+            "dictionary_hints": {},
+            "query_constraints": {},
+            "candidate_rank": 1,
+            "candidate_score": 100,
+            "workflow_hints": {},
+        }
+        fake_adapter.build_candidate_plans.return_value = [dict(fake_adapter.build_bootstrap_plan.return_value)]
+        fake_adapter.build_candidate_hints.return_value = []
+        fake_adapter.build_route.return_value = {
             "execute_capability": False,
             "use_legacy": True,
             "selected_capability_id": "general.answer.v1",
             "reason": "test_forces_legacy_path",
-            "shadow_enabled": False,
+            "routing_mode": "intent",
         }
-        service = ChatApplicationService(memory_runtime=fake_runtime, router=fake_router)
+        service = ChatApplicationService(memory_runtime=fake_runtime, capability_runtime_adapter=fake_adapter)
 
         service.run(
             message="consulta general",

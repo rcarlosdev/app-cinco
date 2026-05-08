@@ -10,8 +10,10 @@ from typing import Any
 
 def normalize_routing_mode(raw: str | None) -> str:
     value = (raw or "").strip().lower()
-    if value in {"intent", "capability_shadow", "shadow", "capability"}:
-        return "capability_shadow" if value == "shadow" else value
+    if value in {"capability_shadow", "shadow"}:
+        return "intent"
+    if value in {"intent", "capability"}:
+        return value
     return "intent"
 
 
@@ -51,7 +53,7 @@ class RunContext:
 
     @property
     def is_shadow_mode(self) -> bool:
-        return self.routing_mode == "capability_shadow"
+        return False
 
     @property
     def is_capability_mode_requested(self) -> bool:

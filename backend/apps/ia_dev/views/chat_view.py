@@ -1,21 +1,42 @@
-﻿from rest_framework import status
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.ia_dev.application.contracts.chat_contracts import ensure_chat_response_contract
+from apps.ia_dev.application.orchestration.chat_application_service import ChatApplicationService
+from apps.ia_dev.services.attendance_period_resolver_service import AttendancePeriodResolverService
 from apps.ia_dev.services.async_job_service import AsyncJobService
 from apps.ia_dev.services.dictionary_tool_service import DictionaryToolService
 from apps.ia_dev.services.knowledge_governance_service import KnowledgeGovernanceService
 from apps.ia_dev.services.observability_service import ObservabilityService
-from apps.ia_dev.services.orchestrator_service import IADevOrchestratorService
+from apps.ia_dev.services.runtime_fallback_service import RuntimeFallbackService
+from apps.ia_dev.services.session_memory_runtime_service import SessionMemoryRuntimeService
 from apps.ia_dev.services.ticket_service import TicketService
 from apps.security.permissions.api_permissions import IsAuthenticatedUser
 
 
-orchestrator_service = IADevOrchestratorService()
+chat_application_service = None
+runtime_fallback_service = None
+session_memory_runtime_service = SessionMemoryRuntimeService()
+attendance_period_resolver_service = AttendancePeriodResolverService()
 dictionary_tool_service = DictionaryToolService()
 knowledge_governance_service = KnowledgeGovernanceService()
 async_job_service = AsyncJobService()
 observability_service = ObservabilityService()
+
+
+def _get_chat_application_service() -> ChatApplicationService:
+    global chat_application_service
+    if chat_application_service is None:
+        chat_application_service = ChatApplicationService()
+    return chat_application_service
+
+
+def _get_runtime_fallback_service() -> RuntimeFallbackService:
+    global runtime_fallback_service
+    if runtime_fallback_service is None:
+        runtime_fallback_service = RuntimeFallbackService()
+    return runtime_fallback_service
 
 
 def _resolve_user_key(request) -> str | None:
@@ -29,6 +50,62 @@ def _resolve_user_key(request) -> str | None:
     if username:
         return f"user:{username}"
     return None
+
+
+def _attach_http_runtime_metadata(
+    *,
+    response: dict,
+    legacy_runtime_fallback_used: bool,
+    legacy_runtime_fallback_reason: str | None = None,
+) -> dict:
+    payload = ensure_chat_response_contract(response)
+    data_sources = dict(payload.get("data_sources") or {})
+    runtime = dict(data_sources.get("runtime") or {})
+    runtime["entrypoint"] = "chat_view_direct"
+    runtime["runtime_owner"] = "ChatApplicationService"
+    runtime["legacy_adapter_removed"] = True
+    runtime["legacy_runtime_fallback_used"] = bool(legacy_runtime_fallback_used)
+    if legacy_runtime_fallback_reason:
+        runtime["legacy_runtime_fallback_reason"] = str(legacy_runtime_fallback_reason)
+    else:
+        runtime.pop("legacy_runtime_fallback_reason", None)
+    data_sources["runtime"] = runtime
+    payload["data_sources"] = data_sources
+    return payload
+
+
+def _record_chat_entrypoint_observability(
+    *,
+    session_id: str | None,
+    response: dict,
+    legacy_runtime_fallback_used: bool,
+    legacy_runtime_fallback_reason: str | None = None,
+) -> None:
+    runtime = dict(((response.get("data_sources") or {}).get("runtime") or {}))
+    observability_service.record_event(
+        event_type="runtime_http_entrypoint_resolved",
+        source="IADevChatView",
+        meta={
+            "entrypoint": "chat_view_direct",
+            "runtime_owner": "ChatApplicationService",
+            "legacy_adapter_removed": True,
+            "legacy_runtime_fallback_used": bool(legacy_runtime_fallback_used),
+            "legacy_runtime_fallback_reason": str(legacy_runtime_fallback_reason or ""),
+            "session_id": str(response.get("session_id") or session_id or ""),
+            "response_flow": str(
+                runtime.get("flow")
+                or ((response.get("orchestrator") or {}).get("runtime_flow") or "")
+            ),
+            "final_intent": str(
+                runtime.get("final_intent")
+                or ((response.get("orchestrator") or {}).get("final_intent") or "")
+            ),
+            "final_domain": str(
+                runtime.get("final_domain")
+                or ((response.get("orchestrator") or {}).get("final_domain") or "")
+            ),
+        },
+    )
 
 
 class IADevChatView(APIView):
@@ -45,11 +122,49 @@ class IADevChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = orchestrator_service.run(
-            message=message,
+        actor_user_key = _resolve_user_key(request)
+        legacy_runtime_fallback_used = False
+        legacy_runtime_fallback_reason = None
+        try:
+            result = _get_chat_application_service().run(
+                message=message,
+                session_id=session_id,
+                reset_memory=reset_memory,
+                legacy_runner=lambda **kwargs: _get_runtime_fallback_service().run(**kwargs),
+                observability=observability_service,
+                actor_user_key=actor_user_key,
+            )
+            runtime_meta = dict(((result.get("data_sources") or {}).get("runtime") or {}))
+            legacy_runtime_fallback_used = bool(
+                runtime_meta.get("legacy_runtime_fallback_used")
+            )
+            if legacy_runtime_fallback_used:
+                legacy_runtime_fallback_reason = str(
+                    runtime_meta.get("legacy_runtime_fallback_reason") or ""
+                ) or None
+        except Exception as exc:
+            legacy_runtime_fallback_used = True
+            legacy_runtime_fallback_reason = (
+                f"chat_application_service_exception:{exc.__class__.__name__}"
+            )
+            result = _get_runtime_fallback_service().run(
+                message=message,
+                session_id=session_id,
+                reset_memory=reset_memory,
+                actor_user_key=actor_user_key,
+                fallback_reason=legacy_runtime_fallback_reason,
+            )
+
+        result = _attach_http_runtime_metadata(
+            response=result,
+            legacy_runtime_fallback_used=legacy_runtime_fallback_used,
+            legacy_runtime_fallback_reason=legacy_runtime_fallback_reason,
+        )
+        _record_chat_entrypoint_observability(
             session_id=session_id,
-            reset_memory=reset_memory,
-            actor_user_key=_resolve_user_key(request),
+            response=result,
+            legacy_runtime_fallback_used=legacy_runtime_fallback_used,
+            legacy_runtime_fallback_reason=legacy_runtime_fallback_reason,
         )
         return Response(result, status=status.HTTP_200_OK)
 
@@ -65,7 +180,7 @@ class IADevMemoryResetView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        result = orchestrator_service.reset_memory(session_id)
+        result = session_memory_runtime_service.reset_memory(session_id)
         if "error" in result:
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
@@ -95,7 +210,7 @@ class IADevAttendancePeriodResolveView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        payload = orchestrator_service.resolve_attendance_period(
+        payload = attendance_period_resolver_service.resolve_attendance_period(
             message=message,
             session_id=session_id,
         )
