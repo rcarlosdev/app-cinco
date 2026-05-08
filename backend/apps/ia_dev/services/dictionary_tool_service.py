@@ -293,11 +293,13 @@ class DictionaryToolService:
             "empleados": "EMPLEADOS",
             "transport": "TRANSPORTE",
             "transporte": "TRANSPORTE",
+            "inventario_logistica": "INVENTARIO_LOGISTICA",
+            "inventario_materiales": "INVENTARIO_MATERIALES",
             "general": "GENERAL",
             "knowledge": "GENERAL",
             "legacy": "GENERAL",
         }
-        domain_code = code_map.get(domain_key, "GENERAL")
+        domain_code = code_map.get(domain_key, str(domain or "GENERAL").strip().upper() or "GENERAL")
 
         with connections[self.db_alias].cursor() as cursor:
             domain_columns = self._table_columns(cursor=cursor, schema=schema, table_name="dd_dominios")

@@ -7,6 +7,7 @@ from django.test import SimpleTestCase
 
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
+    QueryExecutionPlan,
     ResolvedQuerySpec,
     StructuredQueryIntent,
 )

@@ -16,16 +16,19 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 from apps.ia_dev.application.policies.query_execution_policy import QueryExecutionPolicy
 from apps.ia_dev.application.routing.capability_catalog import CapabilityCatalog
 from apps.ia_dev.application.semantic.join_aware_sql_service import JoinAwarePilotSqlService
+from apps.ia_dev.domains.inventario_logistica.response_assembler import (
+    build_inventory_business_response,
+)
 
 
 class QueryExecutionPlanner:
     SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_\.]+$")
     CLEANUP_PHASE = "phase_7"
     PILOT_PHASE = "phase_9"
-    ANALYTICS_ROUTER_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh"}
-    COVERED_ANALYTICS_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh"}
+    ANALYTICS_ROUTER_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
+    COVERED_ANALYTICS_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
     MODERN_HANDLER_CAPABILITY_PREFIXES = ("empleados.",)
-    PRODUCTIVE_PILOT_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh"}
+    PRODUCTIVE_PILOT_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
 
     def __init__(
         self,
@@ -383,6 +386,8 @@ class QueryExecutionPlanner:
             return "unsafe_sql_plan"
         if normalized in {"no_metric_column_declared", "unsupported_metric"}:
             return "unsupported_metric"
+        if normalized == "inventory_stock_requires_business_validation":
+            return "inventory_stock_requires_business_validation"
         if normalized in {"no_allowed_dimension", "max_dimensions_exceeded", "unsupported_dimension"}:
             return "unsupported_dimension"
         if "relation" in normalized:
@@ -417,6 +422,8 @@ class QueryExecutionPlanner:
             return "unsafe_sql_plan"
         if normalized == "no_metric_column_declared":
             return "no_metric_column_declared"
+        if normalized == "inventory_stock_requires_business_validation":
+            return "inventory_stock_requires_business_validation"
         if normalized == "no_allowed_dimension":
             return "no_allowed_dimension"
         if normalized == "max_dimensions_exceeded":
@@ -457,7 +464,11 @@ class QueryExecutionPlanner:
         if not sql_query:
             return {"ok": False, "error": "sql_query_missing"}
 
-        db_alias = str(os.getenv("IA_DEV_DB_READONLY_ALIAS", os.getenv("IA_DEV_DB_ALIAS", "default")) or "default").strip()
+        db_alias = str(
+            (execution_plan.metadata or {}).get("db_alias")
+            or os.getenv("IA_DEV_DB_READONLY_ALIAS", os.getenv("IA_DEV_DB_ALIAS", "default"))
+            or "default"
+        ).strip()
         started = time.perf_counter()
         try:
             with connections[db_alias].cursor() as cursor:
@@ -843,6 +854,15 @@ class QueryExecutionPlanner:
                 return employee_query, employee_reason, employee_metadata
             if employee_reason not in {"employee_sql_not_applicable", ""}:
                 return "", employee_reason, employee_metadata
+        if str(resolved_query.intent.domain_code or "").strip().lower() == "inventario_logistica":
+            inventory_query, inventory_reason, inventory_metadata = self._build_inventory_sql_query(
+                resolved_query=resolved_query,
+                context=context,
+            )
+            if inventory_query:
+                return inventory_query, inventory_reason, inventory_metadata
+            if inventory_reason not in {"inventory_sql_not_applicable", ""}:
+                return "", inventory_reason, inventory_metadata
 
         date_column = self._resolve_date_column(context=context)
         entity_column = self._resolve_entity_column(context=context)
@@ -927,6 +947,212 @@ class QueryExecutionPlanner:
             )
 
         return "", "sql_template_not_supported", {}
+
+    def _build_inventory_sql_query(
+        self,
+        *,
+        resolved_query: ResolvedQuerySpec,
+        context: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any]]:
+        template_id = str(resolved_query.intent.template_id or "").strip().lower()
+        filters = dict(resolved_query.normalized_filters or {})
+        month_value = str(filters.get("month") or "").strip()
+        limit = self._max_sql_limit()
+
+        if template_id == "inventory_stock_balance_pending_validation":
+            return "", "inventory_stock_requires_business_validation", {
+                "compiler": "inventory_semantic_sql",
+                "compiler_used": "inventory_semantic_sql",
+                "limitations": ["stock_calculation_requires_business_validation"],
+                "requires_business_validation": True,
+                "fallback_reason": "inventory_stock_requires_business_validation",
+                "db_alias": "logistica_cinco",
+            }
+
+        if template_id == "inventory_traceability_by_serial":
+            table = self._resolve_table_for_required_columns(
+                context=context,
+                required_columns=("serial", "codigo"),
+                preferred_table_name="logistica_base_seriales",
+            )
+            serial_column = self._resolve_named_column(context=context, preferred_terms=("serial",))
+            if not table or not serial_column or not str(filters.get("serial") or "").strip():
+                return "", "inventory_traceability_missing_serial_metadata", {}
+            detail_columns = self._resolve_inventory_detail_columns(
+                context=context,
+                preferred=("serial", "codigo", "estado", "ubicacion", "responsable", "movimiento", "fecha"),
+            )
+            date_column = self._resolve_inventory_date_column(context=context, table_ref=table)
+            order_column = date_column or serial_column
+            query = (
+                f"SELECT {', '.join(detail_columns)} FROM {table} "
+                f"WHERE {serial_column} = '{self._escape_literal(str(filters.get('serial') or ''))}' "
+                f"ORDER BY {order_column} DESC LIMIT {limit}"
+            )
+            return query, "inventory_traceability_by_serial", self._inventory_sql_metadata(
+                table=table,
+                columns=detail_columns,
+                metric_used="traceability",
+                aggregation_used="detail",
+                dimensions_used=[],
+                concept_field="serial",
+            )
+
+        if template_id == "inventory_risk_consumo_movil_sin_validar":
+            table = self._resolve_table_for_required_columns(
+                context=context,
+                required_columns=("movimiento", "validado"),
+                preferred_table_name="logistica_base_seriales",
+            )
+            movimiento_column = self._resolve_named_column(context=context, preferred_terms=("movimiento",))
+            validado_column = self._resolve_named_column(context=context, preferred_terms=("validado",))
+            if not table or not movimiento_column or not validado_column:
+                return "", "inventory_risk_missing_dictionary_column", {}
+            detail_columns = self._resolve_inventory_detail_columns(
+                context=context,
+                preferred=("serial", "codigo", "movimiento", "validado", "fecha", "responsable"),
+            )
+            query = (
+                f"SELECT {', '.join(detail_columns)} FROM {table} "
+                f"WHERE {movimiento_column} = 'consumo_movil' "
+                f"AND ({validado_column} = 0 OR LOWER(COALESCE(CAST({validado_column} AS CHAR), 'false')) IN ('false', '0', 'no')) "
+                f"LIMIT {limit}"
+            )
+            return query, "inventory_risk_consumo_movil_sin_validar", self._inventory_sql_metadata(
+                table=table,
+                columns=detail_columns,
+                metric_used="pending_validation",
+                aggregation_used="detail",
+                dimensions_used=[],
+                concept_field="consumo_movil_sin_validar",
+            )
+
+        if template_id in {"inventory_consumption_top", "inventory_consumption_by_dimension"}:
+            table = self._resolve_table_for_required_columns(
+                context=context,
+                required_columns=("codigo", "cantidad"),
+                preferred_table_name="logistica_movimientos_consumo",
+            )
+            codigo_column = self._resolve_named_column(context=context, preferred_terms=("codigo",))
+            cantidad_column = self._resolve_named_column(context=context, preferred_terms=("cantidad",))
+            fecha_column = self._resolve_inventory_date_column(context=context, table_ref=table)
+            if not table or not codigo_column or not cantidad_column:
+                return "", "inventory_consumption_missing_dictionary_column", {}
+            where_parts: list[str] = []
+            if month_value and fecha_column:
+                where_parts.append(f"MONTH({fecha_column}) = {int(month_value)}")
+            where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+            query = (
+                f"SELECT {codigo_column} AS material, SUM({cantidad_column}) AS total_consumido "
+                f"FROM {table}{where_sql} GROUP BY {codigo_column} "
+                f"ORDER BY total_consumido DESC LIMIT {limit}"
+            )
+            return query, "inventory_consumption_top", self._inventory_sql_metadata(
+                table=table,
+                columns=[codigo_column, cantidad_column, fecha_column],
+                metric_used="cantidad",
+                aggregation_used="sum",
+                dimensions_used=["material"],
+                concept_field="materiales_mas_consumidos",
+            )
+
+        if template_id == "inventory_transfer_group_by_destination":
+            table = self._resolve_table_for_required_columns(
+                context=context,
+                required_columns=("bodega_destino",),
+                preferred_table_name="logistica_movimientos_traslado",
+            )
+            bodega_destino = self._resolve_named_column(context=context, preferred_terms=("bodega_destino",))
+            cantidad_column = self._resolve_named_column(context=context, preferred_terms=("cantidad",))
+            if not table or not bodega_destino:
+                return "", "inventory_transfer_missing_dictionary_column", {}
+            metric_sql = f"SUM({cantidad_column})" if cantidad_column else "COUNT(*)"
+            metric_alias = "total_trasladado" if cantidad_column else "total_registros"
+            query = (
+                f"SELECT {bodega_destino} AS bodega_destino, {metric_sql} AS {metric_alias} "
+                f"FROM {table} GROUP BY {bodega_destino} ORDER BY {metric_alias} DESC LIMIT {limit}"
+            )
+            return query, "inventory_transfer_group_by_destination", self._inventory_sql_metadata(
+                table=table,
+                columns=[bodega_destino, cantidad_column],
+                metric_used="cantidad" if cantidad_column else "count",
+                aggregation_used="sum" if cantidad_column else "count",
+                dimensions_used=["bodega_destino"],
+                concept_field="traslados",
+            )
+
+        if template_id == "inventory_serial_association_departures":
+            table = self._resolve_table_for_required_columns(
+                context=context,
+                required_columns=("serial", "bodega_salida"),
+                preferred_table_name="logistica_seriales_asociados",
+            )
+            bodega_salida = self._resolve_named_column(context=context, preferred_terms=("bodega_salida",))
+            if not table or not bodega_salida:
+                return "", "inventory_association_missing_dictionary_column", {}
+            detail_columns = self._resolve_inventory_detail_columns(
+                context=context,
+                preferred=("serial", "codigo", "fecha_asociacion", "asociado_a", "bodega_salida", "estado_asociacion"),
+            )
+            query = (
+                f"SELECT {', '.join(detail_columns)} FROM {table} "
+                f"WHERE {bodega_salida} IS NOT NULL LIMIT {limit}"
+            )
+            return query, "inventory_serial_association_departures", self._inventory_sql_metadata(
+                table=table,
+                columns=detail_columns,
+                metric_used="association_departure",
+                aggregation_used="detail",
+                dimensions_used=[],
+                concept_field="salidas_de_bodega_serializados",
+            )
+
+        if template_id == "inventory_entries_by_month":
+            table = self._resolve_table_for_required_columns(
+                context=context,
+                required_columns=("fecha", "cantidad"),
+                preferred_table_name="logistica_movimientos_entrada",
+            )
+            fecha_column = self._resolve_inventory_date_column(context=context, table_ref=table)
+            cantidad_column = self._resolve_named_column(context=context, preferred_terms=("cantidad",))
+            if not table or not fecha_column:
+                return "", "inventory_entries_missing_dictionary_column", {}
+            metric_sql = f"SUM({cantidad_column})" if cantidad_column else "COUNT(*)"
+            query = (
+                f"SELECT MONTH({fecha_column}) AS mes, {metric_sql} AS total_entradas "
+                f"FROM {table} GROUP BY MONTH({fecha_column}) ORDER BY mes ASC LIMIT {limit}"
+            )
+            return query, "inventory_entries_by_month", self._inventory_sql_metadata(
+                table=table,
+                columns=[fecha_column, cantidad_column],
+                metric_used="cantidad" if cantidad_column else "count",
+                aggregation_used="sum" if cantidad_column else "count",
+                dimensions_used=["mes"],
+                concept_field="entradas",
+            )
+
+        if template_id == "inventory_movement_detail":
+            table = self._resolve_primary_table(context=context)
+            if not table:
+                return "", "inventory_movement_missing_primary_table", {}
+            detail_columns = self._resolve_inventory_detail_columns(
+                context=context,
+                preferred=("codigo", "cantidad", "fecha", "bodega", "responsable"),
+            )
+            return (
+                f"SELECT {', '.join(detail_columns)} FROM {table} LIMIT {limit}",
+                "inventory_movement_detail",
+                self._inventory_sql_metadata(
+                    table=table,
+                    columns=detail_columns,
+                    metric_used="movement_detail",
+                    aggregation_used="detail",
+                    dimensions_used=[],
+                    concept_field="movimientos",
+                ),
+            )
+
+        return "", "inventory_sql_not_applicable", {}
 
     def _build_employee_sql_query(
         self,
@@ -1084,14 +1310,19 @@ class QueryExecutionPlanner:
         ):
             return "", "employee_heights_certificate_not_applicable", {}
 
-        required_rule_codes = (
-            "certificado_alturas_vigencia_18_meses",
-            "certificado_alturas_vencido",
-            "certificado_alturas_proximo_vencer_45_dias",
-            "personal_activo_operativo",
+        required_rule_sets = (
+            ("certificado_alturas_vigencia_18_meses", "certificado_alturas_vigencia_anual"),
+            ("certificado_alturas_vencido",),
+            (
+                "certificado_alturas_proximo_vencer_45_dias",
+                "certificado_alturas_proximo_vencer_30_dias",
+            ),
+            ("personal_activo_operativo",),
         )
         missing_rules = [
-            code for code in required_rule_codes if not self._dictionary_rule_declared(context=context, rule_code=code)
+            "/".join(rule_group)
+            for rule_group in required_rule_sets
+            if not any(self._dictionary_rule_declared(context=context, rule_code=code) for code in rule_group)
         ]
         if missing_rules:
             return "", "employee_heights_certificate_rules_missing", {"missing_rule_codes": missing_rules}
@@ -1340,6 +1571,35 @@ class QueryExecutionPlanner:
         )
         if extra_metadata:
             metadata.update(dict(extra_metadata or {}))
+        return metadata
+
+    def _inventory_sql_metadata(
+        self,
+        *,
+        table: str,
+        columns: list[str],
+        metric_used: str,
+        aggregation_used: str,
+        dimensions_used: list[str],
+        concept_field: str,
+    ) -> dict[str, Any]:
+        metadata = self._default_sql_metadata(table=table, columns=columns)
+        metadata.update(
+            {
+                "compiler": "inventory_semantic_sql",
+                "compiler_used": "inventory_semantic_sql",
+                "metric_used": metric_used,
+                "aggregation_used": aggregation_used,
+                "dimensions_used": list(dimensions_used or []),
+                "concept_field": concept_field,
+                "declared_metric_source": "ai_dictionary.dd_campos",
+                "declared_dimensions_source": "ai_dictionary.dd_campos",
+                "insights": [
+                    "La consulta de inventario se resolvio con SQL asistido validado contra ai_dictionary.",
+                ],
+                "db_alias": "logistica_cinco",
+            }
+        )
         return metadata
 
     @staticmethod
@@ -1634,6 +1894,26 @@ class QueryExecutionPlanner:
                 return physical
         return "cedula"
 
+    def _resolve_inventory_date_column(self, *, context: dict[str, Any], table_ref: str = "") -> str:
+        preferred = self._find_context_profile_for_table(
+            context=context,
+            table_ref=table_ref,
+            logical_names=("fecha", "fecha_asociacion"),
+            column_names=("fecha", "fecha_asociacion"),
+        )
+        column_name = str((preferred or {}).get("column_name") or "").strip()
+        if column_name and self._is_safe_identifier(column_name):
+            return column_name
+        return self._resolve_date_column(context=context)
+
+    def _resolve_inventory_detail_columns(self, *, context: dict[str, Any], preferred: tuple[str, ...]) -> list[str]:
+        selected: list[str] = []
+        for token in preferred:
+            physical = self._resolve_named_column(context=context, preferred_terms=(token,))
+            if physical and physical not in selected:
+                selected.append(physical)
+        return selected[:12] or self._resolve_detail_columns(context=context)
+
     def _resolve_status_column(self, *, context: dict[str, Any]) -> str:
         for profile in list(context.get("column_profiles") or []):
             if not isinstance(profile, dict):
@@ -1709,9 +1989,11 @@ class QueryExecutionPlanner:
 
     def _detect_missing_context(self, *, resolved_query: ResolvedQuerySpec) -> list[str]:
         missing: list[str] = []
+        domain_code = str(resolved_query.intent.domain_code or "").strip().lower()
+        template_id = str(resolved_query.intent.template_id or "").strip().lower()
         if not list((resolved_query.semantic_context or {}).get("tables") or []):
             missing.append("tablas_registradas_del_dominio")
-        if str(resolved_query.intent.template_id or "").strip().lower() == "detail_by_entity_and_period":
+        if template_id == "detail_by_entity_and_period":
             filters = dict(resolved_query.normalized_filters or {})
             if not any(
                 str(filters.get(key) or "").strip()
@@ -1719,9 +2001,14 @@ class QueryExecutionPlanner:
             ):
                 missing.append("identificador_empleado")
         period = dict(resolved_query.normalized_period or {})
-        if not period.get("start_date") or not period.get("end_date"):
+        requires_period = template_id in {
+            "count_records_by_period",
+            "detail_by_entity_and_period",
+            "aggregate_by_group_and_period",
+            "trend_by_period",
+        }
+        if requires_period and (not period.get("start_date") or not period.get("end_date")):
             missing.append("periodo_consulta")
-        domain_code = str(resolved_query.intent.domain_code or "").strip().lower()
         if domain_code in {"empleados", "rrhh"}:
             temporal_scope = self._extract_temporal_scope(resolved_query=resolved_query)
             if bool(temporal_scope.get("ambiguous")):
@@ -1865,6 +2152,12 @@ class QueryExecutionPlanner:
             else:
                 reply = f"Se listan {len(rows)} empleados con cumpleanos en el mes {month_value}."
         business_response: dict[str, Any] | None = None
+        if domain_code == "inventario_logistica":
+            business_response = build_inventory_business_response(
+                resolved_query=resolved_query.as_dict(),
+                rows=rows,
+                limitations=list(metadata.get("limitations") or []),
+            )
         findings = [
             {
                 "title": "Top hallazgo",

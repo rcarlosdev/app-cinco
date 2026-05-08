@@ -16,6 +16,24 @@ from apps.ia_dev.application.semantic.column_semantic_resolver import ColumnSema
 from apps.ia_dev.application.semantic.relation_semantic_resolver import RelationSemanticResolver
 from apps.ia_dev.application.semantic.rule_semantic_resolver import RuleSemanticResolver
 from apps.ia_dev.application.semantic.synonym_semantic_resolver import SynonymSemanticResolver
+from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import (
+    InventorySemanticResolver,
+)
+from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
+    get_business_concepts as get_inventory_business_concepts,
+)
+from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
+    get_business_rules as get_inventory_business_rules,
+)
+from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
+    get_examples_as_query_patterns as get_inventory_examples,
+)
+from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
+    get_groupable_dimensions as get_inventory_groupable_dimensions,
+)
+from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
+    load_inventory_agent_yaml,
+)
 from apps.ia_dev.services.dictionary_tool_service import DictionaryToolService
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.period_service import resolve_period_from_text
@@ -34,6 +52,8 @@ class SemanticBusinessResolver:
         "rrhh": "empleados",
         "transporte": "transport",
         "transport": "transport",
+        "inventario_logistica": "inventario_logistica",
+        "inventario_materiales": "inventario_materiales",
     }
     LEGACY_STRUCTURAL_CATALOGS = (
         "ia_dev_catalogo_*",
@@ -97,6 +117,8 @@ class SemanticBusinessResolver:
                 dictionary_seed = self._maybe_seed_rrhh_status_synonyms()
             try:
                 dictionary_context = self.dictionary_tool.get_domain_context(dictionary_domain, limit=20)
+                if normalized_domain == "inventario_logistica" and not list(dictionary_context.get("fields") or []):
+                    dictionary_context = self.dictionary_tool.get_domain_context("inventario_materiales", limit=20)
             except Exception:
                 dictionary_context = {}
 
@@ -179,6 +201,7 @@ class SemanticBusinessResolver:
                         if isinstance(item, dict)
                     )
                 )
+                or normalized_domain == "inventario_logistica"
             )
         )
         query_hints = self._build_query_hints(
@@ -199,6 +222,25 @@ class SemanticBusinessResolver:
             ]
         )
         runtime_structural_status = "dictionary_runtime_context" if (tables or columns or relationships) else "dictionary_metadata_missing"
+        inventory_blueprint: dict[str, Any] = {}
+        if normalized_domain == "inventario_logistica":
+            inventory_yaml = load_inventory_agent_yaml()
+            inventory_blueprint = {
+                "business_concepts": get_inventory_business_concepts(inventory_yaml),
+                "business_rules": get_inventory_business_rules(inventory_yaml),
+                "groupable_dimensions": get_inventory_groupable_dimensions(inventory_yaml),
+                "examples": get_inventory_examples(inventory_yaml),
+            }
+            contexto_agente = {
+                **contexto_agente,
+                "business_domain": dict(inventory_yaml.get("business_domain") or {}),
+                "architecture_contract": dict(inventory_yaml.get("architecture_contract") or {}),
+                "material_families": dict(inventory_yaml.get("material_families") or {}),
+                "intent_taxonomy": dict(inventory_yaml.get("intent_taxonomy") or {}),
+                "database_alias": str((((inventory_yaml.get("agent") or {}).get("database") or {}).get("connection_alias") or "logistica_cinco")),
+            }
+            reglas_negocio = [*reglas_negocio, *get_inventory_business_rules(inventory_yaml)]
+            ejemplos_consulta = [*ejemplos_consulta, *get_inventory_examples(inventory_yaml)]
 
         return {
             "domain_code": normalized_domain,
@@ -236,6 +278,7 @@ class SemanticBusinessResolver:
             "company_context": company_context,
             "company_operational_scope": operational_scope,
             "query_hints": query_hints,
+            "inventory_semantic_blueprint": inventory_blueprint,
             "yaml_role": "narrative_only",
             "yaml_fields_ignored": yaml_fields_ignored,
             "yaml_fields_removed": yaml_fields_removed,
@@ -359,6 +402,12 @@ class SemanticBusinessResolver:
             semantic_context = copy.deepcopy(semantic_context_override)
         else:
             semantic_context = self.build_semantic_context(domain_code=domain_code, include_dictionary=True)
+        if domain_code == "inventario_logistica":
+            return InventorySemanticResolver().resolve_query(
+                message=message,
+                intent=intent,
+                semantic_context=semantic_context,
+            )
         operational_scope = dict(semantic_context.get("company_operational_scope") or {})
         synonym_index = dict(semantic_context.get("synonym_index") or {})
 
