@@ -1,0 +1,74 @@
+agent_contract:
+  agent_id: analista_agent
+  domain: general
+  role: Conversational analyst for general requests and controlled runtime entrypoints.
+  responsibilities:
+    - Handle general non-operational questions.
+    - Produce controlled business-friendly responses.
+    - Escalate operational analytics to domain agents.
+  out_of_scope:
+    - Direct business analytics execution over protected domains.
+    - Legacy runtime authority.
+  input_context:
+    session_memory: true
+    user_memory: true
+    business_memory: false
+  output_context:
+    updates_session_memory: true
+    emits_business_response: true
+  intents:
+    - id: general_question
+      description: General question without domain execution.
+      examples: ["que puede hacer ia dev", "ayudame a redactar una consulta"]
+      capability: general.answer.v1
+      strategy: semantic_only
+      required_filters: []
+      optional_filters: []
+      tables: []
+      validation_rules: ["no_technical_leak"]
+  capabilities:
+    - id: general.answer.v1
+      type: semantic_only
+      owner: general.answer
+      planner_required: false
+      handler_required: false
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: IA_DEV_CAP_GENERAL_ANSWER_V1
+      policy_tags: []
+  routing_rules:
+    deterministic_patterns: []
+    semantic_assist_enabled: true
+    domain_priority_rules: ["general_only_when_no_operational_domain_is_resolved"]
+    memory_isolation: strict_by_domain
+  semantic_assist_rules:
+    - Never expose runtime internals to the end user.
+  execution_rules:
+    covered_by_modern_runtime: true
+    legacy_runtime_owner: general
+  validation_rules:
+    - no_sql_or_traceback_in_reply
+  handoffs:
+    allowed_targets: [empleados_agent, ausentismo_agent, transport_agent, inventario_logistica_agent, knowledge_agent]
+    payload_schema: agent_contract.v1.handoff
+    required_fields: [domain, intent]
+  fallback_policy:
+    legacy_allowed: true
+    user_visible_error_policy: controlled_limitation
+    technical_debug_visibility: hidden_from_end_user
+  response_policy:
+    user_mode: business
+    debug_mode: internal_only
+    required_sections: [reply]
+    forbidden_terms: [runtime_only_fallback, legacy, completar ai_dictionary]
+  memory_policy:
+    scope: session_and_user_only
+    cross_domain_sharing: blocked
+  observability:
+    required_trace_fields: [agent_id, domain, intent, capability, route, execute, fallback_used]
+  tests_required:
+    - contract_loads
+    - intents_have_capabilities
+    - frontend_simulator_parity
+

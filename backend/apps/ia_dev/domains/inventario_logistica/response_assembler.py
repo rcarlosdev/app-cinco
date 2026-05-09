@@ -26,10 +26,39 @@ def build_inventory_business_response(
     siguiente_accion = ""
 
     if rows:
-        dato = f"Se obtuvieron {len(rows)} registros relevantes para inventario."
-        hallazgo = "La consulta se resolvio con metadata estructural validada antes de ejecutar SQL."
-        recomendacion = "Usa un desglose adicional por bodega, responsable o estado para priorizar accion."
-        siguiente_accion = "Solicita el detalle o un agrupado por la dimension operativa que quieras revisar."
+        filters = dict(inventory.get("filters") or query_intent.get("filters") or {})
+        bodega = str(filters.get("bodega") or "").strip()
+        invalid_count = 0
+        zero_stock = 0
+        for row in rows:
+            try:
+                invalid_count += int(row.get("registros_cantidad_invalida") or 0)
+            except Exception:
+                pass
+            try:
+                if float(row.get("saldo_bodega") or 0) == 0:
+                    zero_stock += 1
+            except Exception:
+                pass
+        if business_concept == "stock_bodega" or str(query_intent.get("template_id") or "") == "inventory_material_stock_by_warehouse":
+            scope = f": {bodega}" if bodega else ""
+            dato = (
+                f"Saldo de bodega{scope}. Calcule {len(rows)} codigos con movimientos auditados de materiales: "
+                "entradas - entregas + devoluciones - cobros - traslados a otro aliado, "
+                "considerando traslados de bodega segun el doble registro confirmado."
+            )
+            hallazgo = (
+                f"Registros con cantidad invalida: {invalid_count}. "
+                f"Codigos sin stock en el resultado: {zero_stock}."
+            )
+            riesgo = "La facturacion no se uso para descontar inventario."
+            recomendacion = "Revisar primero los saldos negativos y los registros con cantidad invalida."
+            siguiente_accion = "Pide el detalle de un codigo o exporta el resultado si necesitas conciliacion operativa."
+        else:
+            dato = f"Se obtuvieron {len(rows)} registros relevantes para inventario."
+            hallazgo = "La consulta se resolvio con metadata estructural validada antes de ejecutar SQL."
+            recomendacion = "Usa un desglose adicional por bodega, responsable o estado para priorizar accion."
+            siguiente_accion = "Solicita el detalle o un agrupado por la dimension operativa que quieras revisar."
     elif limitations:
         dato = "La intencion del negocio se entendio, pero no es seguro responder con SQL productivo aun."
         hallazgo = "; ".join(limitations[:3])

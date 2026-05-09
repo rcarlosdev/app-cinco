@@ -150,19 +150,23 @@ class InventoryDictionarySyncService:
                     for table in list(preview.get("dd_tablas") or []):
                         cursor.execute(
                             f"""
-                            INSERT INTO {schema}.dd_tablas (dominio_id, table_name, alias_negocio, descripcion)
-                            SELECT %s, %s, %s, %s
+                            INSERT INTO {schema}.dd_tablas (dominio_id, schema_name, table_name, alias_negocio, descripcion)
+                            SELECT %s, %s, %s, %s, %s
                             WHERE NOT EXISTS (
                                 SELECT 1 FROM {schema}.dd_tablas
-                                WHERE dominio_id = %s AND LOWER(COALESCE(table_name, '')) = LOWER(%s)
+                                WHERE dominio_id = %s
+                                  AND LOWER(COALESCE(schema_name, '')) = LOWER(%s)
+                                  AND LOWER(COALESCE(table_name, '')) = LOWER(%s)
                             )
                             """,
                             [
                                 domain_id,
+                                table.get("schema_name") or "",
                                 table.get("table_name"),
                                 table.get("business_name"),
                                 table.get("description"),
                                 domain_id,
+                                table.get("schema_name") or "",
                                 table.get("table_name"),
                             ],
                         )
@@ -170,16 +174,20 @@ class InventoryDictionarySyncService:
                         cursor.execute(
                             f"""
                             SELECT id FROM {schema}.dd_tablas
-                            WHERE dominio_id = %s AND LOWER(COALESCE(table_name, '')) = LOWER(%s)
+                            WHERE dominio_id = %s
+                              AND LOWER(COALESCE(schema_name, '')) = LOWER(%s)
+                              AND LOWER(COALESCE(table_name, '')) = LOWER(%s)
                             LIMIT 1
                             """,
-                            [domain_id, table.get("table_name")],
+                            [domain_id, table.get("schema_name") or "", table.get("table_name")],
                         )
                         tabla_row = cursor.fetchone()
                         if tabla_row:
                             tabla_ids[str(table.get("table_name") or "")] = int(tabla_row[0] or 0)
 
                     for field in list(preview.get("dd_campos") or []):
+                        if not bool(field.get("sync_to_dd_campos", True)):
+                            continue
                         tabla_id = tabla_ids.get(str(field.get("table_name") or ""))
                         if not tabla_id:
                             warnings.append(f"No se pudo vincular campo a tabla: {field.get('table_name')}.{field.get('column_name')}")

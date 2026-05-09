@@ -16,23 +16,99 @@ class _InspectorCompleto:
         self.database_alias = database_alias
 
     def get_tables(self):
+        movement_columns = {
+            "id": "int",
+            "codigo": "varchar",
+            "cantidad": "varchar",
+            "f_consumo": "datetime",
+            "orden_trabajo": "varchar",
+            "tipo": "varchar",
+            "serial": "varchar",
+            "comentario": "text",
+            "movimiento": "varchar",
+            "documento": "varchar",
+            "proveedor": "varchar",
+            "bodega": "varchar",
+            "cedula": "varchar",
+            "estado": "varchar",
+        }
+        serial_columns = {
+            "id": "int",
+            "numero_serial": "varchar",
+            "codigo": "varchar",
+            "estado": "varchar",
+            "cedula": "varchar",
+            "fecha": "datetime",
+            "ubicacion_bodega": "varchar",
+            "movimiento_sap": "varchar",
+            "bodega": "varchar",
+            "historial": "longtext",
+        }
         return {
             "base_codigos": InventoryTableMetadata(
                 table_name="base_codigos",
                 columns={
                     "codigo": "varchar",
                     "descripcion": "varchar",
+                    "tipo": "varchar",
+                    "medida": "varchar",
+                },
+            ),
+            "base_codigo_seriales": InventoryTableMetadata(
+                table_name="base_codigo_seriales",
+                columns={
+                    "codigo": "varchar",
+                    "descripcion": "varchar",
+                    "familia": "varchar",
                 },
             ),
             "logistica_movimientos_entrada": InventoryTableMetadata(
                 table_name="logistica_movimientos_entrada",
+                columns=movement_columns,
+            ),
+            "logistica_movimientos_entrega": InventoryTableMetadata(
+                table_name="logistica_movimientos_entrega",
+                columns=movement_columns,
+            ),
+            "logistica_movimientos_devolucion": InventoryTableMetadata(
+                table_name="logistica_movimientos_devolucion",
+                columns=movement_columns,
+            ),
+            "logistica_movimientos_consumo": InventoryTableMetadata(
+                table_name="logistica_movimientos_consumo",
+                columns={**movement_columns, "datos": "json"},
+            ),
+            "logistica_movimientos_cobro": InventoryTableMetadata(
+                table_name="logistica_movimientos_cobro",
+                columns=movement_columns,
+            ),
+            "logistica_movimientos_traslado": InventoryTableMetadata(
+                table_name="logistica_movimientos_traslado",
+                columns=movement_columns,
+            ),
+            "logistica_base_seriales": InventoryTableMetadata(
+                table_name="logistica_base_seriales",
+                columns={**serial_columns, "notificacion": "json"},
+            ),
+            "logistica_seriales_asociados": InventoryTableMetadata(
+                table_name="logistica_seriales_asociados",
+                columns=serial_columns,
+            ),
+            "a_promedios_consumo": InventoryTableMetadata(
+                table_name="a_promedios_consumo",
                 columns={
-                    "id": "int",
+                    "codigo": "int",
+                    "familia_mat": "varchar",
+                    "codigo_facturacion": "varchar",
+                    "promedio": "decimal",
+                },
+            ),
+            "facturacion_facturado_wfm": InventoryTableMetadata(
+                table_name="facturacion_facturado_wfm",
+                columns={
+                    "idorden_de_trabajo": "int",
                     "codigo": "varchar",
-                    "cantidad": "decimal",
-                    "fecha": "date",
-                    "bodega": "varchar",
-                    "responsable": "varchar",
+                    "cantidad_actividad": "int",
                 },
             ),
         }

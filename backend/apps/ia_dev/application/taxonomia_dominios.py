@@ -19,9 +19,11 @@ _ALIAS_DOMINIOS = {
     "transport": "transporte",
     "transporte": "transporte",
     "inventario_logistica": "inventario_logistica",
+    "logistica_inventario": "inventario_logistica",
     "inventario": "inventario_logistica",
     "inventario_materiales": "inventario_logistica",
     "logistica": "inventario_logistica",
+    "inventory": "inventario_logistica",
     "knowledge": "knowledge",
     "legacy": "legacy",
     "general": "general",
@@ -73,6 +75,8 @@ def dominio_desde_capacidad(capability_id: Any) -> str:
     capability = str(capability_id or "").strip().lower()
     if not capability:
         return ""
+    if capability.startswith("inventory_"):
+        return "inventario_logistica"
     prefix = capability.split(".", 1)[0] if "." in capability else capability
     return normalizar_codigo_dominio(prefix)
 

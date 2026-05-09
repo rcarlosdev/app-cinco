@@ -68,12 +68,18 @@ class InventorySemanticResolver:
     def _extract_serial(self, message: str) -> str:
         match = re.search(r"\bserial(?:es)?\s+([A-Za-z0-9_-]{3,})\b", str(message or ""), re.IGNORECASE)
         if match:
-            return str(match.group(1) or "").strip()
+            value = str(match.group(1) or "").strip()
+            if value.lower() in {"perdido", "perdidos", "garantia", "garantias"}:
+                return ""
+            return value
         match = re.search(r"\b([A-Z]{2,}\d{2,}[A-Z0-9_-]*)\b", str(message or ""))
         return str(match.group(1) or "").strip() if match else ""
 
     def _extract_code(self, message: str) -> str:
         match = re.search(r"\bcod(?:igo)?\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
+        if match:
+            return str(match.group(1) or "").strip()
+        match = re.search(r"\bmaterial\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
         return str(match.group(1) or "").strip() if match else ""
 
     def _extract_cedula(self, message: str) -> str:
@@ -81,6 +87,8 @@ class InventorySemanticResolver:
         match = re.search(r"\bc\S*dula\s+([0-9]{5,15})\b", normalized)
         if not match:
             match = re.search(r"\bcedula\s+([0-9]{5,15})\b", normalized)
+        if not match and "saldo" in normalized:
+            match = re.search(r"\b(?:empleado|tecnico|movil|mobile)\s+([0-9]{5,15})\b", normalized)
         return str(match.group(1) or "").strip() if match else ""
 
     def _extract_project(self, message: str) -> str:
@@ -89,6 +97,16 @@ class InventorySemanticResolver:
             return "ERI"
         match = re.search(r"\bproyecto\s+([a-z0-9_-]{2,})\b", normalized)
         return str(match.group(1) or "").upper() if match else ""
+
+    def _extract_warehouse(self, message: str) -> str:
+        normalized = self._normalize(message)
+        if re.search(r"\boperacion[_\s-]?hfc\b", normalized):
+            return "operacion_hfc"
+        match = re.search(
+            r"\b(?:bodega|almacen)\s+(?!destino\b|origen\b|por\b|de\b|del\b|la\b|el\b)([a-z0-9_-]{2,})\b",
+            normalized,
+        )
+        return str(match.group(1) or "").strip() if match else ""
 
     def _resolve_material_family(self, normalized: str) -> str:
         if any(token in normalized for token in ("serial", "imei", "mac", "placa", "equipo")):
@@ -145,6 +163,7 @@ class InventorySemanticResolver:
         codigo = self._extract_code(message)
         cedula = self._extract_cedula(message)
         project = self._extract_project(message)
+        warehouse = self._extract_warehouse(message)
         month = self._extract_month(message)
         filters: dict[str, Any] = {}
         if serial:
@@ -153,6 +172,8 @@ class InventorySemanticResolver:
             filters["codigo"] = codigo
         if project:
             filters["proyecto"] = project
+        if warehouse:
+            filters["bodega"] = warehouse
         if month:
             filters["month"] = month
         if cedula:
@@ -205,7 +226,7 @@ class InventorySemanticResolver:
             intent = "reconciliation_query"
             operation = "reconcile"
             business_concept = "conciliacion_logistica"
-            requires_business_validation = True
+            implementation_status = "semantic_limitation_only"
             expected_runtime_flow = "semantic_report"
             candidate_tables = [
                 "logistica_movimientos_entrada",
@@ -215,7 +236,7 @@ class InventorySemanticResolver:
                 "logistica_movimientos_traslado",
             ]
             candidate_fields = ["codigo", "cantidad", "bodega", "movil", "fecha"]
-            limitations.append("requires_business_validation:conciliacion_logistica")
+            limitations.append("semantic_limitation:formula_no_aplica_por_regla_de_negocio")
         elif self._contains_any(normalized, ("entrega consumo tecnico facturacion", "material entregado no consumido", "diferencias entre entrega y facturacion")):
             intent = "reconciliation_query"
             operation = "reconcile"
@@ -226,16 +247,24 @@ class InventorySemanticResolver:
             candidate_tables = ["logistica_movimientos_entrega", "logistica_movimientos_consumo", "logistica_movimientos_cobro"]
             candidate_fields = ["codigo", "cantidad", "entregado_a", "tecnico", "factura", "fecha"]
             limitations.append("facturacion_pending_integration_or_db_validation")
-        elif self._contains_any(normalized, ("consumo tecnico", "consumos tecnicos")) and "facturacion" in normalized:
+        elif (
+            self._contains_any(normalized, ("consumo tecnico", "consumos tecnicos", "consumo vs facturacion", "consumos vs facturacion"))
+            and "facturacion" in normalized
+        ):
             intent = "reconciliation_query"
             operation = "reconcile"
             business_concept = "consumo_vs_facturacion"
-            requires_external_source = True
-            implementation_status = "pending_integration_or_db_validation"
-            expected_runtime_flow = "external_source_pending"
-            candidate_tables = ["logistica_movimientos_consumo", "logistica_movimientos_cobro"]
-            candidate_fields = ["codigo", "cantidad", "tecnico", "proyecto", "factura", "fecha"]
-            limitations.append("facturacion_pending_integration_or_db_validation")
+            candidate_tables = ["logistica_movimientos_consumo", "a_promedios_consumo", "facturacion_facturado_wfm"]
+            candidate_fields = ["codigo", "cantidad", "orden_trabajo", "tipo", "f_consumo", "bodega"]
+            if self._contains_any(normalized, ("operacion_hfc", "operacion hfc", "hfc")):
+                filters["bodega"] = "operacion_hfc"
+                implementation_status = "ready_for_dictionary_validation"
+                expected_runtime_flow = "sql_assisted"
+            else:
+                requires_external_source = True
+                implementation_status = "pending_scope_filter"
+                expected_runtime_flow = "external_source_pending"
+                limitations.append("scope_required:operacion_hfc")
         elif self._contains_any(normalized, ("compra", "compras")) and self._contains_any(normalized, ("logistica", "notificacion", "llegada", "recibidas")):
             intent = "notification_query"
             operation = "trace"
@@ -305,7 +334,7 @@ class InventorySemanticResolver:
                 "logistica_seriales_asociados",
             ]
             candidate_fields = ["codigo", "serial", "cantidad", "fecha", "tipo_movimiento", "documento"]
-        elif "kardex consolidado" in normalized:
+        elif "kardex" in normalized and codigo:
             intent = "movement_history"
             operation = "trace"
             business_concept = "kardex_consolidado"
@@ -350,7 +379,15 @@ class InventorySemanticResolver:
             intent = "transfer_query"
             operation = "aggregate" if group_by else "list"
             candidate_tables = ["logistica_movimientos_traslado"]
-            candidate_fields = ["codigo", "cantidad", "fecha", "bodega_origen", "bodega_destino"]
+            candidate_fields = ["codigo", "cantidad", "f_consumo", "bodega", "movimiento", "estado", "comentario"]
+            if "otro aliado" in normalized or "otro_aliado" in normalized:
+                filters["movimiento"] = "TRASLADOS_OTRO_ALIADO"
+                business_concept = "traslado_otro_aliado"
+            elif "bodega" in normalized:
+                filters["movimiento"] = "TRASLADO_BODEGA"
+                business_concept = "traslado_bodega_doble_registro"
+            if "bodega_destino" in group_by:
+                limitations.append("missing_physical_column:bodega_destino")
         elif "asociad" in normalized and "bodega" in normalized:
             intent = "association_query"
             operation = "list"
@@ -358,14 +395,27 @@ class InventorySemanticResolver:
             business_concept = "salidas_de_bodega_serializados"
             candidate_tables = ["logistica_seriales_asociados"]
             candidate_fields = ["serial", "codigo", "fecha_asociacion", "bodega_salida", "estado_asociacion"]
+        elif "inventario" in normalized and cedula and any(token in normalized for token in ("cuadrilla", "brigada", "movil", "empleado", "tecnico")):
+            intent = "stock_balance"
+            operation = "stock_balance"
+            business_concept = "stock_movil"
+            filters["stock_scope"] = "movil"
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+            ]
+            candidate_fields = ["codigo", "cantidad", "f_consumo", "movil", "cedula", "estado"]
         elif "consum" in normalized:
             intent = "consumption_query"
             operation = "top" if ("mas" in normalized or "top" in normalized) else "aggregate"
             business_concept = "materiales_mas_consumidos" if operation == "top" else ""
             candidate_tables = ["logistica_movimientos_consumo", "base_codigos"]
             candidate_fields = ["codigo", "cantidad", "fecha", "responsable", "movil"]
-        elif any(token in normalized for token in ("stock", "saldo", "existencia", "existencias")):
-            intent = "stock_query"
+        elif any(token in normalized for token in ("stock", "saldo", "existencia", "existencias")) or (
+            "cuanto tengo" in normalized and warehouse
+        ):
+            intent = "stock_balance"
             operation = "stock_balance"
             business_concept = "stock_actual"
             candidate_tables = [
@@ -376,9 +426,19 @@ class InventorySemanticResolver:
                 "logistica_movimientos_cobro",
                 "logistica_movimientos_traslado",
             ]
-            candidate_fields = ["codigo", "cantidad", "fecha", "bodega"]
-            requires_business_validation = True
-            limitations.append("stock_calculation_requires_business_validation")
+            candidate_fields = ["codigo", "cantidad", "f_consumo", "bodega", "movimiento", "estado"]
+            implementation_status = "ready_for_dictionary_validation"
+            if cedula and any(token in normalized for token in ("empleado", "tecnico", "cedula")):
+                business_concept = "stock_movil"
+                filters["stock_scope"] = "movil"
+            if "movil" in normalized or "móvil" in normalized:
+                business_concept = "stock_movil"
+                filters["stock_scope"] = "movil"
+            elif "bodega" in normalized:
+                business_concept = "stock_bodega"
+                filters["stock_scope"] = "bodega"
+                if "bodega" not in group_by:
+                    group_by.append("bodega")
         elif "entrada" in normalized or "ingreso" in normalized:
             intent = "movement_query"
             operation = "aggregate" if group_by else "list"
@@ -397,7 +457,7 @@ class InventorySemanticResolver:
             candidate_tables = ["logistica_base_seriales"]
             candidate_fields = ["estado", "serial"]
 
-        if cedula and intent == "stock_query":
+        if cedula and intent in {"stock_query", "stock_balance"}:
             business_concept = "stock_by_responsible"
             limitations.append("responsable_o_cedula_requires_dictionary_validation")
 
@@ -456,13 +516,51 @@ class InventorySemanticResolver:
             "traceability_query": "inventory_traceability_by_serial",
             "risk_detection": "inventory_risk_consumo_movil_sin_validar",
             "consumption_query": "inventory_consumption_top" if inference.get("operation") == "top" else "inventory_consumption_by_dimension",
-            "transfer_query": "inventory_transfer_group_by_destination" if "bodega_destino" in inferred_group_by else "inventory_transfer_detail",
+            "transfer_query": "inventory_transfer_destination_not_available"
+            if "bodega_destino" in inferred_group_by
+            else (
+                "inventory_transfer_other_ally"
+                if str(normalized_filters.get("movimiento") or "") == "TRASLADOS_OTRO_ALIADO"
+                else (
+                    "inventory_transfer_warehouse"
+                    if str(normalized_filters.get("movimiento") or "") == "TRASLADO_BODEGA"
+                    else "inventory_transfer_detail"
+                )
+            ),
             "association_query": "inventory_serial_association_departures",
-            "stock_query": "inventory_stock_balance_pending_validation",
+            "stock_balance": "inventory_serial_stock_by_dimension"
+            if str(inference.get("material_family") or "") == "serializados"
+            and set(inferred_group_by or []) <= {"estado", "bodega", "ubicacion", "codigo"}
+            and bool(inferred_group_by)
+            else (
+                "inventory_material_stock_mobile"
+                if str(normalized_filters.get("stock_scope") or "") == "movil"
+                else (
+                    "inventory_material_stock_by_warehouse"
+                    if str(normalized_filters.get("stock_scope") or "") == "bodega" or "bodega" in inferred_group_by
+                    else "inventory_material_stock_balance"
+                )
+            ),
+            "stock_query": "inventory_serial_stock_by_dimension"
+            if str(inference.get("material_family") or "") == "serializados"
+            and set(inferred_group_by or []) <= {"estado", "bodega", "ubicacion", "codigo"}
+            and bool(inferred_group_by)
+            else (
+                "inventory_material_stock_mobile"
+                if str(normalized_filters.get("stock_scope") or "") == "movil"
+                else (
+                    "inventory_material_stock_by_warehouse"
+                    if str(normalized_filters.get("stock_scope") or "") == "bodega" or "bodega" in inferred_group_by
+                    else "inventory_material_stock_balance"
+                )
+            ),
             "return_query": "inventory_returns_by_dimension",
             "movement_query": "inventory_entries_by_month" if "mes" in inferred_group_by else "inventory_movement_detail",
             "movement_history": "inventory_kardex_consolidated",
-            "reconciliation_query": "inventory_reconciliation_pending_validation",
+            "reconciliation_query": "inventory_consumption_billing_operacion_hfc"
+            if str(inference.get("business_concept") or "") == "consumo_vs_facturacion"
+            and str(normalized_filters.get("bodega") or "") == "operacion_hfc"
+            else "inventory_reconciliation_pending_validation",
             "external_reconciliation_query": "inventory_external_reconciliation_pending",
             "document_generation": "inventory_document_generation_pending",
             "report_generation": "inventory_semantic_report",
@@ -470,11 +568,17 @@ class InventorySemanticResolver:
             "notification_query": "inventory_notification_pending",
             "assignment_distribution_query": "inventory_assignment_distribution_pending",
         }
+        explicit_template_id = str(intent.template_id or "").strip()
+        resolved_template_id = (
+            explicit_template_id
+            if explicit_template_id.startswith("inventory_")
+            else str(template_map.get(str(inference.get("intent") or ""), "inventory_movement_detail"))
+        )
         resolved_intent = StructuredQueryIntent(
             raw_query=intent.raw_query,
             domain_code=self.RUNTIME_DOMAIN_CODE,
             operation=str(inference.get("operation") or intent.operation or "list"),
-            template_id=str(template_map.get(str(inference.get("intent") or ""), "inventory_movement_detail")),
+            template_id=resolved_template_id,
             entity_type="serial" if normalized_filters.get("serial") else ("codigo" if normalized_filters.get("codigo") else ""),
             entity_value=str(normalized_filters.get("serial") or normalized_filters.get("codigo") or ""),
             filters=normalized_filters,
@@ -486,8 +590,8 @@ class InventorySemanticResolver:
             warnings=warnings,
         )
 
-        if str(inference.get("intent") or "") == "stock_query":
-            warnings.append("inventario_stock_pendiente_validacion_negocio")
+        if str(resolved_intent.template_id or "") == "inventory_stock_balance_pending_validation":
+            warnings.append("inventario_stock_pendiente_validacion_db_ai_dictionary")
         if normalized_filters.get("cedula") and "responsable_o_cedula_requires_dictionary_validation" in limitations:
             warnings.append("cedula_o_responsable_no_validado_en_dictionary")
 

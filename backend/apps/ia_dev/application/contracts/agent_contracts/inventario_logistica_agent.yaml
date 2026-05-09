@@ -1,0 +1,280 @@
+agent_contract:
+  agent_id: inventario_logistica_agent
+  domain: inventario_logistica
+  role: Inventory and logistics semantic SQL agent.
+  responsibilities:
+    - Resolve inventory analytics through semantic assist plus safe SQL planning.
+    - Represent inventory semantic-only and pending external flows as first-class runtime contracts.
+  out_of_scope:
+    - Direct document generation execution without dedicated module.
+    - Financial accounting outside declared logistics scope.
+  input_context:
+    session_memory: true
+    user_memory: true
+    business_memory: true
+  output_context:
+    updates_session_memory: true
+    emits_business_response: true
+  intents:
+    - id: inventory_stock_by_warehouse
+      description: Stock balance by warehouse.
+      examples: ["stock de materiales por bodega", "saldo bodega operacion_hfc"]
+      capability: inventory_stock_balance_by_warehouse
+      strategy: sql_assisted
+      required_filters: []
+      optional_filters: [bodega, codigo, month]
+      tables: [base_codigos, logistica_movimientos_entrada, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, logistica_movimientos_traslado]
+      validation_rules: ["dictionary_table_mapping_required"]
+    - id: inventory_stock_by_mobile
+      description: Stock balance by mobile team.
+      examples: ["stock por movil"]
+      capability: inventory_stock_balance_by_mobile
+      strategy: sql_assisted
+      required_filters: []
+      optional_filters: [movil, codigo]
+      tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro]
+      validation_rules: ["dictionary_table_mapping_required"]
+    - id: inventory_traceability
+      description: Traceability by serial.
+      examples: ["trazabilidad del serial ABC123"]
+      capability: inventory_traceability_by_serial
+      strategy: sql_assisted
+      required_filters: [serial]
+      optional_filters: []
+      tables: [logistica_base_seriales, logistica_seriales_asociados]
+      validation_rules: ["serial_filter_required"]
+    - id: inventory_kardex
+      description: Consolidated kardex by code.
+      examples: ["kardex consolidado del material ABC"]
+      capability: inventory_kardex_consolidated
+      strategy: sql_assisted
+      required_filters: [codigo]
+      optional_filters: []
+      tables: [logistica_movimientos_entrada, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, logistica_movimientos_traslado]
+      validation_rules: ["codigo_filter_required"]
+    - id: inventory_consumption_billing
+      description: Consumption versus billing for HFC operation.
+      examples: ["historial de consumos tecnicos y facturacion"]
+      capability: inventory_consumption_billing_operacion_hfc
+      strategy: sql_assisted
+      required_filters: []
+      optional_filters: [bodega]
+      tables: [logistica_movimientos_consumo, a_promedios_consumo, bd_c3nc4s1s.facturacion_facturado_wfm]
+      validation_rules: ["dictionary_table_mapping_required"]
+    - id: inventory_semantic_report
+      description: Semantic business report pending deeper runtime implementation.
+      examples: ["promedios y CPEs proyecto ERI", "reporte de saldos a las areas"]
+      capability: inventory_semantic_report
+      strategy: semantic_only
+      required_filters: []
+      optional_filters: [proyecto, area]
+      tables: []
+      validation_rules: ["no_technical_leak"]
+    - id: inventory_document_generation
+      description: Controlled pending document generation flow.
+      examples: ["generar acta de traslado interno", "generar SPA de ingreso"]
+      capability: inventory_document_generation_pending
+      strategy: external_pending
+      required_filters: []
+      optional_filters: [tipo_acta]
+      tables: []
+      validation_rules: ["pending_integration_message_required"]
+  capabilities:
+    - id: inventory_stock_balance
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [base_codigos, logistica_movimientos_entrada, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, logistica_movimientos_traslado]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_stock_balance_by_warehouse
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [base_codigos, logistica_movimientos_entrada, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, logistica_movimientos_traslado]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_stock_balance_by_mobile
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_traceability_by_serial
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_base_seriales, logistica_seriales_asociados]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_risk_consumo_movil_sin_validar
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_base_seriales]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_consumption_top
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_consumo, base_codigos]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_consumption_by_dimension
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_consumo, base_codigos]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_transfer_warehouse
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_traslado, base_codigos]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_transfer_other_ally
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_traslado, base_codigos]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_serial_association_departures
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_seriales_asociados]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_entries_by_month
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_entrada]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_movement_detail
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_entrada, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, logistica_movimientos_traslado]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_kardex_consolidated
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_entrada, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, logistica_movimientos_traslado]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_consumption_billing_operacion_hfc
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [logistica_movimientos_consumo, a_promedios_consumo, bd_c3nc4s1s.facturacion_facturado_wfm]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_semantic_report
+      type: semantic_only
+      owner: inventory.semantic_report
+      planner_required: false
+      handler_required: false
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: null
+      policy_tags: [contains_operational_data]
+    - id: inventory_document_generation_pending
+      type: external_pending
+      owner: inventory.document_generation
+      planner_required: false
+      handler_required: false
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: null
+      policy_tags: [contains_operational_data]
+  routing_rules:
+    deterministic_patterns: ["stock", "inventario", "bodega", "serial", "kardex", "consumo", "traslado"]
+    semantic_assist_enabled: true
+    domain_priority_rules: ["inventory_pre_router_has_priority_when_inventory_terms_are_strong"]
+    memory_isolation: strict_by_domain_and_capability
+  semantic_assist_rules:
+    - YAML teaches business semantics and ai_dictionary governs structural execution.
+    - SQL must never be generated directly from YAML.
+  execution_rules:
+    covered_by_modern_runtime: true
+    legacy_runtime_owner: inventory_legacy_runtime
+  validation_rules:
+    - dictionary_table_mapping_required
+    - serial_filter_required
+    - codigo_filter_required
+  handoffs:
+    allowed_targets: [analista_agent]
+    payload_schema: agent_contract.v1.handoff
+    required_fields: [domain, intent, filters]
+  fallback_policy:
+    legacy_allowed: false
+    user_visible_error_policy: controlled_limitation
+    technical_debug_visibility: hidden_from_end_user
+  response_policy:
+    user_mode: business
+    debug_mode: internal_only
+    required_sections: [reply, data]
+    forbidden_terms: [runtime_only_fallback, piloto analytics, completar ai_dictionary, legacy]
+  memory_policy:
+    scope: session_user_and_business
+    cross_domain_sharing: blocked_except_handoff
+  observability:
+    required_trace_fields: [agent_id, domain, intent, capability, route, execute, fallback_used, planner_called, block_reason]
+  tests_required:
+    - contract_loads
+    - intents_have_capabilities
+    - capabilities_have_handler_or_planner
+    - frontend_simulator_parity

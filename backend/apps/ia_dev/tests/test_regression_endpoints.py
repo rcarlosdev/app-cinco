@@ -11,6 +11,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.chat_contracts import build_chat_response_snapshot
+from apps.ia_dev.application.orchestration.chat_application_service import ChatApplicationService
 from apps.ia_dev.application.orchestration.response_assembler import LegacyResponseAssembler
 from apps.ia_dev.application.runtime.service_runtime_bootstrap import apply_service_runtime_bootstrap
 from apps.ia_dev.application.policies.policy_guard import PolicyAction, PolicyDecision
@@ -148,6 +149,47 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
             str(meta["legacy_runtime_fallback_reason"] or ""),
         )
 
+    def test_chat_endpoint_blocks_legacy_when_contract_disallows_it(self):
+        chat_service = MagicMock()
+        chat_service.run.side_effect = RuntimeError("boom")
+        chat_service._bootstrap_classification.return_value = {
+            "intent": "stock_balance",
+            "domain": "inventario_logistica",
+            "selected_agent": "inventario_logistica_agent",
+            "classifier_source": "test",
+            "needs_database": True,
+            "output_mode": "summary",
+        }
+        real_service = ChatApplicationService()
+        chat_service._resolve_agent_contract.side_effect = real_service._resolve_agent_contract
+        chat_service._legacy_allowed_for_contract.side_effect = real_service._legacy_allowed_for_contract
+        chat_service.build_controlled_runtime_limitation_response.side_effect = (
+            real_service.build_controlled_runtime_limitation_response
+        )
+        legacy_service = MagicMock()
+        chat_view_module.chat_application_service = chat_service
+        chat_view_module.runtime_fallback_service = legacy_service
+
+        request = self.factory.post(
+            "/ia-dev/chat/",
+            {"message": "saldo bodega operacion_hfc", "session_id": "sess-no-legacy"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        response = IADevChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        legacy_service.run.assert_not_called()
+        runtime_meta = response.data.get("data_sources", {}).get("runtime", {})
+        self.assertFalse(bool(runtime_meta.get("legacy_runtime_fallback_used")))
+        self.assertEqual(str(runtime_meta.get("flow") or ""), "controlled_runtime_limitation")
+        self.assertIn("ruta auditada", str(response.data.get("reply") or "").lower())
+        self.assertNotIn("traceback", str(response.data.get("reply") or "").lower())
+        self.assertEqual(
+            str(response.data.get("response_envelope", {}).get("block_reason") or ""),
+            str(runtime_meta.get("block_reason") or ""),
+        )
+
     def test_chat_endpoint_preserves_internal_legacy_runtime_fallback_metadata(self):
         snapshot = build_chat_response_snapshot()
         snapshot["session_id"] = "sess-inner-fallback"
@@ -184,6 +226,44 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
             str(meta["legacy_runtime_fallback_reason"] or ""),
             "legacy_runtime_fallback",
         )
+
+    def test_controlled_runtime_limitation_hides_internal_terms_for_user_mode(self):
+        service = ChatApplicationService()
+        response = service.build_controlled_runtime_limitation_response(
+            message="saldo bodega operacion_hfc",
+            session_id="sess-user",
+            classification={
+                "intent": "stock_balance",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventario_logistica_agent",
+                "needs_database": True,
+            },
+            block_reason="chat_application_service_exception:RuntimeError",
+            response_debug_mode=False,
+        )
+
+        self.assertNotIn("traceback", str(response.get("reply") or "").lower())
+        self.assertNotIn("chatapplicationservice", str(response.get("reply") or "").lower())
+        self.assertFalse(bool(response.get("trace")))
+
+    def test_controlled_runtime_limitation_keeps_debug_trace_in_debug_mode(self):
+        service = ChatApplicationService()
+        response = service.build_controlled_runtime_limitation_response(
+            message="saldo bodega operacion_hfc",
+            session_id="sess-debug",
+            classification={
+                "intent": "stock_balance",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventario_logistica_agent",
+                "needs_database": True,
+            },
+            block_reason="missing_columns:movimientos:bodega_destino",
+            response_debug_mode=True,
+        )
+
+        self.assertEqual(str(response.get("response_envelope", {}).get("mode") or ""), "debug")
+        self.assertTrue(bool(response.get("trace")))
+        self.assertIn("block_reason_code", json.dumps(response.get("trace"), ensure_ascii=False))
 
     def test_memory_reset_endpoint_uses_session_memory_runtime_service(self):
         chat_view_module.session_memory_runtime_service.reset_memory.return_value = {

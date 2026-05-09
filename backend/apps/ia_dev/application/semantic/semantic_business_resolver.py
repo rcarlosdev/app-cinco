@@ -20,6 +20,9 @@ from apps.ia_dev.application.semantic.synonym_semantic_resolver import SynonymSe
 from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import (
     InventorySemanticResolver,
 )
+from apps.ia_dev.domains.inventario_logistica.inventory_dictionary_sync import (
+    InventoryDictionarySyncService,
+)
 from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
     get_business_concepts as get_inventory_business_concepts,
 )
@@ -349,6 +352,90 @@ class SemanticBusinessResolver:
         normalized_domain: str,
         dictionary_context: dict[str, Any],
     ) -> dict[str, Any]:
+        if normalized_domain == "inventario_logistica":
+            preview = InventoryDictionarySyncService().build_preview(agent_code="inventario_logistica")
+            manifest = {
+                "tables": [
+                    {
+                        **dict(item),
+                        "alias_negocio": item.get("alias_negocio") or item.get("business_name"),
+                        "rol": item.get("rol") or item.get("primary_role"),
+                    }
+                    for item in list(preview.get("dd_tablas") or [])
+                    if isinstance(item, dict) and bool(item.get("sync_to_dd_tablas", True))
+                ],
+                "fields": [
+                    {
+                        **dict(item),
+                        "campo_logico": item.get("campo_logico") or item.get("semantic_role") or item.get("column_name"),
+                        "definicion_negocio": item.get("definicion_negocio")
+                        or {
+                            "business_concepts": item.get("business_concepts"),
+                            "allowed_operations": item.get("allowed_operations"),
+                        },
+                        "es_filtro": item.get("es_filtro") if item.get("es_filtro") is not None else item.get("is_filterable"),
+                        "es_group_by": item.get("es_group_by") if item.get("es_group_by") is not None else item.get("is_groupable"),
+                        "es_metrica": item.get("es_metrica") if item.get("es_metrica") is not None else item.get("is_metric"),
+                        "supports_filter": item.get("supports_filter") if item.get("supports_filter") is not None else item.get("is_filterable"),
+                        "supports_group_by": item.get("supports_group_by") if item.get("supports_group_by") is not None else item.get("is_groupable"),
+                        "supports_metric": item.get("supports_metric") if item.get("supports_metric") is not None else item.get("is_metric"),
+                        "supports_dimension": item.get("supports_dimension") if item.get("supports_dimension") is not None else item.get("is_groupable"),
+                    }
+                    for item in list(preview.get("dd_campos") or [])
+                    if isinstance(item, dict) and bool(item.get("sync_to_dd_campos", True))
+                ],
+                "relations": [
+                    {
+                        **dict(item),
+                        "nombre_relacion": item.get("nombre_relacion") or item.get("code"),
+                        "join_sql": item.get("join_sql") or item.get("condicion_join_sql"),
+                        "cardinalidad": item.get("cardinalidad") or item.get("relationship_type"),
+                    }
+                    for item in list(preview.get("dd_relaciones") or [])
+                    if isinstance(item, dict)
+                ],
+                "synonyms": list(preview.get("dd_sinonimos") or []),
+                "rules": list((preview.get("semantic_metadata") or {}).get("business_rules") or []),
+            }
+            merged = dict(dictionary_context or {})
+            for key, key_builder in (
+                (
+                    "tables",
+                    lambda row: (
+                        str((row or {}).get("schema_name") or "").strip().lower(),
+                        str((row or {}).get("table_name") or "").strip().lower(),
+                    ),
+                ),
+                (
+                    "fields",
+                    lambda row: (
+                        str((row or {}).get("table_name") or "").strip().lower(),
+                        str((row or {}).get("campo_logico") or (row or {}).get("logical_name") or "").strip().lower(),
+                        str((row or {}).get("column_name") or "").strip().lower(),
+                    ),
+                ),
+                (
+                    "relations",
+                    lambda row: str((row or {}).get("nombre_relacion") or (row or {}).get("code") or "").strip().lower(),
+                ),
+                (
+                    "synonyms",
+                    lambda row: (
+                        str((row or {}).get("termino") or "").strip().lower(),
+                        str((row or {}).get("sinonimo") or "").strip().lower(),
+                    ),
+                ),
+                (
+                    "rules",
+                    lambda row: str((row or {}).get("codigo") or (row or {}).get("nombre") or "").strip().lower(),
+                ),
+            ):
+                merged[key] = self._merge_dictionary_rows(
+                    rows=[*list(merged.get(key) or []), *list(manifest.get(key) or [])],
+                    key_builder=key_builder,
+                )
+            merged.setdefault("structural_fallback", "inventory_audited_yaml_manifest")
+            return merged
         if normalized_domain not in {"empleados", "rrhh"}:
             return dict(dictionary_context or {})
         manifest = self._normalize_remediation_manifest(

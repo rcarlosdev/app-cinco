@@ -63,19 +63,107 @@ class RuntimeEventHumanizer:
             count = int(meta.get("candidate_count") or 0)
             ranking = list(meta.get("ranking") or [])
             top = ""
+            top_score = 0.0
+            top_count = 0
+            top_template = ""
             if ranking:
                 first = ranking[0]
                 if isinstance(first, dict):
                     top = str(first.get("pattern_key") or first.get("domain_code") or "").strip()
+                    top_score = float(first.get("top_score") or 0.0)
+                    top_count = int(first.get("count") or 0)
+                    top_template = str(first.get("top_template_id") or "").strip()
             suffix = f" Referencias encontradas: {count}." if count else " No hubo patrones previos fuertes."
             if top:
-                suffix += f" La mejor pista fue {top}."
+                suffix += f" Pista mas cercana por memoria: {top}"
+                if top_score:
+                    suffix += f" (score {top_score:.2f}"
+                    if top_count:
+                        suffix += f", {top_count} coincidencias"
+                    suffix += ")"
+                if top_template:
+                    suffix += f", plantilla {top_template}"
+                suffix += ". Aun no es decision final; se valida contra la pregunta y el diccionario."
             self._append_summary_step("Se contrasto la pregunta con patrones historicos de consulta.")
             return {
                 "phase": self._PHASE_LABELS["intencion"],
                 "status": "info",
                 "message": f"🧠 Entendiendo la pregunta...{suffix}",
                 "key": f"patterns:{count}:{top}",
+            }
+        if event_type == "semantic_context_loading":
+            domain = str(meta.get("domain_code") or "general").strip()
+            return {
+                "phase": self._PHASE_LABELS["diccionario"],
+                "status": "info",
+                "message": f"Buscando contexto semantico del dominio {domain}: YAML de negocio, ai_dictionary y metadata permitida.",
+                "key": f"semantic_context_loading:{domain}",
+            }
+        if event_type == "semantic_context_loaded":
+            domain = str(meta.get("domain_code") or "general").strip()
+            tables = int(meta.get("tables_count") or 0)
+            fields = int(meta.get("fields_count") or 0)
+            supports_sql = bool(meta.get("supports_sql_assisted"))
+            detail = f"Contexto listo para {domain}: {tables} tablas candidatas y {fields} campos declarados."
+            detail += " SQL assisted disponible." if supports_sql else " SQL assisted aun limitado para este alcance."
+            return {
+                "phase": self._PHASE_LABELS["diccionario"],
+                "status": "ok",
+                "message": detail,
+                "key": f"semantic_context_loaded:{domain}:{tables}:{fields}",
+            }
+        if event_type == "semantic_normalization_started":
+            domain = str(meta.get("domain_code") or "general").strip()
+            return {
+                "phase": self._PHASE_LABELS["intencion"],
+                "status": "info",
+                "message": f"Normalizando la pregunta para {domain}: reviso sinonimos, filtros, metricas y posibles columnas.",
+                "key": f"semantic_normalization_started:{domain}",
+            }
+        if event_type == "query_intent_resolution_started":
+            domain = str(meta.get("domain_code") or "general").strip()
+            patterns = int(meta.get("candidate_patterns") or 0)
+            return {
+                "phase": self._PHASE_LABELS["intencion"],
+                "status": "info",
+                "message": f"Resolviendo intencion estructurada para {domain}. Patrones de memoria disponibles: {patterns}.",
+                "key": f"query_intent_resolution_started:{domain}:{patterns}",
+            }
+        if event_type == "query_resolution_started":
+            domain = str(meta.get("domain_code") or "general").strip()
+            operation = str(meta.get("operation") or "").strip()
+            template_id = str(meta.get("template_id") or "").strip()
+            detail = f"Preparando consulta de negocio para {domain}."
+            if operation:
+                detail += f" Operacion: {operation}."
+            if template_id:
+                detail += f" Plantilla: {template_id}."
+            return {
+                "phase": self._PHASE_LABELS["decision"],
+                "status": "info",
+                "message": detail,
+                "key": f"query_resolution_started:{domain}:{operation}:{template_id}",
+            }
+        if event_type == "execution_plan_started":
+            domain = str(meta.get("domain_code") or "general").strip()
+            candidate_tables = int(meta.get("candidate_tables") or 0)
+            return {
+                "phase": self._PHASE_LABELS["decision"],
+                "status": "info",
+                "message": f"Armando plan de ejecucion para {domain}: valido reglas de seguridad y {candidate_tables} tablas candidatas.",
+                "key": f"execution_plan_started:{domain}:{candidate_tables}",
+            }
+        if event_type == "query_sql_assisted_started":
+            domain = str(meta.get("domain_code") or "general").strip()
+            reason = str(meta.get("reason") or "").strip()
+            detail = f"Ejecutando SQL assisted para {domain} con datos reales."
+            if reason:
+                detail += f" Motivo del plan: {reason}."
+            return {
+                "phase": self._PHASE_LABELS["sql"],
+                "status": "info",
+                "message": detail,
+                "key": f"query_sql_assisted_started:{domain}:{reason}",
             }
         if event_type == "intent_arbitration_resolved":
             final_intent = str(meta.get("arbitrated_intent") or meta.get("final_intent") or "").strip()
@@ -552,6 +640,7 @@ class Command(BaseCommand):
             actor_user_key=options.get("actor_user_key"),
             options=options,
             live_mode=live_mode,
+            response_debug_mode=raw,
         )
         self._print_payload(payload, raw=raw, flow_mode=flow_mode, live_mode=live_mode)
 
@@ -603,6 +692,7 @@ class Command(BaseCommand):
                     actor_user_key=options.get("actor_user_key"),
                     options=options,
                     live_mode=current_live_mode,
+                    response_debug_mode=raw,
                 )
                 self._print_payload(payload, raw=raw, flow_mode=current_flow_mode, live_mode=current_live_mode)
                 continue
@@ -637,6 +727,7 @@ class Command(BaseCommand):
                 actor_user_key=options.get("actor_user_key"),
                 options=options,
                 live_mode=current_live_mode,
+                response_debug_mode=raw,
             )
             self._print_payload(payload, raw=raw, flow_mode=current_flow_mode, live_mode=current_live_mode)
 
@@ -650,6 +741,7 @@ class Command(BaseCommand):
         actor_user_key: str | None,
         options: dict[str, Any],
         live_mode: str,
+        response_debug_mode: bool = False,
     ) -> dict:
         if mode == "http":
             return self._run_http(
@@ -657,6 +749,7 @@ class Command(BaseCommand):
                 session_id=session_id,
                 reset_memory=reset_memory,
                 options=options,
+                response_debug_mode=response_debug_mode,
             )
         return self._run_service(
             message=message,
@@ -664,6 +757,7 @@ class Command(BaseCommand):
             reset_memory=reset_memory,
             actor_user_key=actor_user_key,
             live_mode=live_mode,
+            response_debug_mode=response_debug_mode,
         )
 
     def _run_service(
@@ -674,6 +768,7 @@ class Command(BaseCommand):
         reset_memory: bool,
         actor_user_key: str | None,
         live_mode: str,
+        response_debug_mode: bool,
     ) -> dict:
         service = ChatApplicationService()
         legacy_runtime = LegacyOrchestratorRuntime()
@@ -700,6 +795,7 @@ class Command(BaseCommand):
             legacy_runner=lambda **kwargs: legacy_runtime.run(**kwargs),
             observability=observability,
             actor_user_key=actor_user_key,
+            response_debug_mode=response_debug_mode,
         )
 
     def _run_http(
@@ -709,6 +805,7 @@ class Command(BaseCommand):
         session_id: str,
         reset_memory: bool,
         options: dict[str, Any],
+        response_debug_mode: bool,
     ) -> dict:
         base_url = str(options.get("base_url") or "http://127.0.0.1:8000").rstrip("/")
         url = f"{base_url}/ia-dev/chat/"
@@ -722,6 +819,8 @@ class Command(BaseCommand):
         req = request.Request(url=url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "application/json")
+        if response_debug_mode:
+            req.add_header("X-IA-Dev-Debug", "1")
 
         auth_token = str(options.get("auth_token") or "").strip()
         api_key = str(options.get("api_key") or "").strip()
@@ -796,7 +895,7 @@ class Command(BaseCommand):
         runtime_meta = dict((payload.get("data_sources") or {}).get("runtime") or {})
         route = {
             "selected_capability_id": str(orchestrator.get("selected_capability_id") or ""),
-            "execute_capability": str(orchestrator.get("runtime_flow") or "") == "handler",
+            "execute_capability": str(orchestrator.get("runtime_flow") or "") in {"handler", "sql_assisted"},
             "use_legacy": str(orchestrator.get("runtime_flow") or "") == "legacy_fallback",
             "reason": str(orchestrator.get("fallback_reason") or ""),
         }
@@ -804,9 +903,26 @@ class Command(BaseCommand):
         execution_plan = dict(qi_payload.get("execution_plan") or {})
         query_pattern_fastpath = dict(qi_payload.get("query_pattern_fastpath") or {})
         intent = dict(qi_payload.get("intent") or {})
+        original_question = str(((payload.get("task_state") or {}).get("state") or {}).get("original_question") or "").strip()
+        if original_question and not str(intent.get("raw_query") or "").strip():
+            intent["raw_query"] = original_question
         semantic_norm = dict(qi_payload.get("semantic_normalization") or {})
         canonical_resolution = dict(qi_payload.get("canonical_resolution") or {})
         semantic_diag = dict(((payload.get("data_sources") or {}).get("query_intelligence") or {}).get("semantic_diagnostics") or {})
+        if not execution_plan and str(qi_payload.get("strategy") or semantic_diag.get("strategy") or ""):
+            execution_plan = {
+                "strategy": str(qi_payload.get("strategy") or semantic_diag.get("strategy") or ""),
+                "domain_code": str(semantic_diag.get("domain_code") or ""),
+                "constraints": {
+                    "filters": dict(
+                        ((semantic_diag.get("search_bases") or {}).get("operational_context") or {}).get("filters_normalized")
+                        or {}
+                    )
+                },
+            }
+        if str(execution_plan.get("strategy") or "").strip().lower() == "sql_assisted" and not route.get("selected_capability_id"):
+            route["selected_capability_id"] = "query_execution_planner.sql_assisted"
+            route["execute_capability"] = True
         sources = dict(payload.get("data_sources") or {})
         trace = list(payload.get("trace") or [])
 
@@ -832,9 +948,9 @@ class Command(BaseCommand):
             self.stdout.write(
                 "  query_intelligence: "
                 f"mode={str(qi_payload.get('mode') or '-')} | "
-                f"enabled={bool(qi_payload.get('enabled'))} | "
-                f"domain={str(intent.get('domain_code') or '-')} | "
-                f"op={str(intent.get('operation') or '-')} | "
+                f"enabled={bool(qi_payload.get('enabled', qi_payload.get('ok', False)))} | "
+                f"domain={str(intent.get('domain_code') or semantic_diag.get('domain_code') or '-')} | "
+                f"op={str(intent.get('operation') or semantic_diag.get('operation') or '-')} | "
                 f"strategy={strategy}"
             )
             if warnings:
@@ -1220,8 +1336,14 @@ class Command(BaseCommand):
             "ambiguedades": ambiguedades,
             "agente_seleccionado": str(orchestrator.get("selected_agent") or "").strip(),
             "estrategia_ejecucion": str(execution_plan.get("strategy") or "").strip(),
-            "capacidad_enrutada": str(route.get("selected_capability_id") or "").strip(),
-            "ejecuta_capacidad": bool(route.get("execute_capability")),
+            "capacidad_enrutada": str(
+                execution_plan.get("capability_id")
+                or route.get("selected_capability_compat_id")
+                or route.get("selected_capability_id")
+                or ""
+            ).strip(),
+            "ejecuta_capacidad": bool(route.get("execute_capability"))
+            or str(execution_plan.get("strategy") or "").strip().lower() == "sql_assisted",
             "sugerencia_continuacion": sugerencia_continuacion,
         }
 

@@ -87,6 +87,64 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(intent.operation, "count")
         self.assertEqual(intent.template_id, "count_entities_by_status")
 
+    def test_query_intent_resolver_saldo_bodega_is_inventory_stock_balance(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="saldo bodega operacion_hfc",
+                base_classification={
+                    "domain": "inventario_logistica",
+                    "intent": "stock_balance",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+
+        self.assertEqual(intent.domain_code, "inventario_logistica")
+        self.assertEqual(intent.operation, "stock_balance")
+        self.assertEqual(intent.template_id, "inventory_material_stock_by_warehouse")
+        self.assertEqual(str(intent.filters.get("bodega") or ""), "operacion_hfc")
+        self.assertEqual(str(intent.filters.get("stock_scope") or ""), "bodega")
+        self.assertNotEqual(intent.template_id, "aggregate_by_group_and_period")
+
+    def test_query_intent_resolver_ignores_unrelated_attendance_memory_for_inventory(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0",
+                "IA_DEV_QUERY_PATTERN_FASTPATH_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            intent = resolver.resolve(
+                message="saldo bodega operacion_hfc",
+                base_classification={
+                    "domain": "inventario_logistica",
+                    "intent": "stock_balance",
+                    "needs_database": True,
+                },
+                semantic_context={},
+                memory_hints={
+                    "query_patterns": [
+                        {
+                            "query_shape_key": resolver._build_query_shape_key("saldo bodega operacion_hfc"),
+                            "domain_code": "ausentismo",
+                            "operation": "aggregate",
+                            "template_id": "aggregate_by_group_and_period",
+                            "group_by": ["supervisor"],
+                            "filters": {"indicador_ausentismo": "SI"},
+                            "score": 0.99,
+                        }
+                    ]
+                },
+            )
+
+        self.assertEqual(intent.domain_code, "inventario_logistica")
+        self.assertEqual(intent.operation, "stock_balance")
+        self.assertEqual(intent.template_id, "inventory_material_stock_by_warehouse")
+        self.assertNotIn("indicador_ausentismo", dict(intent.filters or {}))
+
     def test_query_intent_resolver_inferrs_employee_egresos_this_month_as_inactive_count(self):
         resolver = QueryIntentResolver()
         with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):

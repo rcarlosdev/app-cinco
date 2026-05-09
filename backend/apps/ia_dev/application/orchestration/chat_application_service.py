@@ -4,14 +4,20 @@ import logging
 import os
 import re
 import unicodedata
+import copy
 from typing import Any, Callable
 
 from apps.ia_dev.application.context.run_context import RunContext
+from apps.ia_dev.application.contracts.agent_contract_loader import AgentContractLoader
+from apps.ia_dev.application.contracts.chat_contracts import ensure_chat_response_contract
 from apps.ia_dev.application.memory.chat_memory_runtime_service import (
     ChatMemoryRuntimeService,
 )
 from apps.ia_dev.application.orchestration.response_assembler import (
     ResponseAssembler,
+)
+from apps.ia_dev.application.orchestration.business_response_composer_service import (
+    BusinessResponseComposerService,
 )
 from apps.ia_dev.application.reasoning.diagnostic_orchestrator import (
     DiagnosticOrchestrator,
@@ -49,6 +55,9 @@ from apps.ia_dev.application.semantic.satisfaction_review_gate import (
     SatisfactionReviewGate,
 )
 from apps.ia_dev.application.semantic.semantic_business_resolver import SemanticBusinessResolver
+from apps.ia_dev.application.semantic.semantic_orchestrator_service import (
+    SemanticOrchestratorService,
+)
 from apps.ia_dev.application.taxonomia_dominios import (
     agente_desde_dominio,
     dominio_desde_capacidad,
@@ -68,6 +77,17 @@ class ChatApplicationService:
     CLEANUP_PHASE = "phase_7"
     PILOT_PHASE = "phase_9"
     PRODUCTIVE_PILOT_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh"}
+    _USER_MODE_RESPONSE_FORBIDDEN_TERMS = (
+        "runtime_only_fallback",
+        "piloto analytics",
+        "completar ai_dictionary",
+        "legacy",
+        "traceback",
+        "chatapplicationservice",
+        "runtimefallbackservice",
+        "legacyorchestratorruntime",
+        "unsupported_capability_domain",
+    )
 
     def __init__(
         self,
@@ -93,6 +113,8 @@ class ChatApplicationService:
         reasoning_memory_service: ReasoningMemoryService | None = None,
         task_state_service: TaskStateService | None = None,
         intent_arbitration_service: IntentArbitrationService | None = None,
+        semantic_orchestrator_service: SemanticOrchestratorService | None = None,
+        business_response_composer_service: BusinessResponseComposerService | None = None,
     ):
         self.catalog = catalog or CapabilityCatalog()
         self.capability_runtime = capability_runtime_adapter or RuntimeCapabilityAdapter(
@@ -123,6 +145,434 @@ class ChatApplicationService:
         self.reasoning_memory_service = reasoning_memory_service or ReasoningMemoryService()
         self.task_state_service = task_state_service or TaskStateService()
         self.intent_arbitration_service = intent_arbitration_service or IntentArbitrationService()
+        self.semantic_orchestrator_service = (
+            semantic_orchestrator_service or SemanticOrchestratorService()
+        )
+        self.business_response_composer_service = (
+            business_response_composer_service or BusinessResponseComposerService()
+        )
+        self.contract_loader = getattr(self.catalog, "contract_loader", None) or AgentContractLoader()
+
+    @staticmethod
+    def _contract_dev_legacy_override_enabled() -> bool:
+        return str(os.getenv("IA_DEV_AGENT_CONTRACT_ALLOW_LEGACY_OVERRIDE", "0") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    def _resolve_agent_contract(
+        self,
+        *,
+        agent_id: str | None = None,
+        domain_code: str | None = None,
+    ) -> dict[str, Any]:
+        record = None
+        if agent_id:
+            record = self.contract_loader.get(agent_id)
+        if record is None and domain_code:
+            record = self.contract_loader.get_by_domain(domain_code)
+        if record is None:
+            return {}
+        return dict(record.payload or {})
+
+    def _set_active_agent_contract(
+        self,
+        *,
+        run_context: RunContext,
+        agent_id: str | None,
+        domain_code: str | None,
+    ) -> dict[str, Any]:
+        payload = self._resolve_agent_contract(agent_id=agent_id, domain_code=domain_code)
+        run_context.metadata["agent_contract"] = dict(payload or {})
+        run_context.metadata["agent_contract_agent_id"] = str(
+            payload.get("agent_id") or agent_id or ""
+        ).strip()
+        run_context.metadata["agent_contract_domain"] = str(
+            payload.get("domain") or domain_code or ""
+        ).strip().lower()
+        return payload
+
+    @staticmethod
+    def _active_agent_contract(run_context: RunContext) -> dict[str, Any]:
+        return dict(run_context.metadata.get("agent_contract") or {})
+
+    @classmethod
+    def _legacy_allowed_for_contract(
+        cls,
+        *,
+        contract_payload: dict[str, Any] | None,
+        response_debug_mode: bool = False,
+    ) -> bool:
+        payload = dict(contract_payload or {})
+        if cls._contract_dev_legacy_override_enabled():
+            return True
+        if response_debug_mode and str(os.getenv("IA_DEV_AGENT_CONTRACT_ALLOW_LEGACY_DEBUG", "0") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            return True
+        return bool(dict(payload.get("fallback_policy") or {}).get("legacy_allowed"))
+
+    @staticmethod
+    def _route_snapshot(route: dict[str, Any] | None) -> dict[str, Any]:
+        route_payload = dict(route or {})
+        return {
+            "selected_capability_id": str(route_payload.get("selected_capability_id") or ""),
+            "reason": str(route_payload.get("reason") or ""),
+            "execute_capability": bool(route_payload.get("execute_capability")),
+            "use_legacy": bool(route_payload.get("use_legacy")),
+            "runtime_authority": str(route_payload.get("runtime_authority") or ""),
+            "planner_was_authority": bool(route_payload.get("planner_was_authority")),
+        }
+
+    @staticmethod
+    def _contract_policy_applied_payload(
+        *,
+        contract_payload: dict[str, Any] | None,
+        memory_policy_applied: bool = True,
+        response_policy_applied: bool = True,
+        fallback_policy_applied: bool = True,
+        observability_policy_applied: bool = True,
+    ) -> dict[str, Any]:
+        payload = dict(contract_payload or {})
+        return {
+            "agent_id": str(payload.get("agent_id") or ""),
+            "domain": str(payload.get("domain") or "").strip().lower(),
+            "fallback_policy": fallback_policy_applied and bool(payload.get("fallback_policy")),
+            "memory_policy": memory_policy_applied and bool(payload.get("memory_policy")),
+            "response_policy": response_policy_applied and bool(payload.get("response_policy")),
+            "observability": observability_policy_applied and bool(payload.get("observability")),
+        }
+
+    def _apply_memory_policy(
+        self,
+        *,
+        memory_hints: dict[str, Any],
+        allowed_domain: str | None,
+        capability_id: str | None,
+        run_context: RunContext | None = None,
+        observability=None,
+    ) -> dict[str, Any]:
+        normalized_domain = normalizar_codigo_dominio(allowed_domain)
+        if not normalized_domain:
+            return dict(memory_hints or {})
+
+        filtered = dict(memory_hints or {})
+        blocked_items: list[dict[str, Any]] = []
+        blocked_keys: list[str] = []
+
+        def remember_blocked(*, source_key: str, payload: Any) -> None:
+            if isinstance(payload, dict):
+                blocked_items.append(copy.deepcopy(payload))
+            blocked_keys.append(source_key)
+
+        def keep_pattern(item: Any, *, source_key: str) -> bool:
+            if not isinstance(item, dict):
+                return True
+            candidate_domain = normalizar_codigo_dominio(
+                item.get("domain_code") or item.get("domain") or item.get("candidate_domain")
+            )
+            candidate_capability = str(item.get("capability_id") or "").strip().lower()
+            capability_domain = dominio_desde_capacidad(candidate_capability)
+            if candidate_domain and candidate_domain != normalized_domain:
+                remember_blocked(source_key=source_key, payload=item)
+                return False
+            if candidate_capability and capability_domain not in {"", normalized_domain, "general"}:
+                remember_blocked(source_key=source_key, payload=item)
+                return False
+            return True
+
+        for key in ("query_patterns", "reasoning_patterns"):
+            if key in filtered:
+                filtered[key] = [
+                    item for item in list(filtered.get(key) or []) if keep_pattern(item, source_key=key)
+                ]
+
+        domain_guarded_keys = {
+            "ausentismo": {
+                "output_mode",
+                "personal_status",
+                "team",
+                "supervisor",
+                "analytics_chart_type",
+                "analytics_top_n",
+                "recurrence_view",
+            },
+            "transporte": {
+                "transport_default_period_label",
+                "transport_output_mode",
+            },
+        }
+        for domain_key, hint_keys in domain_guarded_keys.items():
+            if domain_key == normalized_domain:
+                continue
+            for hint_key in hint_keys:
+                if hint_key in filtered:
+                    remember_blocked(source_key=hint_key, payload={"hint_key": hint_key, "hint_value": filtered.get(hint_key)})
+                    filtered.pop(hint_key, None)
+
+        filtered["cross_domain_memory_blocked_for"] = normalized_domain
+        if blocked_items or blocked_keys:
+            filtered["debug_blocked_cross_domain_hints"] = blocked_items
+            filtered["debug_blocked_cross_domain_hint_keys"] = sorted(set(blocked_keys))
+
+        if run_context is not None:
+            memory_meta = run_context.metadata.setdefault("memory_context", {})
+            if isinstance(memory_meta, dict):
+                memory_meta["policy_allowed_domain"] = normalized_domain
+                memory_meta["policy_allowed_capability_id"] = str(capability_id or "")
+                memory_meta["policy_blocked_hints"] = copy.deepcopy(blocked_items)
+                memory_meta["memory_policy_applied"] = True
+            self._record_event(
+                observability=observability,
+                event_type="memory_policy_applied",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "allowed_domain": normalized_domain,
+                    "capability_id": str(capability_id or ""),
+                    "blocked_count": len(blocked_items),
+                    "blocked_keys": sorted(set(blocked_keys)),
+                },
+                only_if=True,
+            )
+
+        return filtered
+
+    @staticmethod
+    def _planner_block_reason_to_business_text(block_reason: str) -> str:
+        raw = str(block_reason or "").strip()
+        normalized = raw.lower()
+        if normalized.startswith("missing_table:"):
+            _, _, table_name = raw.partition(":")
+            return f"No puedo responder esta consulta porque la tabla auditada {table_name or 'requerida'} no esta disponible."
+        if normalized.startswith("missing_columns:"):
+            _, _, remainder = raw.partition(":")
+            table_name, _, columns = remainder.partition(":")
+            column_labels = ", ".join([item for item in columns.split(",") if item]) or "campos requeridos"
+            return (
+                f"No puedo calcular esta consulta porque faltan columnas auditadas en {table_name or 'la tabla requerida'}: "
+                f"{column_labels}."
+            )
+        if normalized == "legacy_disallowed_by_contract":
+            return "No puedo usar una ruta no auditada para este dominio porque el contrato del agente la bloquea."
+        if normalized == "policy_forced_legacy_fallback":
+            return "La solicitud fue entendida, pero la ruta productiva y auditada para responderla aun no esta habilitada."
+        if normalized in {"semantic_orchestrator_clarification_required", "intent_arbitration_clarification_required"}:
+            return "Necesito una aclaracion breve para responder con seguridad."
+        if normalized.startswith("unsupported_capability_domain:"):
+            return "La solicitud fue entendida, pero esa ruta operativa todavia no tiene ejecucion productiva habilitada."
+        if normalized in {"unsafe_sql_plan", "runtime_only_fallback"}:
+            return "No puedo ejecutar esta consulta con seguridad todavia. Falta completar la trazabilidad de datos requerida para responderla sin riesgo."
+        if normalized.startswith("chat_application_service_exception:"):
+            return "No pude completar esta consulta con la ruta auditada disponible para este dominio."
+        if normalized in {"route_use_legacy", "query_execution_planner_selected_fallback", "capability_handler_failed"}:
+            return "No pude resolver esta solicitud con una ruta auditada y trazable del dominio."
+        return raw or "No pude resolver esta solicitud con una ruta auditada del dominio."
+
+    def build_controlled_runtime_limitation_response(
+        self,
+        *,
+        message: str,
+        session_id: str | None,
+        classification: dict[str, Any] | None = None,
+        run_context: RunContext | None = None,
+        block_reason: str,
+        response_debug_mode: bool = False,
+    ) -> dict[str, Any]:
+        context = run_context or RunContext.create(
+            message=message,
+            session_id=session_id,
+            reset_memory=False,
+        )
+        resolved = dict(classification or {})
+        domain_code = str(
+            resolved.get("domain")
+            or context.metadata.get("agent_contract_domain")
+            or "general"
+        ).strip().lower()
+        agent_id = str(
+            context.metadata.get("agent_contract_agent_id")
+            or resolved.get("selected_agent")
+            or agente_desde_dominio(domain_code, fallback="analista_agent")
+        ).strip()
+        contract_payload = self._resolve_agent_contract(agent_id=agent_id, domain_code=domain_code)
+        business_block_reason = self._planner_block_reason_to_business_text(block_reason)
+        reply = business_block_reason
+        payload = ensure_chat_response_contract(
+            {
+                "session_id": str(context.session_id or session_id or ""),
+                "reply": reply,
+                "orchestrator": {
+                    "intent": str(resolved.get("intent") or "controlled_runtime_limitation"),
+                    "domain": domain_code,
+                    "selected_agent": agent_id,
+                    "classifier_source": str(resolved.get("classifier_source") or "agent_contract"),
+                    "needs_database": bool(resolved.get("needs_database", True)),
+                    "output_mode": str(resolved.get("output_mode") or "summary"),
+                    "used_tools": [],
+                    "runtime_flow": "controlled_runtime_limitation",
+                },
+                "data": {
+                    "kpis": {},
+                    "series": [],
+                    "labels": [],
+                    "insights": [business_block_reason],
+                    "table": {"columns": [], "rows": [], "rowcount": 0},
+                },
+                "trace": [],
+            }
+        )
+        runtime_meta = {
+            "ok": True,
+            "flow": "controlled_runtime_limitation",
+            "route": {
+                "selected_capability_id": "",
+                "reason": "controlled_runtime_limitation",
+                "execute_capability": False,
+                "use_legacy": False,
+                "runtime_authority": "agent_contract",
+                "planner_was_authority": False,
+            },
+            "execute": False,
+            "legacy_used": False,
+            "fallback_used": {
+                "used": True,
+                "reason": str(block_reason or ""),
+                "flow": "controlled_runtime_limitation",
+            },
+            "planner_called": False,
+            "block_reason": business_block_reason,
+            "block_reason_code": str(block_reason or ""),
+            "contract_policy_applied": self._contract_policy_applied_payload(contract_payload=contract_payload),
+            "agent_id": agent_id,
+            "domain": domain_code,
+            "intent": str(resolved.get("intent") or "controlled_runtime_limitation"),
+            "capability": "",
+            "response_mode": "debug" if response_debug_mode else "user",
+            "legacy_runtime_fallback_used": False,
+        }
+        data_sources = dict(payload.get("data_sources") or {})
+        data_sources["runtime"] = runtime_meta
+        payload["data_sources"] = data_sources
+        payload["response_envelope"] = {
+            "mode": "debug" if response_debug_mode else "user",
+            "progress_source": "backend",
+            "route": dict(runtime_meta.get("route") or {}),
+            "fallback_used": dict(runtime_meta.get("fallback_used") or {}),
+            "legacy_used": False,
+            "contract_policy_applied": dict(runtime_meta.get("contract_policy_applied") or {}),
+            "needs_clarification": False,
+            "block_reason": business_block_reason,
+        }
+        if response_debug_mode:
+            payload["trace"] = [
+                {
+                    "phase": "controlled_runtime_limitation",
+                    "status": "blocked",
+                    "detail": {
+                        "block_reason_code": str(block_reason or ""),
+                        "message_preview": str(message or "")[:200],
+                    },
+                }
+            ]
+        return payload
+
+    def _apply_response_policy(
+        self,
+        *,
+        response: dict[str, Any],
+        run_context: RunContext,
+        route: dict[str, Any] | None,
+        execution_meta: dict[str, Any] | None,
+        response_flow: str,
+        response_debug_mode: bool,
+    ) -> dict[str, Any]:
+        payload = ensure_chat_response_contract(response)
+        contract_payload = self._active_agent_contract(run_context)
+        runtime = dict((payload.get("data_sources") or {}).get("runtime") or {})
+        fallback_meta = dict(runtime.get("fallback_used") or {})
+        block_reason = str(runtime.get("block_reason") or "")
+        envelope = {
+            "mode": "debug" if response_debug_mode else "user",
+            "progress_source": "backend",
+            "route": self._route_snapshot(route),
+            "fallback_used": {
+                "used": bool(fallback_meta.get("used")),
+                "reason": str(fallback_meta.get("reason") or ""),
+                "flow": str(fallback_meta.get("flow") or response_flow or ""),
+            },
+            "legacy_used": bool(runtime.get("legacy_used")),
+            "contract_policy_applied": self._contract_policy_applied_payload(contract_payload=contract_payload),
+            "needs_clarification": bool(
+                ((payload.get("reasoning") or {}).get("needs_clarification"))
+                or ((run_context.metadata.get("satisfaction_review") or {}).get("needs_clarification"))
+            ),
+            "block_reason": block_reason,
+        }
+        payload["response_envelope"] = envelope
+        if response_debug_mode:
+            return payload
+
+        forbidden_terms = {
+            token.lower()
+            for token in self._USER_MODE_RESPONSE_FORBIDDEN_TERMS
+        }
+        forbidden_terms.update(
+            {
+                str(item or "").strip().lower()
+                for item in list(dict(contract_payload.get("response_policy") or {}).get("forbidden_terms") or [])
+                if str(item or "").strip()
+            }
+        )
+
+        def sanitize_text(value: Any) -> Any:
+            if not isinstance(value, str):
+                return value
+            cleaned = value
+            for token in forbidden_terms:
+                if token and token in cleaned.lower():
+                    return ""
+            return cleaned
+
+        fallback_reason_code = str(
+            runtime.get("block_reason_code")
+            or fallback_meta.get("reason")
+            or block_reason
+            or ""
+        )
+        safe_fallback_reply = self._planner_block_reason_to_business_text(
+            fallback_reason_code or block_reason
+        )
+        payload["reply"] = sanitize_text(payload.get("reply")) or sanitize_text(safe_fallback_reply) or (
+            "No pude completar la consulta con la ruta auditada disponible."
+        )
+        data = dict(payload.get("data") or {})
+        data["insights"] = [
+            text
+            for text in (sanitize_text(item) for item in list(data.get("insights") or []))
+            if str(text or "").strip()
+        ]
+        payload["data"] = data
+        payload["actions"] = [
+            item
+            for item in list(payload.get("actions") or [])
+            if not any(
+                token in str((item or {}).get("label") or "").strip().lower()
+                for token in forbidden_terms
+            )
+        ]
+        payload["trace"] = []
+        runtime["response_mode"] = "user"
+        runtime["response_policy_applied"] = True
+        payload.setdefault("data_sources", {})
+        payload["data_sources"]["runtime"] = runtime
+        return payload
 
     def run(
         self,
@@ -133,6 +583,7 @@ class ChatApplicationService:
         legacy_runner: Callable[..., dict[str, Any]],
         observability=None,
         actor_user_key: str | None = None,
+        response_debug_mode: bool = False,
     ) -> dict[str, Any]:
         run_context = RunContext.create(
             message=message,
@@ -157,6 +608,11 @@ class ChatApplicationService:
             message=message,
             session_context=session_context,
         )
+        self._set_active_agent_contract(
+            run_context=run_context,
+            agent_id=str(pre_classification.get("selected_agent") or "") or None,
+            domain_code=str(pre_classification.get("domain") or "") or None,
+        )
         self.reasoning_ledger_service.record_progress(
             run_context=run_context,
             stage="bootstrap",
@@ -178,6 +634,13 @@ class ChatApplicationService:
             observability=observability,
         )
         pre_query_memory_hints = self._extract_memory_hints(pre_query_memory_context)
+        pre_query_memory_hints = self._apply_memory_policy(
+            memory_hints=pre_query_memory_hints,
+            allowed_domain=str(pre_classification.get("domain") or "") or None,
+            capability_id=None,
+            run_context=run_context,
+            observability=observability,
+        )
         pre_query_workflow_hints = self._load_workflow_hints(user_key=user_key)
         self.reasoning_ledger_service.attach_memory_hints(
             run_context=run_context,
@@ -275,6 +738,15 @@ class ChatApplicationService:
             observability=observability,
         )
         memory_hints = self._extract_memory_hints(pre_memory_context)
+        memory_hints = self._apply_memory_policy(
+            memory_hints=memory_hints,
+            allowed_domain=self._domain_code_from_capability(bootstrap_plan)
+            or str(pre_classification.get("domain") or "")
+            or None,
+            capability_id=str(bootstrap_plan.get("capability_id") or "") or None,
+            run_context=run_context,
+            observability=observability,
+        )
         workflow_hints = self._load_workflow_hints(user_key=user_key)
         run_context.metadata["memory_context"] = {
             "user_key": user_key,
@@ -530,6 +1002,7 @@ class ChatApplicationService:
             query_intelligence=query_intelligence,
             execution_meta=execution_meta,
         )
+        run_context.metadata["runtime_route"] = dict(route or {})
         response_flow = self._resolve_runtime_response_flow(
             query_intelligence=query_intelligence,
             route=route,
@@ -537,6 +1010,13 @@ class ChatApplicationService:
             execution_meta=execution_meta,
         )
         classification = self._extract_classification(primary_response)
+        self._set_active_agent_contract(
+            run_context=run_context,
+            agent_id=str(classification.get("selected_agent") or pre_classification.get("selected_agent") or "") or None,
+            domain_code=self._domain_code_from_capability(planned_capability)
+            or str(classification.get("domain") or pre_classification.get("domain") or "")
+            or None,
+        )
 
         divergence = {"diverged": False, "reason": "legacy_capability_routing_pruned"}
 
@@ -555,6 +1035,15 @@ class ChatApplicationService:
             "capability_id": planned_capability.get("capability_id"),
         }
         resolved_memory_hints = self._extract_memory_hints(resolved_memory_context)
+        resolved_memory_hints = self._apply_memory_policy(
+            memory_hints=resolved_memory_hints,
+            allowed_domain=self._domain_code_from_capability(planned_capability)
+            or str(classification.get("domain") or "")
+            or None,
+            capability_id=str(planned_capability.get("capability_id") or "") or None,
+            run_context=run_context,
+            observability=observability,
+        )
         run_context.metadata["memory_context"]["resolved_hints"] = resolved_memory_hints
         self.reasoning_ledger_service.attach_memory_hints(
             run_context=run_context,
@@ -751,10 +1240,22 @@ class ChatApplicationService:
             divergence=divergence,
             memory_effects=memory_effects,
         )
-        return self._attach_runtime_metadata(
+        final_response = self._attach_runtime_metadata(
             response=assembled,
             run_context=run_context,
             response_flow=response_flow,
+        )
+        final_response = self.business_response_composer_service.compose(
+            response=final_response,
+            semantic_orchestrator=dict(run_context.metadata.get("semantic_orchestrator") or {}),
+        )
+        return self._apply_response_policy(
+            response=final_response,
+            run_context=run_context,
+            route=route,
+            execution_meta=execution_meta,
+            response_flow=response_flow,
+            response_debug_mode=response_debug_mode,
         )
 
     def _resolve_query_intelligence(
@@ -778,14 +1279,48 @@ class ChatApplicationService:
             classification_for_qi = dict(base_classification or {})
             memory_hints = dict(((run_context.metadata.get("memory_context") or {}).get("hints") or {}))
             domain_code = str(classification_for_qi.get("domain") or "").strip().lower()
+            inventory_pre_router = self._inventory_stock_pre_router_match(message)
+            if inventory_pre_router:
+                domain_code = "inventario_logistica"
+                classification_for_qi.update(
+                    {
+                        "intent": "stock_balance",
+                        "domain": "inventario_logistica",
+                        "selected_agent": "inventario_logistica_agent",
+                        "classifier_source": "inventory_stock_pre_router",
+                        "needs_database": True,
+                        "output_mode": "summary",
+                        "needs_personal_join": False,
+                    }
+                )
+                if self._has_strong_inventory_terms(message):
+                    memory_hints = self._filter_cross_domain_memory_hints(
+                        memory_hints=memory_hints,
+                        allowed_domain="inventario_logistica",
+                    )
+                self._record_event(
+                    observability=observability,
+                    event_type="pre_router_match",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        **dict(inventory_pre_router or {}),
+                        "memory_cross_domain_blocked": True,
+                    },
+                    only_if=True,
+                )
             rescued_domain = self._rescue_query_domain(
                 message=message,
                 domain_code=domain_code,
             )
             if rescued_domain and rescued_domain != domain_code:
                 classification_for_qi["domain"] = rescued_domain
-                classification_for_qi["intent"] = "empleados_query"
-                classification_for_qi["selected_agent"] = "empleados_agent"
+                classification_for_qi["intent"] = f"{rescued_domain}_query"
+                classification_for_qi["selected_agent"] = agente_desde_dominio(
+                    rescued_domain,
+                    fallback="analista_agent",
+                )
                 classification_for_qi["needs_database"] = True
                 domain_code = rescued_domain
                 self._record_event(
@@ -797,13 +1332,50 @@ class ChatApplicationService:
                         "trace_id": run_context.trace_id,
                         "from_domain": str(base_classification.get("domain") or ""),
                         "to_domain": rescued_domain,
-                        "reason": "rrhh_signals_detected",
+                        "reason": f"{rescued_domain}_signals_detected",
                     },
                     only_if=True,
                 )
+            allowed_memory_domain = str(classification_for_qi.get("domain") or domain_code or "").strip().lower()
+            if allowed_memory_domain:
+                memory_hints = self._apply_memory_policy(
+                    memory_hints=memory_hints,
+                    allowed_domain=allowed_memory_domain,
+                    capability_id=None,
+                    run_context=run_context,
+                    observability=observability,
+                )
+            self._record_event(
+                observability=observability,
+                event_type="semantic_context_loading",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "domain_code": domain_code or "general",
+                    "message_preview": message[:120],
+                    "next_phase": "semantic_business_context",
+                },
+                only_if=True,
+            )
             semantic_context = self.semantic_business_resolver.build_semantic_context(
                 domain_code=domain_code,
                 include_dictionary=True,
+            )
+            self._record_event(
+                observability=observability,
+                event_type="semantic_context_loaded",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "domain_code": domain_code or "general",
+                    "tables_count": len(list(semantic_context.get("tables") or [])),
+                    "fields_count": len(list((semantic_context.get("dictionary") or {}).get("fields") or [])),
+                    "supports_sql_assisted": bool(semantic_context.get("supports_sql_assisted")),
+                    "next_phase": "query_patterns",
+                },
+                only_if=True,
             )
             query_pattern_ranking = self._rank_query_patterns(memory_hints=memory_hints)
             if query_pattern_ranking:
@@ -868,14 +1440,31 @@ class ChatApplicationService:
                 max_candidates=4,
             )
 
-            fastpath_intent = self.query_intent_resolver.match_query_pattern(
+            fastpath_intent = self._build_inventory_pre_router_intent(
                 message=message,
-                base_classification=classification_for_qi,
-                semantic_context=semantic_context,
-                memory_hints=memory_hints,
+                pre_router=inventory_pre_router,
             )
+            if fastpath_intent is None:
+                fastpath_intent = self.query_intent_resolver.match_query_pattern(
+                    message=message,
+                    base_classification=classification_for_qi,
+                    semantic_context=semantic_context,
+                    memory_hints=memory_hints,
+                )
             if not isinstance(fastpath_intent, StructuredQueryIntent):
                 fastpath_intent = None
+            if inventory_pre_router:
+                self._record_event(
+                    observability=observability,
+                    event_type="inventory_pattern_match",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        **dict(inventory_pre_router or {}),
+                    },
+                    only_if=True,
+                )
             canonical_resolution_enabled = self._canonical_resolution_enabled()
             canonical_resolution_shadow_enabled = self._canonical_resolution_shadow_enabled()
             should_compute_semantic_normalization = bool(
@@ -886,6 +1475,20 @@ class ChatApplicationService:
             )
 
             if should_compute_semantic_normalization:
+                self._record_event(
+                    observability=observability,
+                    event_type="semantic_normalization_started",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        "domain_code": domain_code or "general",
+                        "active": semantic_normalization_enabled,
+                        "shadow": semantic_normalization_shadow_enabled and not semantic_normalization_enabled,
+                        "next_phase": "canonical_resolution",
+                    },
+                    only_if=True,
+                )
                 semantic_normalization_output = self.semantic_normalization_service.normalize(
                     raw_query=message,
                     semantic_context=semantic_context,
@@ -982,6 +1585,19 @@ class ChatApplicationService:
                     only_if=True,
                 )
             else:
+                self._record_event(
+                    observability=observability,
+                    event_type="query_intent_resolution_started",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        "domain_code": domain_code or "general",
+                        "candidate_patterns": int(len(list(memory_hints.get("query_patterns") or []))),
+                        "next_phase": "intent_resolver",
+                    },
+                    only_if=True,
+                )
                 intent = self.query_intent_resolver.resolve(
                     message=message,
                     base_classification=classification_for_qi,
@@ -1059,6 +1675,50 @@ class ChatApplicationService:
                 intent=intent,
             )
             run_context.metadata["intent_arbitration"] = dict(intent_arbitration or {})
+            semantic_orchestrator = self.semantic_orchestrator_service.orchestrate(
+                user_message=message,
+                candidate_domain=str(
+                    intent_arbitration.get("final_domain")
+                    or classification_for_qi.get("domain")
+                    or intent.domain_code
+                    or domain_code
+                    or ""
+                ),
+                candidate_agent=str(
+                    classification_for_qi.get("selected_agent")
+                    or agente_desde_dominio(
+                        str(intent_arbitration.get("final_domain") or intent.domain_code or domain_code or ""),
+                        fallback="analista_agent",
+                    )
+                    or ""
+                ),
+                agent_contract=self._resolve_agent_contract(
+                    agent_id=str(classification_for_qi.get("selected_agent") or "") or None,
+                    domain_code=str(
+                        intent_arbitration.get("final_domain")
+                        or classification_for_qi.get("domain")
+                        or intent.domain_code
+                        or domain_code
+                        or ""
+                    ),
+                ),
+                ai_dictionary_summary=self._build_semantic_orchestrator_dictionary_summary(
+                    semantic_context=semantic_context,
+                ),
+                domain_semantic_summary=self._build_semantic_orchestrator_domain_summary(
+                    semantic_context=semantic_context,
+                ),
+                memory_context=self._build_semantic_orchestrator_memory_context(
+                    memory_hints=memory_hints,
+                ),
+                route_debug_hints={
+                    "pre_router": dict(inventory_pre_router or {}),
+                    "classification": dict(classification_for_qi or {}),
+                    "semantic_normalization": dict(semantic_normalization_payload or {}),
+                    "canonical_resolution": dict(canonical_resolution_payload or {}),
+                },
+            )
+            run_context.metadata["semantic_orchestrator"] = dict(semantic_orchestrator or {})
             self._record_event(
                 observability=observability,
                 event_type="intent_arbitration_resolved",
@@ -1077,6 +1737,22 @@ class ChatApplicationService:
                     "sql_assisted_selected_by_arbitration": bool(
                         intent_arbitration.get("sql_assisted_selected_by_arbitration")
                     ),
+                },
+                only_if=True,
+            )
+            self._record_event(
+                observability=observability,
+                event_type="semantic_orchestrator_resolved",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "domain": str(semantic_orchestrator.get("domain") or ""),
+                    "intent": str(semantic_orchestrator.get("intent") or ""),
+                    "capability": str(semantic_orchestrator.get("capability") or ""),
+                    "recommended_route": str(semantic_orchestrator.get("recommended_route") or ""),
+                    "needs_clarification": bool(semantic_orchestrator.get("needs_clarification")),
+                    "confidence": float(semantic_orchestrator.get("confidence") or 0.0),
                 },
                 only_if=True,
             )
@@ -1121,16 +1797,106 @@ class ChatApplicationService:
                 },
                 only_if=bool(semantic_normalization_enabled or semantic_normalization_shadow_enabled),
             )
+            self._record_event(
+                observability=observability,
+                event_type="query_resolution_started",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "domain_code": str(intent.domain_code or ""),
+                    "operation": str(intent.operation or ""),
+                    "template_id": str(intent.template_id or ""),
+                    "next_phase": "semantic_business_resolver",
+                },
+                only_if=True,
+            )
             resolved_query = self.semantic_business_resolver.resolve_query(
                 message=message,
                 intent=intent,
                 base_classification=classification_for_qi,
                 semantic_context_override=semantic_context if context_builder_enabled else None,
             )
+            if inventory_pre_router:
+                self._record_event(
+                    observability=observability,
+                    event_type="extracted_filters",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        "domain_code": str(resolved_query.intent.domain_code or ""),
+                        "intent": str((inventory_pre_router or {}).get("intent") or ""),
+                        "filters": dict(resolved_query.normalized_filters or {}),
+                        "scope": str((inventory_pre_router or {}).get("scope") or ""),
+                    },
+                    only_if=True,
+                )
+            self._record_event(
+                observability=observability,
+                event_type="execution_plan_started",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "domain_code": str(resolved_query.intent.domain_code or ""),
+                    "operation": str(resolved_query.intent.operation or ""),
+                    "candidate_tables": len(list((resolved_query.semantic_context or {}).get("tables") or [])),
+                    "next_phase": "query_execution_planner",
+                },
+                only_if=True,
+            )
             execution_plan = self.query_execution_planner.plan(
                 run_context=run_context,
                 resolved_query=resolved_query,
             )
+            if inventory_pre_router:
+                self._record_event(
+                    observability=observability,
+                    event_type="planner_called",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        "domain_code": str(resolved_query.intent.domain_code or ""),
+                        "template_id": str(resolved_query.intent.template_id or ""),
+                        "strategy": str(execution_plan.strategy or ""),
+                        "reason": str(execution_plan.reason or ""),
+                    },
+                    only_if=True,
+                )
+                self._record_event(
+                    observability=observability,
+                    event_type="selected_capability",
+                    source="ChatApplicationService",
+                    meta={
+                        "run_id": run_context.run_id,
+                        "trace_id": run_context.trace_id,
+                        "capability_id": str(execution_plan.capability_id or ""),
+                        "strategy": str(execution_plan.strategy or ""),
+                    },
+                    only_if=True,
+                )
+                planner_block_reason = str(
+                    (execution_plan.metadata or {}).get("planner_block_reason_specific")
+                    or (execution_plan.metadata or {}).get("fallback_reason")
+                    or ""
+                ).strip()
+                if planner_block_reason:
+                    self._record_event(
+                        observability=observability,
+                        event_type="planner_block_reason_specific",
+                        source="ChatApplicationService",
+                        meta={
+                            "run_id": run_context.run_id,
+                            "trace_id": run_context.trace_id,
+                            "reason": planner_block_reason,
+                            "table": str((execution_plan.metadata or {}).get("table") or ""),
+                            "missing_columns": list((execution_plan.metadata or {}).get("missing_columns") or []),
+                            "capability_blocked": str((execution_plan.metadata or {}).get("capability_blocked") or execution_plan.capability_id or ""),
+                        },
+                        only_if=True,
+                    )
             execution_plan = self._apply_intent_arbitration_to_execution_plan(
                 execution_plan=execution_plan,
                 arbitration=intent_arbitration,
@@ -1164,7 +1930,21 @@ class ChatApplicationService:
             )
             precomputed_response: dict[str, Any] = {}
             execution_result: dict[str, Any] | None = None
-            if bool(intent_arbitration.get("should_fallback")) and str(
+            planner_has_authoritative_sql = bool(
+                execution_plan.strategy == "sql_assisted"
+                and str(execution_plan.sql_query or "").strip()
+                and not bool(execution_plan.requires_context)
+                and bool(dict(execution_plan.policy or {}).get("allowed", True))
+                and not bool(dict(execution_plan.metadata or {}).get("blocked_legacy_fallback"))
+            )
+            if bool(semantic_orchestrator.get("needs_clarification")) and not planner_has_authoritative_sql and str(
+                semantic_orchestrator.get("clarification_question") or ""
+            ).strip():
+                precomputed_response = self._build_semantic_orchestrator_clarification_response(
+                    run_context=run_context,
+                    semantic_orchestrator=semantic_orchestrator,
+                )
+            elif bool(intent_arbitration.get("should_fallback")) and not planner_has_authoritative_sql and str(
                 intent_arbitration.get("required_clarification") or ""
             ).strip():
                 precomputed_response = self._build_intent_arbitration_clarification_response(
@@ -1177,7 +1957,11 @@ class ChatApplicationService:
                         "ok": True,
                         "response": precomputed_response,
                         "used_legacy": False,
-                        "fallback_reason": "intent_arbitration_clarification_required",
+                        "fallback_reason": (
+                            "semantic_orchestrator_clarification_required"
+                            if bool(semantic_orchestrator.get("needs_clarification"))
+                            else "intent_arbitration_clarification_required"
+                        ),
                     }
                 elif execution_plan.strategy == "ask_context":
                     precomputed_response = self.query_execution_planner.build_missing_context_response(
@@ -1186,6 +1970,20 @@ class ChatApplicationService:
                         execution_plan=execution_plan,
                     )
                 elif execution_plan.strategy == "sql_assisted":
+                    self._record_event(
+                        observability=observability,
+                        event_type="query_sql_assisted_started",
+                        source="ChatApplicationService",
+                        meta={
+                            "run_id": run_context.run_id,
+                            "trace_id": run_context.trace_id,
+                            "domain_code": str(resolved_query.intent.domain_code or ""),
+                            "strategy": execution_plan.strategy,
+                            "reason": str(execution_plan.reason or ""),
+                            "next_phase": "sql_execution",
+                        },
+                        only_if=True,
+                    )
                     execution_result = self.query_execution_planner.execute_sql_assisted(
                         run_context=run_context,
                         resolved_query=resolved_query,
@@ -1218,6 +2016,18 @@ class ChatApplicationService:
                                     ),
                                 }
                             )
+                            if self._is_valid_empty_inventory_sql_response(
+                                resolved_query=resolved_query,
+                                execution_plan=execution_plan,
+                                response=candidate_response,
+                            ):
+                                execution_result.update(
+                                    {
+                                        "satisfied": True,
+                                        "satisfaction_reason": "empty_inventory_result_is_actionable",
+                                    }
+                                )
+                                precomputed_response = candidate_response
                     if not precomputed_response:
                         fallback_meta = self._build_runtime_only_sql_failure_meta(
                             execution_plan=execution_plan,
@@ -1283,6 +2093,7 @@ class ChatApplicationService:
                 "semantic_normalization": dict(run_context.metadata.get("semantic_normalization") or {}),
                 "canonical_resolution": dict(run_context.metadata.get("canonical_resolution") or {}),
                 "intent_arbitration": dict(intent_arbitration or {}),
+                "semantic_orchestrator": dict(semantic_orchestrator or {}),
                 "query_pattern_fastpath": {
                     "hit": bool(fastpath_intent is not None),
                     "openai_avoided": bool(fastpath_intent is not None),
@@ -2048,6 +2859,20 @@ class ChatApplicationService:
             == "certificado_alturas_vigencia"
         ):
             payload["should_fallback"] = False
+        inventory_filters = dict((execution_plan.constraints or {}).get("filters") or {})
+        inventory_policy = dict(execution_plan.policy or {})
+        critical_inventory_request = (
+            str(execution_plan.domain_code or "").strip().lower() == "inventario_logistica"
+            and str(inventory_filters.get("stock_actual") or "").strip().upper() == "<CRITICO>"
+        )
+        if (
+            execution_plan.strategy == "sql_assisted"
+            and str(execution_plan.domain_code or "").strip().lower() == "inventario_logistica"
+            and str(execution_plan.sql_query or "").strip()
+            and bool(inventory_policy.get("allowed", True))
+            and not critical_inventory_request
+        ):
+            payload["should_fallback"] = False
         if final_intent == "knowledge_change_request":
             return QueryExecutionPlan(
                 strategy="fallback",
@@ -2088,6 +2913,24 @@ class ChatApplicationService:
         )
 
     @staticmethod
+    def _is_valid_empty_inventory_sql_response(
+        *,
+        resolved_query: ResolvedQuerySpec,
+        execution_plan: QueryExecutionPlan,
+        response: dict[str, Any],
+    ) -> bool:
+        if str(resolved_query.intent.domain_code or "").strip().lower() != "inventario_logistica":
+            return False
+        if str(execution_plan.strategy or "").strip().lower() != "sql_assisted":
+            return False
+        if not str(execution_plan.sql_query or "").strip():
+            return False
+        if not bool(dict(execution_plan.policy or {}).get("allowed", True)):
+            return False
+        table = dict((dict(response.get("data") or {}).get("table") or {}))
+        return int(table.get("rowcount") or 0) == 0
+
+    @staticmethod
     def _build_intent_arbitration_clarification_response(
         *,
         run_context: RunContext,
@@ -2098,6 +2941,12 @@ class ChatApplicationService:
             payload.get("required_clarification")
             or "Aclara la intencion antes de ejecutar la solicitud."
         ).strip()
+        normalized_message = ChatApplicationService._normalize_text(run_context.message)
+        if re.search(r"\bmateriales\s+criticos\b", normalized_message):
+            clarification = (
+                "Para materiales criticos necesito el criterio exacto: stock minimo, saldo negativo, "
+                "rotacion, proveedor o un umbral operativo. Tambien confirma la bodega o unidad operativa."
+            )
         return {
             "reply": clarification,
             "session_id": str(run_context.session_id or ""),
@@ -2113,6 +2962,98 @@ class ChatApplicationService:
                 "classifier_source": "intent_arbitration_clarification",
                 "intent": "general_question",
                 "domain": "general",
+            },
+        }
+
+    @staticmethod
+    def _build_semantic_orchestrator_dictionary_summary(
+        *,
+        semantic_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        dictionary = dict(semantic_context.get("dictionary") or {})
+        return {
+            "table_names": [
+                str(item)
+                for item in list(semantic_context.get("allowed_tables") or [])
+                if str(item).strip()
+            ],
+            "column_names": [
+                str(item)
+                for item in list(semantic_context.get("allowed_columns") or [])
+                if str(item).strip()
+            ],
+            "joins": [
+                {
+                    "from_table": str(item.get("from_table") or ""),
+                    "to_table": str(item.get("to_table") or ""),
+                    "join_sql": str(item.get("join_sql") or ""),
+                }
+                for item in list(dictionary.get("relations") or [])
+                if isinstance(item, dict)
+            ],
+        }
+
+    @staticmethod
+    def _build_semantic_orchestrator_domain_summary(
+        *,
+        semantic_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "domain_code": str(semantic_context.get("domain_code") or ""),
+            "supports_sql_assisted": bool(semantic_context.get("supports_sql_assisted")),
+            "business_rules": [
+                str(item)
+                for item in list(semantic_context.get("reglas_negocio") or [])
+                if str(item).strip()
+            ][:8],
+            "query_hints": dict(semantic_context.get("query_hints") or {}),
+            "inventory_semantic_blueprint": dict(
+                semantic_context.get("inventory_semantic_blueprint") or {}
+            ),
+            "source_of_truth": dict(semantic_context.get("source_of_truth") or {}),
+        }
+
+    @staticmethod
+    def _build_semantic_orchestrator_memory_context(
+        *,
+        memory_hints: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "query_patterns": [
+                dict(item)
+                for item in list(memory_hints.get("query_patterns") or [])[:5]
+                if isinstance(item, dict)
+            ],
+            "last_domain": str(memory_hints.get("last_domain") or ""),
+            "last_capability": str(memory_hints.get("last_capability") or ""),
+        }
+
+    @staticmethod
+    def _build_semantic_orchestrator_clarification_response(
+        *,
+        run_context: RunContext,
+        semantic_orchestrator: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = dict(semantic_orchestrator or {})
+        clarification = str(
+            payload.get("clarification_question")
+            or "Necesito una aclaración breve antes de continuar."
+        ).strip()
+        return {
+            "reply": clarification,
+            "session_id": str(run_context.session_id or ""),
+            "payload": {
+                "kpis": {},
+                "series": [],
+                "labels": [],
+                "insights": [str(payload.get("reasoning_summary") or clarification)],
+                "table": {"columns": [], "rows": [], "rowcount": 0},
+            },
+            "orchestrator": {
+                "runtime_flow": "semantic_orchestrator_clarification",
+                "classifier_source": "semantic_orchestrator",
+                "intent": str(payload.get("intent") or ""),
+                "domain": str(payload.get("domain") or ""),
             },
         }
 
@@ -2492,19 +3433,214 @@ class ChatApplicationService:
         }
 
     @staticmethod
+    def _inventory_stock_pre_router_match(message: str) -> dict[str, Any]:
+        normalized = ChatApplicationService._normalize_text(message)
+        if not normalized:
+            return {}
+        warehouse = re.search(r"\bsaldo\s+(?:de\s+)?bodega\s+([a-z0-9_-]{2,})\b", normalized)
+        if not warehouse:
+            warehouse = re.search(r"\bstock\s+(?:de\s+)?bodega\s+([a-z0-9_-]{2,})\b", normalized)
+        if not warehouse:
+            warehouse = re.search(r"\bcuanto\s+tengo\s+en\s+([a-z0-9_-]{2,})\b", normalized)
+        if warehouse:
+            value = str(warehouse.group(1) or "").strip()
+            return {
+                "matched": True,
+                "pattern": "stock_balance_by_warehouse",
+                "domain": "inventario_logistica",
+                "intent": "stock_balance",
+                "scope": "bodega",
+                "filters": {"bodega": value},
+                "capability": "inventory_stock_balance_by_warehouse",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        mobile = re.search(
+            r"\bsaldo\s+(?:empleado|tecnico|movil|mobile|cedula)\s+([0-9]{5,15})\b",
+            normalized,
+        )
+        if not mobile:
+            mobile = re.search(
+                r"\binventario\s+de\s+la\s+(?:cuadrilla|brigada|movil)\s+([0-9]{5,15})\b",
+                normalized,
+            )
+        if mobile:
+            value = str(mobile.group(1) or "").strip()
+            return {
+                "matched": True,
+                "pattern": "stock_balance_by_mobile",
+                "domain": "inventario_logistica",
+                "intent": "stock_balance",
+                "scope": "movil",
+                "filters": {"cedula": value},
+                "capability": "inventory_stock_balance_by_mobile",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        kardex = re.search(r"\bkardex\s+del?\s+codigo\s+([a-z0-9_-]{2,})\b", normalized)
+        if kardex:
+            value = str(kardex.group(1) or "").strip()
+            return {
+                "matched": True,
+                "pattern": "kardex_by_code",
+                "domain": "inventario_logistica",
+                "intent": "movement_history",
+                "operation": "trace",
+                "scope": "codigo",
+                "filters": {"codigo": value},
+                "capability": "inventory_kardex_consolidated",
+                "template_id": "inventory_kardex_consolidated",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        if re.search(r"\bequipos?\s+en\s+garantia\b", normalized):
+            return {
+                "matched": True,
+                "pattern": "equipment_in_warranty",
+                "domain": "inventario_logistica",
+                "intent": "movement_query",
+                "operation": "list",
+                "scope": "",
+                "filters": {"estado": "GARANTIA"},
+                "capability": "inventory_movement_detail",
+                "template_id": "inventory_movement_detail",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        if re.search(r"\bseriales\s+perdidos\b", normalized):
+            return {
+                "matched": True,
+                "pattern": "lost_serials",
+                "domain": "inventario_logistica",
+                "intent": "movement_query",
+                "operation": "list",
+                "scope": "",
+                "filters": {"estado": "PERDIDO"},
+                "capability": "inventory_movement_detail",
+                "template_id": "inventory_movement_detail",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        critical = re.search(r"\bmateriales\s+criticos\s+en\s+([a-z0-9_-]{2,})\b", normalized)
+        if critical:
+            value = str(critical.group(1) or "").strip()
+            return {
+                "matched": True,
+                "pattern": "critical_materials_by_warehouse",
+                "domain": "inventario_logistica",
+                "intent": "stock_balance",
+                "operation": "stock_balance",
+                "scope": "bodega",
+                "filters": {"bodega": value, "stock_actual": "<CRITICO>"},
+                "capability": "inventory_stock_balance_by_warehouse",
+                "template_id": "inventory_material_stock_by_warehouse",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        return {}
+
+    @staticmethod
+    def _build_inventory_pre_router_intent(
+        *,
+        message: str,
+        pre_router: dict[str, Any] | None,
+    ) -> StructuredQueryIntent | None:
+        payload = dict(pre_router or {})
+        if not payload.get("matched"):
+            return None
+        scope = str(payload.get("scope") or "").strip().lower()
+        filters = dict(payload.get("filters") or {})
+        if scope:
+            filters["stock_scope"] = scope
+        return StructuredQueryIntent(
+            raw_query=message,
+            domain_code="inventario_logistica",
+            operation=str(payload.get("operation") or payload.get("intent") or "stock_balance"),
+            template_id=str(
+                payload.get("template_id")
+                or (
+                    "inventory_material_stock_mobile"
+                    if scope == "movil"
+                    else "inventory_material_stock_by_warehouse"
+                )
+            ),
+            filters=filters,
+            group_by=["bodega"] if scope == "bodega" else [],
+            metrics=[],
+            confidence=0.99,
+            source="inventory_stock_pre_router",
+        )
+
+    @staticmethod
+    def _has_strong_inventory_terms(message: str) -> bool:
+        normalized = ChatApplicationService._normalize_text(message)
+        return bool(
+            re.search(
+                r"\b(saldo|stock|bodega|kardex|serial|material(?:es)?|consumo|facturacion|traslado|cobro|devolucion)\b",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _filter_cross_domain_memory_hints(
+        *,
+        memory_hints: dict[str, Any],
+        allowed_domain: str,
+    ) -> dict[str, Any]:
+        allowed = normalizar_codigo_dominio(allowed_domain)
+        filtered = dict(memory_hints or {})
+
+        def keep(item: Any) -> bool:
+            if not isinstance(item, dict):
+                return True
+            domain = normalizar_codigo_dominio(
+                item.get("domain_code") or item.get("domain") or item.get("candidate_domain")
+            )
+            capability_id = str(item.get("capability_id") or "").strip().lower()
+            if domain and domain != allowed:
+                return False
+            if capability_id and dominio_desde_capacidad(capability_id) not in {"", allowed, "general"}:
+                return False
+            return True
+
+        for key in ("query_patterns", "reasoning_patterns"):
+            if key in filtered:
+                filtered[key] = [item for item in list(filtered.get(key) or []) if keep(item)]
+        filtered["cross_domain_memory_blocked_for"] = allowed
+        return filtered
+
+    @staticmethod
     def _rescue_query_domain(*, message: str, domain_code: str) -> str:
         normalized_domain = str(domain_code or "").strip().lower()
         if normalized_domain not in {"", "general"}:
             return normalized_domain
         normalized_message = ChatApplicationService._normalize_text(message)
+        if ChatApplicationService._has_inventory_domain_signals(normalized_message):
+            return "inventario_logistica"
         if ChatApplicationService._has_rrhh_domain_signals(normalized_message):
             return "empleados"
         return normalized_domain or "general"
 
     @staticmethod
+    def _has_inventory_domain_signals(normalized_message: str) -> bool:
+        return bool(
+            re.search(
+                r"\b("
+                r"inventario|logistica|material(?:es)?|ferretero(?:s)?|serial(?:es)?|equipo(?:s)?|"
+                r"stock|saldo(?:s)?|existencia(?:s)?|bodega(?:s)?|almacen|almacenes|"
+                r"kardex|traslado(?:s)?|entrada(?:s)?|salida(?:s)?|devolucion(?:es)?|consumo(?:s)?|"
+                r"operacion_hfc|operacion\s+hfc|hfc"
+                r")\b",
+                str(normalized_message or ""),
+            )
+        )
+
+    @staticmethod
     def _has_rrhh_domain_signals(normalized_message: str) -> bool:
         clean = str(normalized_message or "").strip().lower()
         if not clean:
+            return False
+        if re.search(r"\bsaldo\b", clean) and re.search(r"\b(emplead\w*|tecnico|movil|cedula)\b", clean):
             return False
         has_attendance_signal = any(
             token in clean for token in ("ausent", "asistencia", "injustific", "vacacion", "vacaciones", "incapacidad", "licencia", "permiso", "calamidad")
@@ -2853,6 +3989,13 @@ class ChatApplicationService:
             planned_capability=planned_capability,
             policy_decision=policy_decision,
         )
+        contract_payload = self._set_active_agent_contract(
+            run_context=run_context,
+            agent_id=str((planned_capability.get("source") or {}).get("selected_agent") or "") or None,
+            domain_code=self._domain_code_from_capability(planned_capability)
+            or str((planned_capability.get("source") or {}).get("domain") or "")
+            or None,
+        )
         execution = self._execute_primary_path(
             message=message,
             session_id=session_id,
@@ -2865,7 +4008,9 @@ class ChatApplicationService:
             memory_context=memory_context,
             resolved_query=resolved_query,
             execution_plan=execution_plan,
-            allow_legacy_fallback=True,
+            allow_legacy_fallback=self._legacy_allowed_for_contract(
+                contract_payload=contract_payload,
+            ),
         )
         run_context.metadata.pop("proactive_loop", None)
         return {
@@ -2944,6 +4089,13 @@ class ChatApplicationService:
             policy_decision=selected_policy,
         )
         selected_route["planner_was_authority"] = False
+        contract_payload = self._set_active_agent_contract(
+            run_context=run_context,
+            agent_id=str((selected_plan.get("source") or {}).get("selected_agent") or "") or None,
+            domain_code=self._domain_code_from_capability(selected_plan)
+            or str((selected_plan.get("source") or {}).get("domain") or "")
+            or None,
+        )
         selected_execution = self._execute_primary_path(
             message=message,
             session_id=session_id,
@@ -2956,7 +4108,9 @@ class ChatApplicationService:
             memory_context=memory_context,
             resolved_query=resolved_query,
             execution_plan=execution_plan,
-            allow_legacy_fallback=True,
+            allow_legacy_fallback=self._legacy_allowed_for_contract(
+                contract_payload=contract_payload,
+            ),
         )
         if self._proactive_loop_enabled(run_context=run_context):
             run_context.metadata["proactive_loop"] = {
@@ -3110,10 +4264,23 @@ class ChatApplicationService:
                 only_if=is_domain_capability,
             )
             if not allow_legacy_fallback:
+                controlled_response = self.build_controlled_runtime_limitation_response(
+                    message=message,
+                    session_id=session_id,
+                    classification={
+                        "intent": str((planned_capability.get("source") or {}).get("intent") or ""),
+                        "domain": capability_domain or str((planned_capability.get("source") or {}).get("domain") or ""),
+                        "selected_agent": str((planned_capability.get("source") or {}).get("selected_agent") or ""),
+                        "output_mode": str((planned_capability.get("source") or {}).get("output_mode") or "summary"),
+                        "needs_database": True,
+                    },
+                    run_context=run_context,
+                    block_reason=fallback_reason or "legacy_disallowed_by_contract",
+                )
                 return {
-                    "response": {},
+                    "response": controlled_response,
                     "executed_capability": True,
-                    "ok": False,
+                    "ok": True,
                     "used_legacy": False,
                     "fallback_reason": fallback_reason,
                 }
@@ -3133,19 +4300,45 @@ class ChatApplicationService:
                 },
             )
             if not allow_legacy_fallback:
+                controlled_response = self.build_controlled_runtime_limitation_response(
+                    message=message,
+                    session_id=session_id,
+                    classification={
+                        "intent": str((planned_capability.get("source") or {}).get("intent") or ""),
+                        "domain": capability_domain or str((planned_capability.get("source") or {}).get("domain") or ""),
+                        "selected_agent": str((planned_capability.get("source") or {}).get("selected_agent") or ""),
+                        "output_mode": str((planned_capability.get("source") or {}).get("output_mode") or "summary"),
+                        "needs_database": True,
+                    },
+                    run_context=run_context,
+                    block_reason=str(route.get("reason") or "legacy_disallowed_by_contract"),
+                )
                 return {
-                    "response": {},
+                    "response": controlled_response,
                     "executed_capability": False,
-                    "ok": False,
+                    "ok": True,
                     "used_legacy": False,
                     "fallback_reason": str(route.get("reason") or "route_use_legacy"),
                 }
 
         if not allow_legacy_fallback:
+            controlled_response = self.build_controlled_runtime_limitation_response(
+                message=message,
+                session_id=session_id,
+                classification={
+                    "intent": str((planned_capability.get("source") or {}).get("intent") or ""),
+                    "domain": capability_domain or str((planned_capability.get("source") or {}).get("domain") or ""),
+                    "selected_agent": str((planned_capability.get("source") or {}).get("selected_agent") or ""),
+                    "output_mode": str((planned_capability.get("source") or {}).get("output_mode") or "summary"),
+                    "needs_database": True,
+                },
+                run_context=run_context,
+                block_reason=str(route.get("reason") or "legacy_disallowed_by_contract"),
+            )
             return {
-                "response": {},
+                "response": controlled_response,
                 "executed_capability": False,
-                "ok": False,
+                "ok": True,
                 "used_legacy": False,
                 "fallback_reason": str(route.get("reason") or "route_use_legacy"),
             }
@@ -3469,6 +4662,19 @@ class ChatApplicationService:
         context = dict(session_context or {})
         last_domain = normalizar_codigo_dominio(context.get("last_domain"))
         last_needs_db = bool(context.get("last_needs_database"))
+        inventory_pre_router = ChatApplicationService._inventory_stock_pre_router_match(message)
+        if inventory_pre_router:
+            return {
+                "intent": "stock_balance",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventario_logistica_agent",
+                "classifier_source": "inventory_stock_pre_router",
+                "needs_database": True,
+                "output_mode": "summary",
+                "needs_personal_join": False,
+                "used_tools": [],
+                "dictionary_context": {},
+            }
         if last_domain == "ausentismo" and last_needs_db and ChatApplicationService._is_chart_request(normalized):
             return {
                 "intent": "ausentismo_query",
@@ -3531,6 +4737,19 @@ class ChatApplicationService:
                 "needs_database": True,
                 "output_mode": output_mode,
                 "needs_personal_join": needs_personal_join,
+                "used_tools": [],
+                "dictionary_context": {},
+            }
+        if ChatApplicationService._has_inventory_domain_signals(normalized):
+            wants_detail = any(token in normalized for token in ("detalle", "tabla", "mostrar", "lista", "kardex", "trazabilidad"))
+            return {
+                "intent": "inventario_logistica_query",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventario_logistica_agent",
+                "classifier_source": "bootstrap_rules",
+                "needs_database": True,
+                "output_mode": "table" if wants_detail else "summary",
+                "needs_personal_join": False,
                 "used_tools": [],
                 "dictionary_context": {},
             }
@@ -3986,9 +5205,17 @@ class ChatApplicationService:
         execution_result: dict[str, Any] | None,
     ) -> dict[str, Any]:
         metadata = dict((execution_plan.metadata if execution_plan else {}) or {})
-        if not bool(metadata.get("legacy_analytics_isolated")):
+        is_inventory_sql = bool(
+            str(execution_plan.strategy or "").strip().lower() == "sql_assisted"
+            and str(resolved_query.intent.domain_code or "").strip().lower() == "inventario_logistica"
+            and str(execution_plan.sql_query or "").strip()
+        )
+        if not bool(metadata.get("legacy_analytics_isolated")) and not is_inventory_sql:
             return {}
-        if str(metadata.get("analytics_router_decision") or "").strip().lower() != "join_aware_sql":
+        if (
+            str(metadata.get("analytics_router_decision") or "").strip().lower() != "join_aware_sql"
+            and not is_inventory_sql
+        ):
             return {}
         raw_reason = str(
             (execution_result or {}).get("error")
@@ -4400,6 +5627,7 @@ class ChatApplicationService:
         response_flow: str,
     ) -> dict[str, Any]:
         payload = dict(response or {})
+        payload = ensure_chat_response_contract(payload)
         orchestrator = dict(payload.get("orchestrator") or {})
         intent_arbitration = dict(run_context.metadata.get("intent_arbitration") or {})
         query_intelligence = dict(run_context.metadata.get("query_intelligence") or {})
@@ -4411,7 +5639,12 @@ class ChatApplicationService:
         resolved_query = dict(query_intelligence.get("resolved_query") or {})
         semantic_context = dict(resolved_query.get("semantic_context") or {})
         source_of_truth = dict(semantic_context.get("source_of_truth") or {})
+        semantic_orchestrator = dict(run_context.metadata.get("semantic_orchestrator") or {})
         runtime_compatibility = dict(run_context.metadata.get("runtime_compatibility") or {})
+        contract_payload = dict(run_context.metadata.get("agent_contract") or {})
+        route_payload = ChatApplicationService._route_snapshot(
+            dict(run_context.metadata.get("runtime_route") or {})
+        )
         resolved_final_intent = ChatApplicationService._resolve_runtime_final_intent(
             intent_arbitration=intent_arbitration,
             execution_plan=execution_plan,
@@ -4444,9 +5677,61 @@ class ChatApplicationService:
         payload["task_state"] = dict((run_context.metadata.get("task_state") or {}))
         data_sources = dict(payload.get("data_sources") or {})
         cleanup_guard = dict(run_context.metadata.get("cleanup_guard") or {})
+        fallback_used_payload = dict(
+            (((payload.get("task_state") or {}).get("state") or {}).get("fallback_used") or {})
+            or {}
+        )
+        if not fallback_used_payload:
+            fallback_used_payload = {
+                "used": bool(execution_meta.get("used_legacy")) or response_flow in {"legacy_fallback", "controlled_runtime_limitation", "runtime_only_fallback"},
+                "reason": str(execution_meta.get("fallback_reason") or ""),
+                "flow": response_flow if response_flow != "sql_assisted" else "",
+            }
+        block_reason = str(
+            cleanup_guard.get("runtime_only_fallback_reason")
+            or cleanup_guard.get("fallback_reason")
+            or execution_meta.get("fallback_reason")
+            or ""
+        )
         data_sources["runtime"] = {
             "ok": True,
             "flow": response_flow,
+            "agent_id": str(
+                run_context.metadata.get("agent_contract_agent_id")
+                or contract_payload.get("agent_id")
+                or orchestrator.get("selected_agent")
+                or ""
+            ),
+            "domain": str(
+                run_context.metadata.get("agent_contract_domain")
+                or contract_payload.get("domain")
+                or orchestrator.get("final_domain")
+                or orchestrator.get("domain")
+                or ""
+            ).strip().lower(),
+            "intent": resolved_final_intent,
+            "capability": str(
+                execution_plan.get("capability_id")
+                or route_payload.get("selected_capability_id")
+                or ""
+            ),
+            "route": route_payload,
+            "execute": str(response_flow or "").strip().lower() in {"handler", "sql_assisted"},
+            "legacy_used": bool(execution_meta.get("used_legacy")),
+            "fallback_used": fallback_used_payload,
+            "planner_called": bool(
+                execution_plan
+                or runtime_compatibility.get("planner_was_authority")
+                or str(response_flow or "").strip().lower() == "sql_assisted"
+            ),
+            "block_reason": ChatApplicationService._planner_block_reason_to_business_text(block_reason) if block_reason else "",
+            "block_reason_code": block_reason,
+            "contract_policy_applied": ChatApplicationService._contract_policy_applied_payload(
+                contract_payload=contract_payload,
+                memory_policy_applied=bool(
+                    ((run_context.metadata.get("memory_context") or {}).get("memory_policy_applied"))
+                ),
+            ),
             "arbitrated_intent": str(intent_arbitration.get("final_intent") or ""),
             "final_intent": resolved_final_intent,
             "final_domain": str(
@@ -4486,8 +5771,25 @@ class ChatApplicationService:
                 domain_code=str((orchestrator.get("domain") or "") or "")
             ),
             "pilot_phase": ChatApplicationService.PILOT_PHASE,
+            "legacy_runtime_fallback_used": bool(execution_meta.get("used_legacy")),
         }
         payload["data_sources"] = data_sources
+        envelope = dict(payload.get("response_envelope") or {})
+        envelope.update(
+            {
+                "progress_source": str(envelope.get("progress_source") or "backend"),
+                "route": dict(data_sources["runtime"].get("route") or {}),
+                "fallback_used": dict(data_sources["runtime"].get("fallback_used") or {}),
+                "legacy_used": bool(data_sources["runtime"].get("legacy_used")),
+                "contract_policy_applied": dict(data_sources["runtime"].get("contract_policy_applied") or {}),
+                "needs_clarification": bool(
+                    ((run_context.metadata.get("satisfaction_review") or {}).get("needs_clarification"))
+                    or semantic_orchestrator.get("needs_clarification")
+                ),
+                "block_reason": str(data_sources["runtime"].get("block_reason") or ""),
+            }
+        )
+        payload["response_envelope"] = envelope
         return payload
 
     @staticmethod
@@ -4568,7 +5870,7 @@ class ChatApplicationService:
         reason_text, missing_text = self._runtime_only_fallback_copy(reason=normalized_reason)
         domain_code = str((resolved_query.intent.domain_code if resolved_query else "") or "ausentismo")
         reply = (
-            "El piloto analytics quedo aislado del fallback legacy para esta consulta. "
+            "No puedo ejecutar esta consulta con seguridad todavia. "
             f"{reason_text} {missing_text}"
         ).strip()
         runtime_meta = {
@@ -4637,28 +5939,28 @@ class ChatApplicationService:
         normalized = str(reason or "unsafe_sql_plan").strip().lower()
         mapping = {
             "unsupported_metric": (
-                "La metrica pedida todavia no esta soportada por el compiler join-aware.",
-                "Falta declarar la metrica en ai_dictionary.dd_campos y su capacidad en ai_dictionary.ia_dev_capacidades_columna.",
+                "La metrica pedida todavia no esta disponible para consulta segura.",
+                "Falta completar la trazabilidad de datos de esa metrica antes de responderla.",
             ),
             "unsupported_dimension": (
-                "La dimension solicitada no quedo soportada de forma segura en el piloto.",
-                "Falta modelar la dimension y sus sinonimos en ai_dictionary.dd_campos y ai_dictionary.dd_sinonimos.",
+                "La dimension solicitada todavia no esta disponible para consulta segura.",
+                "Falta completar la trazabilidad de datos de esa dimension antes de responderla.",
             ),
             "missing_dictionary_relation": (
-                "No existe una relacion utilizable en ai_dictionary para resolver el join de esta analitica.",
-                "Falta registrar la relacion en ai_dictionary.dd_relaciones entre ausentismo y empleados.",
+                "No existe una relacion de datos confiable para cruzar las fuentes requeridas.",
+                "Falta completar la relacion auditada entre las fuentes antes de responder.",
             ),
             "missing_dictionary_column": (
-                "El compiler no encontro una columna gobernada suficiente para armar el SQL.",
-                "Falta declarar la columna requerida en ai_dictionary.dd_campos y habilitar su uso analitico.",
+                "No encontre un campo de datos gobernado suficiente para calcular la respuesta.",
+                "Falta completar la trazabilidad del campo requerido antes de responder.",
             ),
             "no_actionable_insight": (
-                "La consulta no produjo un insight accionable con la informacion gobernada disponible.",
-                "Falta enriquecer ai_dictionary con columnas o reglas que permitan una conclusion util.",
+                "La informacion disponible no produjo una conclusion accionable.",
+                "Falta enriquecer la trazabilidad de datos o las reglas de negocio para dar una conclusion util.",
             ),
             "unsafe_sql_plan": (
-                "El plan SQL no paso las validaciones de seguridad del runtime.",
-                "Hay que ajustar ai_dictionary para que tablas, columnas y relaciones queden completamente trazables.",
+                "No puedo ejecutar esta consulta con seguridad todavia.",
+                "Falta completar la trazabilidad de tablas, campos y relaciones requeridas.",
             ),
         }
         return mapping.get(normalized, mapping["unsafe_sql_plan"])

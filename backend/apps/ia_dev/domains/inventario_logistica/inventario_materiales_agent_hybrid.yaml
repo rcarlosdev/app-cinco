@@ -418,7 +418,7 @@ tables:
         is_selectable: true
         sync_to_dd_campos: true
 
-      tipo_material:
+      tipo:
         data_type: string
         required: false
         semantic_role: material_family
@@ -431,7 +431,7 @@ tables:
         missing_metadata_allowed: true
         note: Confirmar si esta columna existe físicamente o si el tipo se deduce por otra columna.
 
-      unidad:
+      medida:
         data_type: string
         required: false
         semantic_role: unit_of_measure
@@ -479,7 +479,7 @@ tables:
         is_metric: true
         is_selectable: true
 
-      fecha:
+      f_consumo:
         data_type: date
         semantic_role: movement_date
         business_concepts: [movement_timing]
@@ -488,6 +488,43 @@ tables:
         is_filterable: true
         is_selectable: true
         is_time_dimension: true
+
+      movimiento:
+        data_type: string
+        semantic_role: movement_type
+        business_concepts: [movement_classification, stock_calculation]
+        synonyms: [movimiento, tipo movimiento, ingreso, entrada]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [ENTRADA]
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_stock]
+        synonyms: [bodega, almacen, sede, ubicacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      estado:
+        data_type: string
+        semantic_role: movement_status
+        business_concepts: [movement_classification, transfer]
+        synonyms: [estado, traslado bodega, estado movimiento]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: ["", traslado_bodega]
+
+      comentario:
+        data_type: text
+        semantic_role: movement_comment
+        business_concepts: [transfer_traceability]
+        synonyms: [comentario, observacion, observacion traslado]
+        allowed_operations: [select, search]
+        is_selectable: true
 
       bodega:
         data_type: string
@@ -499,7 +536,7 @@ tables:
         is_filterable: true
         is_selectable: true
 
-      responsable:
+      cedula:
         data_type: string
         semantic_role: responsible_person
         business_concepts: [movement_responsibility]
@@ -577,7 +614,7 @@ tables:
         allowed_operations: [select, sum, avg, filter]
         is_metric: true
 
-      fecha:
+      f_consumo:
         data_type: date
         semantic_role: movement_date
         business_concepts: [movement_timing]
@@ -672,7 +709,7 @@ tables:
         allowed_operations: [select, sum, avg, filter]
         is_metric: true
 
-      fecha:
+      f_consumo:
         data_type: date
         semantic_role: movement_date
         synonyms: [fecha, fecha devolución, fecha devolucion, mes, año, periodo]
@@ -684,6 +721,14 @@ tables:
         data_type: string
         semantic_role: warehouse
         synonyms: [bodega, almacén, almacen, sede]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      cedula:
+        data_type: string
+        semantic_role: responsible_person
+        synonyms: [cedula, devuelto por, responsable, tecnico, usuario]
         allowed_operations: [select, filter, group_by]
         is_groupable: true
         is_filterable: true
@@ -727,13 +772,60 @@ tables:
         allowed_operations: [select, sum, avg, filter]
         is_metric: true
 
-      fecha:
+      f_consumo:
         data_type: date
         semantic_role: movement_date
         synonyms: [fecha, fecha consumo, mes, año, periodo]
         allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
         is_filterable: true
         is_time_dimension: true
+
+      movimiento:
+        data_type: string
+        semantic_role: movement_type
+        business_concepts: [movement_classification, consumption]
+        synonyms: [movimiento, consumo]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [CONSUMO]
+
+      estado:
+        data_type: string
+        semantic_role: movement_status
+        business_concepts: [movement_classification, consumption]
+        synonyms: [estado, cerrado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [CERRADO]
+
+      orden_trabajo:
+        data_type: string
+        semantic_role: work_order
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [orden trabajo, ot, orden_trabajo]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      tipo:
+        data_type: string
+        semantic_role: billing_activity_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [tipo, codigo facturacion, actividad]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_location]
+        synonyms: [bodega, operacion_hfc]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
 
       responsable:
         data_type: string
@@ -819,13 +911,30 @@ tables:
         allowed_operations: [select, sum, avg, filter]
         is_metric: true
 
-      fecha:
+      f_consumo:
         data_type: date
         semantic_role: movement_date
         synonyms: [fecha, fecha cobro, mes, año, periodo]
         allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
         is_filterable: true
         is_time_dimension: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_stock, charge_discount]
+        synonyms: [bodega, almacen, operacion_hfc]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      estado:
+        data_type: string
+        semantic_role: charge_status
+        synonyms: [estado, estado cobro, cobrado, pendiente, pendiente de cobro]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
 
       tercero:
         data_type: string
@@ -902,7 +1011,7 @@ tables:
         allowed_operations: [select, sum, avg, filter]
         is_metric: true
 
-      fecha:
+      f_consumo:
         data_type: date
         semantic_role: movement_date
         synonyms: [fecha, fecha traslado, mes, año, periodo]
@@ -910,7 +1019,35 @@ tables:
         is_filterable: true
         is_time_dimension: true
 
-      bodega_origen:
+      movimiento:
+        data_type: string
+        semantic_role: movement_type
+        business_concepts: [movement_classification, transfer, stock_calculation]
+        synonyms: [movimiento, traslado bodega, traslado aliado, traslado otro aliado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [TRASLADO_BODEGA, TRASLADOS_OTRO_ALIADO]
+
+      estado:
+        data_type: string
+        semantic_role: movement_status
+        business_concepts: [movement_classification, transfer]
+        synonyms: [estado, traslado bodega]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: ["", traslado_bodega]
+
+      comentario:
+        data_type: text
+        semantic_role: movement_comment
+        business_concepts: [transfer_traceability]
+        synonyms: [comentario, observacion, observacion traslado]
+        allowed_operations: [select, search]
+        is_selectable: true
+
+      bodega:
         data_type: string
         semantic_role: source_warehouse
         synonyms: [bodega origen, origen, sale de, bodega salida]
@@ -927,6 +1064,8 @@ tables:
         is_groupable: true
         is_filterable: true
         missing_metadata_allowed: true
+        sync_to_dd_campos: false
+        caveat: No existe columna fisica bodega_destino; el destino de traslado bodega se infiere solo desde el doble registro entrada/traslado.
 
       documento:
         data_type: string
@@ -973,15 +1112,14 @@ tables:
         is_groupable: true
         is_filterable: true
 
-      categoria:
+      familia:
         data_type: string
-        semantic_role: equipment_category
+        semantic_role: equipment_family
         business_concepts: [equipment_classification]
-        synonyms: [categoria, categoría, familia, tipo]
+        synonyms: [familia, categoria, categoría, tipo]
         allowed_operations: [select, filter, group_by]
         is_groupable: true
         is_filterable: true
-        missing_metadata_allowed: true
 
   logistica_base_seriales:
     domain_code: inventario_materiales
@@ -993,7 +1131,7 @@ tables:
       ingreso, móvil, consumo móvil y estado operativo del serial.
     sync_to_dd_tablas: true
     columns:
-      serial:
+      numero_serial:
         data_type: string
         required: true
         semantic_role: serial_number
@@ -1021,8 +1159,18 @@ tables:
         allowed_operations: [select, filter, group_by]
         is_groupable: true
         is_filterable: true
+        confirmed_business_values:
+          - BODEGA INGRESO
+          - MOVIL
+          - ASOCIADO MOVIL
+          - BODEGA DEVOLUCION
+          - GARANTIA CINCO
+          - SERIAL-PERDIDO-COBRO
+          - MOVIL - RECHAZADO
+          - MOVIL-MAL-ASOCIADO
+          - MOVIL - PENDIENTE
 
-      movimiento:
+      movimiento_sap:
         data_type: string
         semantic_role: serial_movement_type
         business_concepts: [serial_movement, mobile_consumption]
@@ -1040,7 +1188,16 @@ tables:
         is_filterable: true
         is_time_dimension: true
 
-      ubicacion:
+      historial:
+        data_type: json_text
+        semantic_role: serial_history
+        business_concepts: [traceability, serial_history]
+        synonyms: [historial, kardex serial, trazabilidad serial]
+        allowed_operations: [select]
+        is_selectable: true
+        caveat: Fuente de trazabilidad cronologica; no reemplaza estado actual, que se toma de estado.
+
+      ubicacion_bodega:
         data_type: string
         semantic_role: location
         business_concepts: [warehouse_location, current_location]
@@ -1060,7 +1217,7 @@ tables:
         is_filterable: true
         missing_metadata_allowed: true
 
-      responsable:
+      cedula:
         data_type: string
         semantic_role: responsible_person
         business_concepts: [custody, movement_responsibility]
@@ -1079,6 +1236,8 @@ tables:
         is_groupable: true
         is_filterable: true
         missing_metadata_allowed: true
+        sync_to_dd_campos: false
+        caveat: No existe columna fisica validado en logistica_base_seriales; no habilitar consumo movil sin validar hasta tener mapping real.
 
   logistica_seriales_asociados:
     domain_code: inventario_materiales
@@ -1093,7 +1252,7 @@ tables:
         semantic_role: association_id
         allowed_operations: [select, filter]
 
-      serial:
+      numero_serial:
         data_type: string
         semantic_role: serial_number
         business_concepts: [serial_identity, traceability]
@@ -1110,7 +1269,7 @@ tables:
         is_groupable: true
         is_filterable: true
 
-      fecha_asociacion:
+      fecha:
         data_type: date
         semantic_role: association_date
         business_concepts: [association_timing]
@@ -1120,7 +1279,7 @@ tables:
         is_time_dimension: true
         missing_metadata_allowed: true
 
-      asociado_a:
+      cedula:
         data_type: string
         semantic_role: association_target
         business_concepts: [assignment, custody]
@@ -1130,7 +1289,7 @@ tables:
         is_filterable: true
         missing_metadata_allowed: true
 
-      bodega_salida:
+      bodega:
         data_type: string
         semantic_role: source_warehouse
         business_concepts: [warehouse_location, warehouse_exit]
@@ -1140,7 +1299,7 @@ tables:
         is_filterable: true
         missing_metadata_allowed: true
 
-      estado_asociacion:
+      estado:
         data_type: string
         semantic_role: association_status
         business_concepts: [association_status]
@@ -1149,6 +1308,83 @@ tables:
         is_groupable: true
         is_filterable: true
         missing_metadata_allowed: true
+
+  a_promedios_consumo:
+    domain_code: inventario_materiales
+    business_name: Promedios de consumo por actividad
+    material_family: materiales_y_ferreteros
+    primary_role: reference
+    description: Promedios validados para comparar consumo tecnico contra facturacion; no descuenta saldo.
+    sync_to_dd_tablas: true
+    columns:
+      codigo:
+        data_type: integer
+        semantic_role: material_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [codigo, codigo material]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      familia_mat:
+        data_type: string
+        semantic_role: material_family
+        synonyms: [familia, familia material]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      codigo_facturacion:
+        data_type: string
+        semantic_role: billing_activity_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [codigo facturacion, actividad, codigo actividad]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      promedio:
+        data_type: number
+        semantic_role: average_quantity
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [promedio, cantidad promedio]
+        allowed_operations: [select, sum, avg]
+        is_metric: true
+
+  facturacion_facturado_wfm:
+    domain_code: inventario_materiales
+    schema_name: bd_c3nc4s1s
+    business_name: Facturacion WFM
+    material_family: materiales_y_ferreteros
+    primary_role: billing_reference
+    description: Fuente de facturacion para comparacion con consumo en operacion_hfc. Prohibido usar como descuento de inventario.
+    sync_to_dd_tablas: true
+    columns:
+      idorden_de_trabajo:
+        data_type: integer
+        semantic_role: work_order
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [orden_trabajo, orden trabajo, ot]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      codigo:
+        data_type: string
+        semantic_role: billing_activity_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [codigo facturacion, codigo actividad, actividad]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      cantidad_actividad:
+        data_type: number
+        semantic_role: billed_activity_quantity
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [cantidad actividad, cantidad facturada]
+        allowed_operations: [select, sum, avg]
+        is_metric: true
 
 # -------------------------------------------------------------------
 # 5. RELACIONES -> dd_relaciones
@@ -1215,6 +1451,36 @@ relationships:
     join_purpose: enriquecer traslados con descripción/tipo/unidad del material
     sync_to_dd_relaciones: true
 
+  consumo_codigo_to_promedios:
+    from_table: logistica_movimientos_consumo
+    from_column: codigo
+    to_table: a_promedios_consumo
+    to_column: codigo
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: comparar consumo real contra promedio por codigo, usando COLLATE cuando la DB lo requiera
+    sync_to_dd_relaciones: true
+
+  facturacion_codigo_to_promedios:
+    from_table: facturacion_facturado_wfm
+    from_column: codigo
+    to_table: a_promedios_consumo
+    to_column: codigo_facturacion
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: mapear actividad facturada contra promedio de consumo; no descuenta saldo
+    sync_to_dd_relaciones: true
+
+  facturacion_orden_to_consumo:
+    from_table: facturacion_facturado_wfm
+    from_column: idorden_de_trabajo
+    to_table: logistica_movimientos_consumo
+    to_column: orden_trabajo
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: comparar facturacion y consumo por orden_trabajo en operacion_hfc; no descuenta saldo
+    sync_to_dd_relaciones: true
+
   serial_codigo_to_catalog:
     from_table: logistica_base_seriales
     from_column: codigo
@@ -1227,9 +1493,9 @@ relationships:
 
   serial_asociado_to_serial_base:
     from_table: logistica_seriales_asociados
-    from_column: serial
+    from_column: numero_serial
     to_table: logistica_base_seriales
-    to_column: serial
+    to_column: numero_serial
     relationship_type: many_to_one
     allowed: true
     join_purpose: conectar asociaciones/salidas con estado e historial del serial
@@ -1246,10 +1512,20 @@ business_concepts:
     preferred_intent: stock_query
     semantic_formula:
       description: >
-        El stock se debe calcular con movimientos reales. La fórmula exacta debe
-        validarse con negocio según si cobros descuentan o solo registran evento.
-      draft_formula: entradas + devoluciones - entregas - consumos - cobros +/- traslados
-      requires_business_validation: true
+        El stock se debe calcular con movimientos reales. Negocio confirma que
+        el cobro descuenta inventario en el momento del cobro aunque la factura
+        se genere despues. Facturacion no descuenta inventario. Traslado bodega
+        se representa por doble registro: salida en logistica_movimientos_traslado
+        y entrada en logistica_movimientos_entrada. Traslado a otro aliado sale
+        del inventario propio.
+      confirmed_formula: entradas - entregas + devoluciones - cobros - traslados_otro_aliado
+      stock_bodega_formula: entradas - entregas + devoluciones - cobros - traslados_otro_aliado +/- traslados_bodega
+      stock_movil_formula: entregas - consumo - cobros - devoluciones
+      bajas_materiales: 0
+      garantias_materiales: 0
+      requires_business_validation: false
+      requires_db_validation: false
+      db_validation_status: passed_2026_05_08
     required_tables:
       - logistica_movimientos_entrada
       - logistica_movimientos_entrega
@@ -1440,20 +1716,20 @@ business_concepts:
       implementation_status: pending_integration_or_db_validation
 
   conciliacion_logistica:
-    description: Conciliacion conceptual entre ingresos, stock bodega, stock movil y facturacion.
+    description: Consulta comparativa entre ingresos, stock bodega, stock movil y facturacion marcada por negocio como no aplicable.
     applies_to: [materiales, ferreteros]
     preferred_intent: reconciliation_query
     semantic_formula:
-      description: Formula conceptual pendiente de validacion exacta por negocio antes de habilitar calculo productivo.
-      draft_formula: ingresos - stock_bodega - stock_movil - facturacion
-      requires_business_validation: true
+      description: Negocio confirmo que el comparativo ingresos - stock_bodega - stock_movil - facturacion no aplica como formula oficial.
+      status: not_applicable
+      rejected_formula: ingresos - stock_bodega - stock_movil - facturacion
+      requires_business_validation: false
     expected_output:
-      - codigo
-      - ingresos
-      - stock_bodega
-      - stock_movil
-      - facturacion
-      - saldo_total_conceptual
+      - limitacion_semantica
+      - datos_que_si_pueden_consultarse
+      - siguiente_accion_recomendada
+    data_readiness:
+      implementation_status: semantic_limitation_only
 
   conciliacion_sap_kardex:
     description: Cruce de saldo SAP contra kardex de consumo o movimientos logisticos.
@@ -1597,8 +1873,8 @@ groupable_dimensions:
     description: "Agrupación por familia de material: materiales, ferreteros o serializados."
     synonyms: [familia, tipo, tipo material, clase]
     canonical_fields:
-      - base_codigos.tipo_material
-      - base_codigo_seriales.categoria
+      - base_codigos.tipo
+      - base_codigo_seriales.familia
     allowed_operations: [group_by, filter, select]
 
   bodega:
@@ -1608,20 +1884,21 @@ groupable_dimensions:
       - logistica_movimientos_entrada.bodega
       - logistica_movimientos_entrega.bodega
       - logistica_movimientos_devolucion.bodega
-      - logistica_movimientos_traslado.bodega_origen
-      - logistica_movimientos_traslado.bodega_destino
-      - logistica_base_seriales.ubicacion
-      - logistica_seriales_asociados.bodega_salida
+      - logistica_movimientos_cobro.bodega
+      - logistica_movimientos_traslado.bodega
+      - logistica_movimientos_entrada.bodega
+      - logistica_base_seriales.ubicacion_bodega
+      - logistica_seriales_asociados.bodega
     allowed_operations: [group_by, filter, select]
 
   responsable:
     description: Agrupación por responsable, técnico, custodio o usuario.
     synonyms: [responsable, técnico, tecnico, usuario, custodio, cuadrilla]
     canonical_fields:
-      - logistica_movimientos_entrada.responsable
-      - logistica_movimientos_consumo.responsable
-      - logistica_movimientos_devolucion.devuelto_por
-      - logistica_base_seriales.responsable
+      - logistica_movimientos_entrada.cedula
+      - logistica_movimientos_consumo.cedula
+      - logistica_movimientos_devolucion.cedula
+      - logistica_base_seriales.cedula
     allowed_operations: [group_by, filter, select]
 
   movil:
@@ -1637,22 +1914,22 @@ groupable_dimensions:
     synonyms: [estado, situación, situacion, condición, condicion]
     canonical_fields:
       - logistica_base_seriales.estado
-      - logistica_movimientos_cobro.estado_cobro
-      - logistica_seriales_asociados.estado_asociacion
+      - logistica_movimientos_cobro.estado
+      - logistica_seriales_asociados.estado
     allowed_operations: [group_by, filter, select]
 
   mes:
     description: Agrupación por mes usando campos de fecha declarados.
     synonyms: [mes, mensual, por mes]
     canonical_fields:
-      - logistica_movimientos_entrada.fecha
-      - logistica_movimientos_entrega.fecha
-      - logistica_movimientos_devolucion.fecha
-      - logistica_movimientos_consumo.fecha
-      - logistica_movimientos_cobro.fecha
-      - logistica_movimientos_traslado.fecha
+      - logistica_movimientos_entrada.f_consumo
+      - logistica_movimientos_entrega.f_consumo
+      - logistica_movimientos_devolucion.f_consumo
+      - logistica_movimientos_consumo.f_consumo
+      - logistica_movimientos_cobro.f_consumo
+      - logistica_movimientos_traslado.f_consumo
       - logistica_base_seriales.fecha
-      - logistica_seriales_asociados.fecha_asociacion
+      - logistica_seriales_asociados.fecha
     allowed_operations: [group_by_month, date_part_month]
 
   proyecto:
@@ -1678,7 +1955,7 @@ groupable_dimensions:
     canonical_fields:
       - logistica_movimientos_consumo.tecnico
       - logistica_movimientos_entrega.entregado_a
-      - logistica_base_seriales.responsable
+      - logistica_base_seriales.cedula
     allowed_operations: [group_by, filter, select]
 
   cedula:
@@ -1724,7 +2001,7 @@ groupable_dimensions:
     description: Agrupacion por tipo de movimiento logistico consolidado.
     synonyms: [tipo movimiento, movimiento, evento]
     canonical_fields:
-      - logistica_base_seriales.movimiento
+      - logistica_base_seriales.movimiento_sap
       - logistica_movimientos_traslado.tipo_movimiento
     allowed_operations: [group_by, filter, select]
 
@@ -1732,7 +2009,7 @@ groupable_dimensions:
     description: Agrupacion por origen logistico de un movimiento.
     synonyms: [origen, desde, fuente]
     canonical_fields:
-      - logistica_movimientos_traslado.bodega_origen
+      - logistica_movimientos_traslado.bodega
       - logistica_movimientos_entrada.origen
     allowed_operations: [group_by, filter, select]
 
@@ -1888,7 +2165,7 @@ business_rules:
     description: >
       El cálculo de stock debe usar movimientos reales y debe declarar claramente
       qué movimientos suman y cuáles restan.
-    default_components:
+    confirmed_components:
       add:
         - entradas
         - devoluciones
@@ -1898,9 +2175,15 @@ business_rules:
         - consumos
         - cobros
         - traslados_salientes
-    requires_validation:
-      - Confirmar si cobros descuentan inventario o solo registran evento financiero/logístico.
-      - Confirmar cómo identificar traslados entrantes y salientes.
+    confirmed_business_rules:
+      - Cobro descuenta inventario en el momento del cobro, aunque la factura se genere despues.
+      - Traslado bodega sale de una bodega e ingresa a otra.
+      - Traslado otro aliado sale del inventario propio.
+      - Facturacion no reemplaza el movimiento logistico para calcular saldo.
+    pending_db_validation:
+      - Confirmar columnas de cantidad, fecha, codigo, bodega, origen, destino y tipo_movimiento en tablas de movimiento.
+      - Confirmar valores fisicos que identifican traslado_bodega y traslado_otro_aliado.
+      - Confirmar si existe saldo materializado o si siempre debe calcularse por movimientos.
     metadata_tags:
       - stock
       - inventory_balance
@@ -1919,7 +2202,7 @@ business_rules:
     description: >
       El consumo móvil sin validar representa posible riesgo operativo.
     detection:
-      movement_field: logistica_base_seriales.movimiento
+      movement_field: logistica_base_seriales.movimiento_sap
       expected_movement_value: consumo_movil
       validation_field: logistica_base_seriales.validado
       pending_value: false
@@ -1956,22 +2239,44 @@ business_rules:
 
   stock_balance_rule:
     description: >
-      Todo saldo o stock solicitado debe responderse desde movimientos validados o
-      declararse como pendiente si la formula exacta no esta aprobada por negocio.
-    requires_validation:
-      - Confirmar componentes que suman y restan para cada familia de material.
+      Todo saldo o stock solicitado debe responderse desde movimientos validados.
+      La formula de negocio para materiales queda confirmada y habilitada solo
+      con columnas fisicas auditadas en logistica_cinco. Las cantidades varchar
+      se castean solo cuando pasan validacion numerica; registros invalidos se
+      reportan y no se suman.
+    requires_business_validation: false
+    requires_db_validation: false
+    validation_status: passed_2026_05_08
+    confirmed_columns:
+      - logistica_movimientos_entrada.codigo/cantidad/f_consumo/bodega/movimiento/estado/comentario
+      - logistica_movimientos_entrega.codigo/cantidad/f_consumo/bodega
+      - logistica_movimientos_devolucion.codigo/cantidad/f_consumo/bodega
+      - logistica_movimientos_consumo.codigo/cantidad/f_consumo/bodega/orden_trabajo/tipo/estado
+      - logistica_movimientos_cobro.codigo/cantidad/f_consumo/bodega
+      - logistica_movimientos_traslado.codigo/cantidad/f_consumo/bodega/movimiento/estado/comentario
+    blocked_columns:
+      - logistica_movimientos_traslado.bodega_destino
+      - bajas
+      - garantias_materiales
+    confirmed_formulas:
+      saldo_general_materiales: entradas - entregas + devoluciones - cobros - traslados_otro_aliado
+      saldo_bodega_materiales: entradas - entregas + devoluciones - cobros - traslados_otro_aliado +/- traslados_bodega
+      saldo_movil: entregas - consumo - cobros - devoluciones
+      bajas: 0
+      garantias_materiales: 0
     metadata_tags:
       - stock
-      - validation_required
+      - db_validation_required
 
   ingreso_stock_movil_facturacion_rule:
     description: >
-      La conciliacion ingreso - stock bodega - movil - facturacion es conceptual
-      y no debe activarse como calculo productivo hasta validar negocio.
-    requires_business_validation: true
+      La conciliacion ingreso - stock bodega - movil - facturacion fue marcada
+      por negocio como no aplicable y no debe activarse como calculo productivo.
+    status: not_applicable
+    requires_business_validation: false
     metadata_tags:
       - reconciliation
-      - balance_formula
+      - semantic_limitation
 
   consumo_tecnico_facturacion_rule:
     description: >
@@ -2305,10 +2610,11 @@ examples:
       intent: reconciliation_query
       business_concept: conciliacion_logistica
       operation: reconcile
-      requires_business_validation: true
+      requires_business_validation: false
       requires_external_source: false
       expected_runtime_flow: semantic_report
-      fallback_reason: formula_pendiente_de_validacion_de_negocio
+      implementation_status: semantic_limitation_only
+      fallback_reason: formula_no_aplica_por_regla_de_negocio
 
   - id: inv_016
     query: cruce saldos SAP contra kardex consumo
@@ -2625,8 +2931,8 @@ fill_with_real_db_metadata:
     - Confirmar cómo se identifica consumo_movil.
     - Confirmar cómo se marca validado/sin validar.
     - Confirmar cómo distinguir materiales comunes vs ferreteros.
-    - Confirmar si cobros descuentan inventario.
-    - Confirmar si traslados tienen origen y destino en la misma tabla.
+    - Validar en ai_dictionary/DB que cobros tienen columnas suficientes para descontar inventario por codigo, cantidad y fecha.
+    - Validar en ai_dictionary/DB que traslados tienen origen, destino y tipo de traslado para separar bodega vs otro aliado.
     - Confirmar si existe saldo materializado o debe calcularse siempre por movimientos.
 
   recommended_commands:
