@@ -10,6 +10,20 @@ CHAT_RESPONSE_CONTRACT_VERSION = "ia_dev.chat_response.v1"
 CHAT_RESPONSE_SNAPSHOT_V1: dict[str, Any] = {
     "session_id": "",
     "reply": "",
+    "response_envelope": {
+        "mode": "user",
+        "progress_source": "backend",
+        "route": {},
+        "fallback_used": {
+            "used": False,
+            "reason": "",
+            "flow": "",
+        },
+        "legacy_used": False,
+        "contract_policy_applied": {},
+        "needs_clarification": False,
+        "block_reason": "",
+    },
     "orchestrator": {
         "intent": "",
         "domain": "",
@@ -78,6 +92,26 @@ def ensure_chat_response_contract(payload: dict[str, Any] | None) -> dict[str, A
         response["session_id"] = str(response.get("session_id") or "")
     if not isinstance(response.get("reply"), str):
         response["reply"] = str(response.get("reply") or "")
+    response_envelope = response.get("response_envelope")
+    if not isinstance(response_envelope, dict):
+        response_envelope = {}
+    response_envelope.setdefault("mode", "user")
+    response_envelope.setdefault("progress_source", "backend")
+    if not isinstance(response_envelope.get("route"), dict):
+        response_envelope["route"] = {}
+    fallback_used = response_envelope.get("fallback_used")
+    if not isinstance(fallback_used, dict):
+        fallback_used = {}
+    fallback_used.setdefault("used", False)
+    fallback_used.setdefault("reason", "")
+    fallback_used.setdefault("flow", "")
+    response_envelope["fallback_used"] = fallback_used
+    response_envelope.setdefault("legacy_used", False)
+    if not isinstance(response_envelope.get("contract_policy_applied"), dict):
+        response_envelope["contract_policy_applied"] = {}
+    response_envelope.setdefault("needs_clarification", False)
+    response_envelope.setdefault("block_reason", "")
+    response["response_envelope"] = response_envelope
 
     orchestrator = response.get("orchestrator")
     if not isinstance(orchestrator, dict):

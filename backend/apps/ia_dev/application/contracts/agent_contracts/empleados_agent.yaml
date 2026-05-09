@@ -1,0 +1,94 @@
+agent_contract:
+  agent_id: empleados_agent
+  domain: empleados
+  role: Employee analytics and detail agent.
+  responsibilities:
+    - Count and group employee populations.
+    - Resolve employee detail and workforce turnover queries.
+  out_of_scope:
+    - Knowledge governance.
+    - Cross-domain attendance analytics without handoff.
+  input_context:
+    session_memory: true
+    user_memory: true
+    business_memory: true
+  output_context:
+    updates_session_memory: true
+    emits_business_response: true
+  intents:
+    - id: employee_count
+      description: Count or aggregate employees by status and dimension.
+      examples: ["cuantos empleados activos hay", "empleados por cargo"]
+      capability: empleados.count.active.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [estado, area, cargo, supervisor, movil]
+      tables: [cinco_base_de_personal]
+      validation_rules: ["status_filter_if_present_must_be_applied"]
+    - id: employee_detail
+      description: Employee detail by identifier or operational grouping.
+      examples: ["informacion de 98711054", "informacion movil TIRAN462"]
+      capability: empleados.detail.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [cedula, movil, codigo_sap, search]
+      tables: [cinco_base_de_personal]
+      validation_rules: ["entity_filter_if_present_must_be_applied"]
+  capabilities:
+    - id: empleados.count.active.v1
+      type: handler
+      owner: empleados.count_active
+      planner_required: true
+      handler_required: true
+      allowed_tables: [cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: kpi_or_table
+      rollout_flag: IA_DEV_CAP_EMPLEADOS_ENABLED|IA_DEV_CAP_EMPLEADOS_COUNT_ENABLED
+      policy_tags: [contains_personal_data, contains_operational_data]
+    - id: empleados.detail.v1
+      type: handler
+      owner: empleados.detail
+      planner_required: true
+      handler_required: true
+      allowed_tables: [cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_EMPLEADOS_ENABLED
+      policy_tags: [contains_personal_data]
+  routing_rules:
+    deterministic_patterns: ["cedula", "movil", "empleados activos", "rotacion de personal"]
+    semantic_assist_enabled: true
+    domain_priority_rules: ["empleados_over_general_when_employee_vocabulary_is_strong"]
+    memory_isolation: strict_by_domain_and_capability
+  semantic_assist_rules:
+    - Treat active or inactive population questions as analytics, not person-detail, unless an identifier is present.
+  execution_rules:
+    covered_by_modern_runtime: true
+    legacy_runtime_owner: employees_legacy_runtime
+  validation_rules:
+    - entity_filter_if_present_must_be_applied
+    - expected_group_dimension_must_exist_when_requested
+  handoffs:
+    allowed_targets: [ausentismo_agent]
+    payload_schema: agent_contract.v1.handoff
+    required_fields: [domain, intent, filters]
+  fallback_policy:
+    legacy_allowed: true
+    user_visible_error_policy: controlled_limitation
+    technical_debug_visibility: hidden_from_end_user
+  response_policy:
+    user_mode: business
+    debug_mode: internal_only
+    required_sections: [reply, data]
+    forbidden_terms: [runtime_only_fallback, legacy, completar ai_dictionary]
+  memory_policy:
+    scope: session_user_and_business
+    cross_domain_sharing: blocked_except_handoff
+  observability:
+    required_trace_fields: [agent_id, domain, intent, capability, route, execute, fallback_used, planner_called]
+  tests_required:
+    - contract_loads
+    - intents_have_capabilities
+    - capabilities_have_handler_or_planner
+    - frontend_simulator_parity
+

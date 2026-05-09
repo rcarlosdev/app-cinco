@@ -272,6 +272,8 @@ export const normalizeChatPayload = (
 ): NormalizedAssistantPayload => {
   const fallbackSummary = asString(response?.reply);
   const data = asObject(response?.data) || {};
+  const envelope = asObject(response?.response_envelope) || {};
+  const runtime = asObject(asObject(response?.data_sources)?.runtime) || {};
 
   const kpis = normalizeKpis(
     data.kpis ?? (response as Record<string, unknown> | undefined)?.kpis,
@@ -300,7 +302,9 @@ export const normalizeChatPayload = (
     data.charts ?? (response as Record<string, unknown> | undefined)?.charts,
   ).filter(isValidChart);
 
-  const meta = {
+  const meta: Record<string, unknown> = {
+    response_envelope: envelope,
+    runtime,
     ...(asObject(data.cause_generation_meta) || {}),
     ...(asObject(data.meta) || {}),
     ...(rawChart?.meta && typeof rawChart.meta === "object"
@@ -361,5 +365,27 @@ export const normalizeChatPayload = (
     meta,
     hasStructuredContent,
     highlight: findDominantHighlight(labels, series, table),
+    route:
+      (asObject(envelope.route) || asObject(runtime.route) || {}) as Record<
+        string,
+        unknown
+      >,
+    fallbackUsed:
+      (asObject(envelope.fallback_used) ||
+        asObject(runtime.fallback_used) ||
+        {}) as Record<string, unknown>,
+    legacyUsed:
+      Boolean(envelope.legacy_used) || Boolean(runtime.legacy_used),
+    contractPolicyApplied:
+      (asObject(envelope.contract_policy_applied) ||
+        asObject(runtime.contract_policy_applied) ||
+        {}) as Record<string, unknown>,
+    needsClarification: Boolean(envelope.needs_clarification),
+    blockReason:
+      asString(envelope.block_reason) || asString(runtime.block_reason),
+    progressSource:
+      asString(envelope.progress_source) ||
+      asString(runtime.progress_source) ||
+      "backend",
   };
 };

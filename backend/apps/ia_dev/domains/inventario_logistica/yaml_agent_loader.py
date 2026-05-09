@@ -59,6 +59,7 @@ def get_tables_for_dictionary(config: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "domain_code": domain_code,
                 "yaml_business_domain_code": get_business_domain_code(config),
+                "schema_name": str(table_data.get("schema_name") or ""),
                 "table_name": str(table_name),
                 "business_name": str(table_data.get("business_name") or ""),
                 "description": str(table_data.get("description") or ""),
@@ -80,6 +81,7 @@ def get_fields_for_dictionary(config: dict[str, Any]) -> list[dict[str, Any]]:
             rows.append(
                 {
                     "domain_code": get_runtime_domain_code(config),
+                    "schema_name": str(table_data.get("schema_name") or ""),
                     "table_name": str(table_name),
                     "column_name": str(column_name),
                     "data_type": str(column_data.get("data_type") or ""),

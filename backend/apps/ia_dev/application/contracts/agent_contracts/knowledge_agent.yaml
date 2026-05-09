@@ -1,0 +1,111 @@
+agent_contract:
+  agent_id: knowledge_agent
+  domain: knowledge
+  role: Governance agent for knowledge proposals and approvals.
+  responsibilities:
+    - Create, approve and reject governed knowledge proposals.
+    - Keep proposal lifecycle observable and policy-first.
+  out_of_scope:
+    - Free-form analytics execution.
+    - Direct legacy runtime delegation.
+  input_context:
+    session_memory: true
+    user_memory: true
+    business_memory: false
+  output_context:
+    updates_session_memory: false
+    emits_business_response: true
+  intents:
+    - id: knowledge_change_request
+      description: Create a knowledge proposal.
+      examples: ["agrega una regla nueva", "registra este sinonimo"]
+      capability: knowledge.proposal.create.v1
+      strategy: semantic_only
+      required_filters: []
+      optional_filters: []
+      tables: []
+      validation_rules: ["approval_policy_required"]
+    - id: knowledge_approve
+      description: Approve a proposal.
+      examples: ["aprueba la propuesta 123"]
+      capability: knowledge.proposal.approve.v1
+      strategy: semantic_only
+      required_filters: []
+      optional_filters: []
+      tables: []
+      validation_rules: ["approval_policy_required"]
+    - id: knowledge_reject
+      description: Reject a proposal.
+      examples: ["rechaza la propuesta 123"]
+      capability: knowledge.proposal.reject.v1
+      strategy: semantic_only
+      required_filters: []
+      optional_filters: []
+      tables: []
+      validation_rules: ["approval_policy_required"]
+  capabilities:
+    - id: knowledge.proposal.create.v1
+      type: semantic_only
+      owner: knowledge.governance
+      planner_required: false
+      handler_required: false
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: IA_DEV_CAP_KNOWLEDGE_PROPOSAL_CREATE_V1
+      policy_tags: [requires_governance]
+    - id: knowledge.proposal.approve.v1
+      type: semantic_only
+      owner: knowledge.governance
+      planner_required: false
+      handler_required: false
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: IA_DEV_CAP_KNOWLEDGE_PROPOSAL_APPROVE_V1
+      policy_tags: [requires_governance, requires_approval]
+    - id: knowledge.proposal.reject.v1
+      type: semantic_only
+      owner: knowledge.governance
+      planner_required: false
+      handler_required: false
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: IA_DEV_CAP_KNOWLEDGE_PROPOSAL_REJECT_V1
+      policy_tags: [requires_governance]
+  routing_rules:
+    deterministic_patterns: ["explicit_change_request", "explicit_approval_request"]
+    semantic_assist_enabled: true
+    domain_priority_rules: ["knowledge_overrides_general_for_governance_requests"]
+    memory_isolation: strict_by_domain
+  semantic_assist_rules:
+    - Only classify requests explicitly asking for governance changes as knowledge operations.
+  execution_rules:
+    covered_by_modern_runtime: true
+    legacy_runtime_owner: none
+  validation_rules:
+    - approval_policy_required
+  handoffs:
+    allowed_targets: [analista_agent]
+    payload_schema: agent_contract.v1.handoff
+    required_fields: [intent]
+  fallback_policy:
+    legacy_allowed: false
+    user_visible_error_policy: controlled_limitation
+    technical_debug_visibility: hidden_from_end_user
+  response_policy:
+    user_mode: business
+    debug_mode: internal_only
+    required_sections: [reply]
+    forbidden_terms: [runtime_only_fallback, legacy, completar ai_dictionary]
+  memory_policy:
+    scope: session_only
+    cross_domain_sharing: blocked
+  observability:
+    required_trace_fields: [agent_id, domain, intent, capability, route, execute, fallback_used]
+  tests_required:
+    - contract_loads
+    - intents_have_capabilities
+    - frontend_simulator_parity
+

@@ -52,6 +52,31 @@ def _resolve_user_key(request) -> str | None:
     return None
 
 
+def _request_debug_mode(request) -> bool:
+    header = str(request.headers.get("X-IA-Dev-Debug", "") or "").strip().lower()
+    query = str(request.query_params.get("debug", "") or "").strip().lower()
+    body = str(request.data.get("debug", "") or "").strip().lower() if hasattr(request, "data") else ""
+    return header in {"1", "true", "yes", "on"} or query in {"1", "true", "yes", "on"} or body in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _legacy_is_blocked_for_message(*, message: str) -> tuple[bool, dict]:
+    service = _get_chat_application_service()
+    classification = service._bootstrap_classification(message=message, session_context={})
+    contract_payload = service._resolve_agent_contract(
+        agent_id=str(classification.get("selected_agent") or "") or None,
+        domain_code=str(classification.get("domain") or "") or None,
+    )
+    blocked = bool(contract_payload) and not service._legacy_allowed_for_contract(
+        contract_payload=contract_payload
+    )
+    return blocked, classification
+
+
 def _attach_http_runtime_metadata(
     *,
     response: dict,
@@ -71,6 +96,10 @@ def _attach_http_runtime_metadata(
         runtime.pop("legacy_runtime_fallback_reason", None)
     data_sources["runtime"] = runtime
     payload["data_sources"] = data_sources
+    envelope = dict(payload.get("response_envelope") or {})
+    envelope["progress_source"] = str(envelope.get("progress_source") or "backend")
+    envelope["legacy_used"] = bool(runtime.get("legacy_used") or legacy_runtime_fallback_used)
+    payload["response_envelope"] = envelope
     return payload
 
 
@@ -123,6 +152,7 @@ class IADevChatView(APIView):
             )
 
         actor_user_key = _resolve_user_key(request)
+        response_debug_mode = _request_debug_mode(request)
         legacy_runtime_fallback_used = False
         legacy_runtime_fallback_reason = None
         try:
@@ -133,6 +163,7 @@ class IADevChatView(APIView):
                 legacy_runner=lambda **kwargs: _get_runtime_fallback_service().run(**kwargs),
                 observability=observability_service,
                 actor_user_key=actor_user_key,
+                response_debug_mode=response_debug_mode,
             )
             runtime_meta = dict(((result.get("data_sources") or {}).get("runtime") or {}))
             legacy_runtime_fallback_used = bool(
@@ -143,17 +174,26 @@ class IADevChatView(APIView):
                     runtime_meta.get("legacy_runtime_fallback_reason") or ""
                 ) or None
         except Exception as exc:
-            legacy_runtime_fallback_used = True
-            legacy_runtime_fallback_reason = (
-                f"chat_application_service_exception:{exc.__class__.__name__}"
-            )
-            result = _get_runtime_fallback_service().run(
-                message=message,
-                session_id=session_id,
-                reset_memory=reset_memory,
-                actor_user_key=actor_user_key,
-                fallback_reason=legacy_runtime_fallback_reason,
-            )
+            legacy_runtime_fallback_reason = f"chat_application_service_exception:{exc.__class__.__name__}"
+            blocked, classification = _legacy_is_blocked_for_message(message=message)
+            if blocked:
+                result = _get_chat_application_service().build_controlled_runtime_limitation_response(
+                    message=message,
+                    session_id=session_id,
+                    classification=classification,
+                    block_reason=legacy_runtime_fallback_reason,
+                    response_debug_mode=response_debug_mode,
+                )
+                legacy_runtime_fallback_used = False
+            else:
+                legacy_runtime_fallback_used = True
+                result = _get_runtime_fallback_service().run(
+                    message=message,
+                    session_id=session_id,
+                    reset_memory=reset_memory,
+                    actor_user_key=actor_user_key,
+                    fallback_reason=legacy_runtime_fallback_reason,
+                )
 
         result = _attach_http_runtime_metadata(
             response=result,

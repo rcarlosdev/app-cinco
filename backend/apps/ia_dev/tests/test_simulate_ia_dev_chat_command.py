@@ -484,8 +484,9 @@ class _FakeChatApplicationService:
         actor_user_key: str | None = None,
         legacy_runner=None,
         observability=None,
+        response_debug_mode: bool = False,
     ):
-        del legacy_runner, observability
+        del legacy_runner, observability, response_debug_mode
         with patch.object(
             ChatApplicationService,
             "_bootstrap_classification",
@@ -520,6 +521,7 @@ class _CaptureChatApplicationService:
         actor_user_key: str | None = None,
         legacy_runner=None,
         observability=None,
+        response_debug_mode: bool = False,
     ):
         del actor_user_key, legacy_runner, observability
         self.__class__.calls.append(
@@ -527,6 +529,7 @@ class _CaptureChatApplicationService:
                 "message": message,
                 "session_id": session_id,
                 "reset_memory": reset_memory,
+                "response_debug_mode": response_debug_mode,
             }
         )
         return _sql_response()
@@ -640,6 +643,7 @@ class SimulateIADevChatCommandTests(SimpleTestCase):
         self.assertEqual(str(orchestrator.get("compiler_used") or ""), "join_aware_pilot")
         self.assertEqual(str(orchestrator.get("analytics_router_decision") or ""), "join_aware_sql")
         self.assertEqual(str(orchestrator.get("arbitrated_intent") or ""), "analytics_query")
+        self.assertIn("response_envelope", payload)
 
     def test_management_command_raw_output_exposes_employee_birthday_sql_runtime(self):
         stdout = StringIO()
@@ -755,6 +759,27 @@ class SimulateIADevChatCommandTests(SimpleTestCase):
                 "Qué patrones existen por área, cargo y sede",
             ],
         )
+
+    def test_raw_service_mode_enables_debug_response_mode(self):
+        stdout = StringIO()
+        _CaptureChatApplicationService.calls = []
+
+        with patch(
+            "apps.ia_dev.management.commands.simulate_ia_dev_chat.ChatApplicationService",
+            _CaptureChatApplicationService,
+        ):
+            call_command(
+                "simulate_ia_dev_chat",
+                "--message",
+                "saldo bodega operacion_hfc",
+                "--session-id",
+                "debug-raw",
+                "--raw",
+                stdout=stdout,
+            )
+
+        self.assertEqual(len(_CaptureChatApplicationService.calls), 1)
+        self.assertTrue(bool(_CaptureChatApplicationService.calls[0].get("response_debug_mode")))
 
     def test_service_runtime_bootstrap_includes_sql_assisted_and_pilot_flags(self):
         from apps.ia_dev.application.runtime.service_runtime_bootstrap import SERVICE_RUNTIME_DEFAULTS

@@ -324,7 +324,7 @@ class RuntimeCapabilityAdapter:
             if intent in {"aggregate", "count", "summary"}:
                 return "attendance.summary.by_attribute.v1"
             return "attendance.unjustified.summary.v1"
-        if domain == "transport":
+        if domain in {"transport", "transporte"}:
             return "transport.departures.summary.v1"
         if not needs_database or domain == "general":
             return "general.answer.v1"

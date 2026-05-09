@@ -85,6 +85,15 @@ class RuntimeFallbackService:
             runtime.pop("legacy_runtime_fallback_reason", None)
         data_sources["runtime"] = runtime
         payload["data_sources"] = data_sources
+        envelope = dict(payload.get("response_envelope") or {})
+        envelope["progress_source"] = str(envelope.get("progress_source") or "backend")
+        envelope["legacy_used"] = bool(legacy_runtime_fallback_used)
+        envelope["fallback_used"] = {
+            "used": bool(legacy_runtime_fallback_used),
+            "reason": str(legacy_runtime_fallback_reason or ""),
+            "flow": "legacy_fallback" if legacy_runtime_fallback_used else "",
+        }
+        payload["response_envelope"] = envelope
         return payload
 
     def _record_runtime_fallback_event(

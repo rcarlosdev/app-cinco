@@ -53,6 +53,43 @@ class InventoryDatabaseInspector:
                 metadata[table_name] = InventoryTableMetadata(table_name=table_name, columns=columns)
         return metadata
 
+    def get_tables_for_schemas(self, schemas: set[str], table_names: set[str] | None = None) -> dict[str, InventoryTableMetadata]:
+        requested = {str(item or "").strip() for item in set(schemas or set()) if str(item or "").strip()}
+        if not requested:
+            return {}
+        requested_tables = {
+            str(item or "").strip()
+            for item in set(table_names or set())
+            if str(item or "").strip()
+        }
+        metadata: dict[str, InventoryTableMetadata] = {}
+        connection = connections[self.database_alias]
+        with connection.cursor() as cursor:
+            placeholders = ", ".join(["%s"] * len(requested))
+            params: list[str] = sorted(requested)
+            table_filter = ""
+            if requested_tables:
+                table_placeholders = ", ".join(["%s"] * len(requested_tables))
+                table_filter = f" AND TABLE_NAME IN ({table_placeholders})"
+                params.extend(sorted(requested_tables))
+            cursor.execute(
+                f"""
+                SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA IN ({placeholders}){table_filter}
+                ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+                """,
+                params,
+            )
+            for table_name, column_name, column_type in cursor.fetchall():
+                clean_table = str(table_name or "").strip()
+                clean_column = str(column_name or "").strip()
+                if not clean_table or not clean_column:
+                    continue
+                metadata.setdefault(clean_table, InventoryTableMetadata(table_name=clean_table, columns={}))
+                metadata[clean_table].columns[clean_column] = str(column_type or "").strip().lower()
+        return metadata
+
 
 class InventoryDictionaryAuditService:
     def __init__(self, *, inspector_class=InventoryDatabaseInspector):
@@ -63,6 +100,8 @@ class InventoryDictionaryAuditService:
         normalized = str(type_name or "").strip().lower()
         if not normalized:
             return False
+        if normalized in {"7", "10", "11", "12"}:
+            return True
         return any(token in normalized for token in DATE_TYPE_HINTS)
 
     def audit(
@@ -79,7 +118,20 @@ class InventoryDictionaryAuditService:
         relationships_declared = get_relationships_for_dictionary(config)
         groupable_declared = get_groupable_dimensions(config)
         try:
-            tables_metadata = self.inspector_class(database_alias=database_alias).get_tables()
+            inspector = self.inspector_class(database_alias=database_alias)
+            tables_metadata = inspector.get_tables()
+            extra_schemas = {
+                str(table.get("schema_name") or "").strip()
+                for table in tables_declared
+                if str(table.get("schema_name") or "").strip()
+            }
+            if extra_schemas and hasattr(inspector, "get_tables_for_schemas"):
+                extra_table_names = {
+                    str(table.get("table_name") or "").strip()
+                    for table in tables_declared
+                    if str(table.get("schema_name") or "").strip()
+                }
+                tables_metadata.update(inspector.get_tables_for_schemas(extra_schemas, extra_table_names))
         except Exception as exc:
             return {
                 "agent": str(agent_code or get_runtime_domain_code(config)),

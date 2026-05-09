@@ -41,6 +41,13 @@ export type NormalizedAssistantPayload = {
   meta: Record<string, unknown>;
   hasStructuredContent: boolean;
   highlight: NormalizedHighlight | null;
+  route: Record<string, unknown>;
+  fallbackUsed: Record<string, unknown>;
+  legacyUsed: boolean;
+  contractPolicyApplied: Record<string, unknown>;
+  needsClarification: boolean;
+  blockReason: string;
+  progressSource: string;
 };
 
 export type ChatMessageModel = {

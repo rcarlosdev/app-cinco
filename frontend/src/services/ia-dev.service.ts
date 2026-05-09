@@ -101,6 +101,20 @@ export type IADevReasoningDiagnostic = {
 export type IADevChatResponse = {
   session_id: string;
   reply: string;
+  response_envelope?: {
+    mode?: "user" | "debug" | string;
+    progress_source?: "backend" | "synthetic" | string;
+    route?: Record<string, unknown>;
+    fallback_used?: {
+      used?: boolean;
+      reason?: string;
+      flow?: string;
+    };
+    legacy_used?: boolean;
+    contract_policy_applied?: Record<string, unknown>;
+    needs_clarification?: boolean;
+    block_reason?: string;
+  };
   orchestrator: {
     intent?: string;
     domain?: string;
@@ -122,6 +136,7 @@ export type IADevChatResponse = {
     cause_generation_meta?: Record<string, unknown>;
   };
   data_sources?: {
+    runtime?: Record<string, unknown>;
     ai_dictionary?: {
       ok: boolean;
       table?: string | null;

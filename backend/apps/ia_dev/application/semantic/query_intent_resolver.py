@@ -45,6 +45,14 @@ class QueryIntentResolver:
         r"\b(sin|no\s+tiene(?:n)?|vaci[oa]s?|incomplet[oa]s?|faltante(?:s)?|falta(?:n)?|"
         r"no\s+registrad[oa]s?|no\s+disponible(?:s)?|pendiente(?:s)?\s+de\s+dato)\b"
     )
+    _INVENTORY_DOMAIN_SIGNAL_RE = re.compile(
+        r"\b("
+        r"inventario|logistica|material(?:es)?|ferretero(?:s)?|serial(?:es)?|equipo(?:s)?|"
+        r"stock|saldo(?:s)?|existencia(?:s)?|bodega(?:s)?|almacen|almacenes|"
+        r"kardex|traslado(?:s)?|entrada(?:s)?|salida(?:s)?|devolucion(?:es)?|consumo(?:s)?|"
+        r"operacion_hfc|operacion\s+hfc|hfc"
+        r")\b"
+    )
 
     def __init__(self):
         self.model = resolve_model_name("query_intent")
@@ -150,7 +158,17 @@ class QueryIntentResolver:
             dimension_tokens=dimension_tokens,
         )
         asks_summary_count = any(token in normalized for token in ("cantidad", "cuantos", "cuantas", "total", "numero"))
-        if asks_summary_count:
+        natural_inventory_stock = bool(
+            domain == "inventario_logistica"
+            and (
+                re.search(r"\b(stock|saldo|existencia(?:s)?)\b", normalized)
+                or re.search(r"\bcuanto\s+tengo\b", normalized)
+                or re.search(r"\binventario\s+de\s+la\s+(?:cuadrilla|brigada|movil)\b", normalized)
+            )
+        )
+        if natural_inventory_stock:
+            operation = "stock_balance"
+        elif asks_summary_count:
             operation = "count"
         elif (
             self._has_employee_population_status_signal(normalized=normalized, domain=domain)
@@ -496,6 +514,14 @@ class QueryIntentResolver:
             merged_filters = dict(fallback_filters)
             merged_filters.setdefault("indicador_ausentismo", "SI")
 
+        if (fallback_domain or resolved_domain) == "inventario_logistica" and re.search(
+            r"\b(stock|saldo|existencia(?:s)?)\b", normalized_raw_query
+        ):
+            operation = "stock_balance"
+            template_id = str(fallback.template_id or template_id or "").strip().lower()
+            resolved_domain = "inventario_logistica"
+            merged_filters.update(fallback_filters)
+
         return StructuredQueryIntent(
             raw_query=fallback.raw_query,
             domain_code=resolved_domain,
@@ -525,6 +551,12 @@ class QueryIntentResolver:
         operation: str,
         dimension_tokens: list[str] | None = None,
     ) -> str:
+        if normalizar_codigo_dominio(domain_code) == "inventario_logistica" and operation == "stock_balance":
+            if re.search(r"\b(?:bodega|almacen|operacion[_\s-]?hfc)\b", normalized):
+                return "inventory_material_stock_by_warehouse"
+            if re.search(r"\b(?:cuadrilla|brigada|movil|empleado|tecnico)\b", normalized):
+                return "inventory_material_stock_mobile"
+            return "inventory_material_stock_balance"
         if (
             domain_code in {"empleados", "rrhh"}
             and QueryIntentResolver._has_group_dimension_signal(normalized, dimension_tokens=dimension_tokens)
@@ -602,7 +634,22 @@ class QueryIntentResolver:
         employee_name = QueryIntentResolver._extract_employee_name_filter(normalized=normalized)
         if employee_name:
             filters["nombre"] = employee_name
+        inventory_warehouse = QueryIntentResolver._extract_inventory_warehouse_filter(normalized=normalized)
+        if inventory_warehouse:
+            filters.setdefault("bodega", inventory_warehouse)
+            filters.setdefault("stock_scope", "bodega")
         return filters
+
+    @staticmethod
+    def _extract_inventory_warehouse_filter(*, normalized: str) -> str:
+        text = str(normalized or "").strip().lower()
+        if re.search(r"\boperacion[_\s-]?hfc\b", text):
+            return "operacion_hfc"
+        match = re.search(
+            r"\b(?:bodega|almacen)\s+(?!destino\b|origen\b|por\b|de\b|del\b|la\b|el\b)([a-z0-9_-]{2,})\b",
+            text,
+        )
+        return str(match.group(1) or "").strip() if match else ""
 
     @staticmethod
     def _extract_employee_name_filter(*, normalized: str) -> str:
@@ -1171,6 +1218,9 @@ class QueryIntentResolver:
             return fallback
 
         domain_code = str(matched.get("domain_code") or fallback.domain_code or "").strip().lower()
+        fallback_domain = normalizar_codigo_dominio(fallback.domain_code)
+        if fallback_domain == "inventario_logistica" and normalizar_codigo_dominio(domain_code) != "inventario_logistica":
+            return fallback
         operation = str(matched.get("operation") or fallback.operation or "").strip().lower()
         template_id = str(matched.get("template_id") or fallback.template_id or "").strip().lower()
         group_by = [str(item).strip().lower() for item in list(matched.get("group_by") or fallback.group_by or []) if str(item).strip()]
@@ -1307,9 +1357,15 @@ class QueryIntentResolver:
             return "empleados"
         if rrhh_match or generic_employee_lookup:
             return "empleados"
+        if QueryIntentResolver._has_inventory_domain_signal(normalized):
+            return "inventario_logistica"
         if any(token in normalized for token in ("transporte", "ruta", "movilidad", "vehicul")):
             return "general"
         return normalizar_dominio_operativo(domain, fallback="general")
+
+    @classmethod
+    def _has_inventory_domain_signal(cls, normalized: str) -> bool:
+        return bool(cls._INVENTORY_DOMAIN_SIGNAL_RE.search(str(normalized or "")))
 
     @classmethod
     def _has_employee_inactive_signal(cls, normalized: str) -> bool:

@@ -57,14 +57,54 @@ class InventarioSemanticResolverTests(SimpleTestCase):
     def test_traslados_por_bodega_destino(self):
         resolved = self._resolve("traslados por bodega destino", operation="aggregate")
 
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_transfer_group_by_destination")
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_transfer_destination_not_available")
         self.assertEqual(list(resolved.intent.group_by or []), ["bodega_destino"])
+        self.assertIn("missing_physical_column:bodega_destino", list((resolved.semantic_context.get("resolved_semantic") or {}).get("limitations") or []))
 
-    def test_stock_de_materiales_por_bodega_queda_pendiente_validacion(self):
+    def test_stock_de_materiales_por_bodega_usa_saldo_validado(self):
         resolved = self._resolve("stock de materiales por bodega", operation="aggregate")
 
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_stock_balance_pending_validation")
-        self.assertIn("inventario_stock_pendiente_validacion_negocio", list(resolved.warnings or []))
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_by_warehouse")
+        self.assertNotIn("inventario_stock_pendiente_validacion_db_ai_dictionary", list(resolved.warnings or []))
+
+    def test_saldo_bodega_operacion_hfc_extrae_filtro_fuerte(self):
+        resolved = self._resolve("saldo bodega operacion_hfc", operation="stock_balance")
+        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+        self.assertEqual(str(inference.get("intent") or ""), "stock_balance")
+        self.assertEqual(str(resolved.intent.operation or ""), "stock_balance")
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_by_warehouse")
+        self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+        self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "bodega")
+        self.assertIn("bodega", list(resolved.intent.group_by or []))
+
+    def test_saldo_movil_materiales_resuelve_template_movil(self):
+        resolved = self._resolve("saldo movil de materiales", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "movil")
+
+    def test_saldo_empleado_resuelve_stock_movil_por_cedula(self):
+        resolved = self._resolve("saldo empleado 98672304", operation="stock_balance")
+
+        self.assertEqual(str(resolved.intent.domain_code or ""), "inventario_logistica")
+        self.assertEqual(str(resolved.intent.operation or ""), "stock_balance")
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "98672304")
+        self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "movil")
+
+    def test_consumo_vs_facturacion_solo_sql_para_operacion_hfc(self):
+        resolved = self._resolve("consumo vs facturacion operacion_hfc", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_consumption_billing_operacion_hfc")
+        self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+
+    def test_equipos_por_estado_usa_saldo_serializado_validado(self):
+        resolved = self._resolve("equipos por estado", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_dimension")
+        self.assertEqual(list(resolved.intent.group_by or []), ["estado"])
+        self.assertNotIn("inventario_stock_pendiente_validacion_db_ai_dictionary", list(resolved.warnings or []))
 
     def test_saldo_actual_de_cedula_no_inventa_responsable(self):
         resolved = self._resolve("saldo actual de la cÃ©dula 123456789", operation="aggregate")
@@ -98,7 +138,7 @@ class InventarioSemanticResolverTests(SimpleTestCase):
                 "intent": "reconciliation_query",
                 "business_concept": "conciliacion_logistica",
                 "runtime_flow": "semantic_report",
-                "requires_business_validation": True,
+                "implementation_status": "semantic_limitation_only",
             },
             {
                 "message": "cruce saldos SAP contra kardex consumo",
