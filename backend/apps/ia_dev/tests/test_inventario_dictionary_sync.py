@@ -30,6 +30,7 @@ class _InspectorCompleto:
             "proveedor": "varchar",
             "bodega": "varchar",
             "cedula": "varchar",
+            "movil": "varchar",
             "estado": "varchar",
         }
         serial_columns = {
@@ -60,6 +61,21 @@ class _InspectorCompleto:
                     "codigo": "varchar",
                     "descripcion": "varchar",
                     "familia": "varchar",
+                },
+            ),
+            "cinco_base_de_personal": InventoryTableMetadata(
+                table_name="cinco_base_de_personal",
+                columns={
+                    "cedula": "varchar",
+                    "nombre": "varchar",
+                    "apellido": "varchar",
+                    "movil": "varchar",
+                    "area": "varchar",
+                    "carpeta": "varchar",
+                    "cargo": "varchar",
+                    "tipo_labor": "varchar",
+                    "estado": "varchar",
+                    "codigo_sap": "varchar",
                 },
             ),
             "logistica_movimientos_entrada": InventoryTableMetadata(

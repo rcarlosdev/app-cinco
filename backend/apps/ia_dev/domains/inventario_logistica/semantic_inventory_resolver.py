@@ -56,6 +56,10 @@ class InventorySemanticResolver:
     def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
         return any(token in text for token in tokens)
 
+    @staticmethod
+    def _is_numeric_identifier(value: str) -> bool:
+        return bool(re.fullmatch(r"\d{5,15}", str(value or "").strip()))
+
     def _extract_month(self, message: str) -> str:
         normalized = self._normalize(message)
         for month_name, month_number in MONTHS.items():
@@ -72,8 +76,24 @@ class InventorySemanticResolver:
             if value.lower() in {"perdido", "perdidos", "garantia", "garantias"}:
                 return ""
             return value
+        normalized = self._normalize(message)
+        if not self._contains_any(normalized, ("trazabilidad", "historial", "serial", "imei", "mac")):
+            return ""
         match = re.search(r"\b([A-Z]{2,}\d{2,}[A-Z0-9_-]*)\b", str(message or ""))
         return str(match.group(1) or "").strip() if match else ""
+
+    def _extract_operational_identifier(self, message: str) -> str:
+        match = re.search(
+            r"\b(?:movil|m[oó]vil|cuadrilla|brigada|asignacion|asignaci[oó]n)\s+(?:de\s+)?([A-Za-z0-9_-]{3,})\b",
+            str(message or ""),
+            re.IGNORECASE,
+        )
+        if not match:
+            return ""
+        value = str(match.group(1) or "").strip().upper()
+        if self._is_numeric_identifier(value):
+            return ""
+        return value if re.search(r"[A-Z]", value) and re.search(r"\d", value) else ""
 
     def _extract_code(self, message: str) -> str:
         match = re.search(r"\bcod(?:igo)?\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
@@ -87,7 +107,7 @@ class InventorySemanticResolver:
         match = re.search(r"\bc\S*dula\s+([0-9]{5,15})\b", normalized)
         if not match:
             match = re.search(r"\bcedula\s+([0-9]{5,15})\b", normalized)
-        if not match and "saldo" in normalized:
+        if not match:
             match = re.search(r"\b(?:empleado|tecnico|movil|mobile)\s+([0-9]{5,15})\b", normalized)
         return str(match.group(1) or "").strip() if match else ""
 
@@ -125,8 +145,8 @@ class InventorySemanticResolver:
             matched.append("proyecto")
         if "por area" in normalized or "a las areas" in normalized:
             matched.append("area")
-        if "por tecnico" in normalized:
-            matched.append("tecnico")
+        if "por tecnico" in normalized or "por empleado" in normalized or "por cedula" in normalized:
+            matched.append("cedula")
         if "por proveedor" in normalized:
             matched.append("proveedor")
         if "por compra" in normalized:
@@ -147,10 +167,12 @@ class InventorySemanticResolver:
             matched.append("estado")
         if "por bodega" in normalized:
             matched.append("bodega")
-        if "por responsable" in normalized or "por tecnico" in normalized or "por custodio" in normalized:
-            matched.append("responsable")
-        if "por movil" in normalized:
+        if "por responsable" in normalized or "por custodio" in normalized:
+            matched.append("cedula")
+        if "por movil" in normalized or "por cuadrilla" in normalized or "por brigada" in normalized:
             matched.append("movil")
+            if any(token in normalized for token in ("cedula", "empleado", "tecnico", "nombre")):
+                matched.append("cedula")
         if "materiales mas consumidos" in normalized or "mas consumidos" in normalized:
             matched.append("material")
         return list(dict.fromkeys(matched))
@@ -162,6 +184,7 @@ class InventorySemanticResolver:
         serial = self._extract_serial(message)
         codigo = self._extract_code(message)
         cedula = self._extract_cedula(message)
+        operational_identifier = self._extract_operational_identifier(message)
         project = self._extract_project(message)
         warehouse = self._extract_warehouse(message)
         month = self._extract_month(message)
@@ -178,6 +201,8 @@ class InventorySemanticResolver:
             filters["month"] = month
         if cedula:
             filters["cedula"] = cedula
+        if operational_identifier:
+            filters["movil"] = operational_identifier
 
         intent = "movement_query"
         operation = "list"
@@ -367,14 +392,28 @@ class InventorySemanticResolver:
             business_concept = "consumo_movil_sin_validar"
             filters.update({"movimiento": "consumo_movil", "validado": False})
             candidate_tables = ["logistica_base_seriales"]
-            candidate_fields = ["serial", "movimiento", "validado", "fecha", "responsable"]
-        elif ("historial" in normalized and serial) or "trazabilidad" in normalized or serial:
+            candidate_fields = ["serial", "codigo", "estado", "ubicacion", "fecha"]
+        elif (("historial" in normalized and serial) or "trazabilidad" in normalized or serial) and not operational_identifier:
             intent = "traceability_query"
             operation = "trace"
             material_family = "serializados"
             business_concept = "historial_movimientos_completo" if "historial" in normalized else "trazabilidad_serial"
             candidate_tables = ["logistica_base_seriales", "logistica_seriales_asociados"]
-            candidate_fields = ["serial", "codigo", "estado", "ubicacion", "responsable"]
+            candidate_fields = ["serial", "codigo", "estado", "ubicacion", "fecha"]
+        elif "inventario" in normalized and operational_identifier and any(
+            token in normalized for token in ("cuadrilla", "brigada", "movil", "móvil", "asignacion", "asignación")
+        ):
+            intent = "stock_balance"
+            operation = "stock_balance"
+            business_concept = "stock_movil"
+            filters["stock_scope"] = "movil"
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+                "logistica_movimientos_devolucion",
+            ]
+            candidate_fields = ["codigo", "cantidad", "f_consumo", "movil", "cedula", "estado"]
         elif "traslado" in normalized:
             intent = "transfer_query"
             operation = "aggregate" if group_by else "list"
@@ -404,14 +443,54 @@ class InventorySemanticResolver:
                 "logistica_movimientos_entrega",
                 "logistica_movimientos_consumo",
                 "logistica_movimientos_cobro",
+                "logistica_movimientos_devolucion",
             ]
             candidate_fields = ["codigo", "cantidad", "f_consumo", "movil", "cedula", "estado"]
+        elif any(token in normalized for token in ("material", "materiales")) and (cedula or operational_identifier) and any(
+            token in normalized for token in ("empleado", "tecnico", "cuadrilla", "brigada", "movil", "móvil")
+        ):
+            intent = "stock_balance"
+            operation = "stock_balance"
+            business_concept = "stock_movil"
+            filters["stock_scope"] = "movil"
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+                "logistica_movimientos_devolucion",
+            ]
+            candidate_fields = ["codigo", "cantidad", "f_consumo", "movil", "cedula", "estado"]
+        elif "materiales criticos" in normalized and any(
+            token in normalized for token in ("empleado", "tecnico", "cedula", "movil", "móvil")
+        ):
+            intent = "stock_balance"
+            operation = "aggregate"
+            material_family = "materiales"
+            business_concept = "materiales_criticos_por_empleado"
+            filters["stock_scope"] = "movil"
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+                "logistica_movimientos_devolucion",
+                "base_codigos",
+                "cinco_base_de_personal",
+            ]
+            candidate_fields = ["codigo", "cantidad", "f_consumo", "cedula", "bodega", "descripcion", "tipo", "movil"]
+        elif str(material_family or "") == "serializados" and (cedula or operational_identifier) and any(
+            token in normalized for token in ("equipo", "equipos", "serial", "serializados", "cargados", "asociados")
+        ):
+            intent = "serial_holder_query"
+            operation = "list"
+            business_concept = "seriales_por_operador"
+            candidate_tables = ["logistica_base_seriales", "base_codigo_seriales"]
+            candidate_fields = ["serial", "codigo", "estado", "ubicacion", "movil", "cedula", "fecha"]
         elif "consum" in normalized:
             intent = "consumption_query"
             operation = "top" if ("mas" in normalized or "top" in normalized) else "aggregate"
             business_concept = "materiales_mas_consumidos" if operation == "top" else ""
             candidate_tables = ["logistica_movimientos_consumo", "base_codigos"]
-            candidate_fields = ["codigo", "cantidad", "fecha", "responsable", "movil"]
+            candidate_fields = ["codigo", "cantidad", "fecha", "cedula", "movil"]
         elif any(token in normalized for token in ("stock", "saldo", "existencia", "existencias")) or (
             "cuanto tengo" in normalized and warehouse
         ):
@@ -431,7 +510,13 @@ class InventorySemanticResolver:
             if cedula and any(token in normalized for token in ("empleado", "tecnico", "cedula")):
                 business_concept = "stock_movil"
                 filters["stock_scope"] = "movil"
-            if "movil" in normalized or "móvil" in normalized:
+            if (
+                "movil" in normalized
+                or "móvil" in normalized
+                or any(token in normalized for token in ("cuadrilla", "brigada", "empleado", "tecnico"))
+                or "datos del empleado" in normalized
+                or any(token in group_by for token in ("tecnico", "cedula", "movil"))
+            ):
                 business_concept = "stock_movil"
                 filters["stock_scope"] = "movil"
             elif "bodega" in normalized:
@@ -457,9 +542,16 @@ class InventorySemanticResolver:
             candidate_tables = ["logistica_base_seriales"]
             candidate_fields = ["estado", "serial"]
 
-        if cedula and intent in {"stock_query", "stock_balance"}:
-            business_concept = "stock_by_responsible"
-            limitations.append("responsable_o_cedula_requires_dictionary_validation")
+        if cedula and intent in {"stock_query", "stock_balance"} and not business_concept:
+            business_concept = "stock_movil"
+        if (
+            intent == "stock_balance"
+            and business_concept == "stock_movil"
+            and str(material_family or "") == "materiales"
+            and any(token in normalized for token in ("empleado", "tecnico", "cuadrilla", "brigada", "movil", "mÃ³vil", "cedula"))
+            and "codigo" not in group_by
+        ):
+            group_by.append("codigo")
 
         confidence = 0.61
         if candidate_tables:
@@ -528,17 +620,22 @@ class InventorySemanticResolver:
                 )
             ),
             "association_query": "inventory_serial_association_departures",
+            "serial_holder_query": "inventory_serial_by_operational_holder",
             "stock_balance": "inventory_serial_stock_by_dimension"
             if str(inference.get("material_family") or "") == "serializados"
             and set(inferred_group_by or []) <= {"estado", "bodega", "ubicacion", "codigo"}
             and bool(inferred_group_by)
             else (
-                "inventory_material_stock_mobile"
-                if str(normalized_filters.get("stock_scope") or "") == "movil"
+                "inventory_material_critical_by_employee"
+                if str(inference.get("business_concept") or "") == "materiales_criticos_por_empleado"
                 else (
-                    "inventory_material_stock_by_warehouse"
-                    if str(normalized_filters.get("stock_scope") or "") == "bodega" or "bodega" in inferred_group_by
-                    else "inventory_material_stock_balance"
+                    "inventory_material_stock_mobile"
+                    if str(normalized_filters.get("stock_scope") or "") == "movil"
+                    else (
+                        "inventory_material_stock_by_warehouse"
+                        if str(normalized_filters.get("stock_scope") or "") == "bodega" or "bodega" in inferred_group_by
+                        else "inventory_material_stock_balance"
+                    )
                 )
             ),
             "stock_query": "inventory_serial_stock_by_dimension"
@@ -592,9 +689,6 @@ class InventorySemanticResolver:
 
         if str(resolved_intent.template_id or "") == "inventory_stock_balance_pending_validation":
             warnings.append("inventario_stock_pendiente_validacion_db_ai_dictionary")
-        if normalized_filters.get("cedula") and "responsable_o_cedula_requires_dictionary_validation" in limitations:
-            warnings.append("cedula_o_responsable_no_validado_en_dictionary")
-
         semantic_context = dict(semantic_context or {})
         semantic_context["inventory_semantic_inference"] = dict(inference)
         semantic_context.setdefault("resolved_semantic", {})

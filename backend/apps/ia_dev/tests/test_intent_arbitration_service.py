@@ -255,6 +255,105 @@ class IntentArbitrationServiceTests(SimpleTestCase):
         self.assertFalse(bool(result.get("should_fallback")))
         self.assertIn("movil", list(result.get("valid_group_dimensions") or []))
 
+    def test_saldo_empleado_con_nombre_y_movil_asignada_stays_in_inventory_analytics(self):
+        service = self._service()
+
+        with patch.object(
+            service,
+            "_arbitrate_openai",
+            return_value={
+                "final_intent": "operational_question",
+                "final_domain": "inventario_logistica",
+                "should_execute_query": False,
+                "should_create_kpro": False,
+                "should_use_sql_assisted": False,
+                "should_use_handler": False,
+                "should_fallback": False,
+                "confidence": 0.83,
+                "reasoning_summary": "La solicitud parece operativa.",
+                "required_clarification": "",
+            },
+        ):
+            service.enable_openai = True
+            result = service.arbitrate(
+                original_question="saldo empleado 1214730857 con nombre y movil asignada",
+                candidate_domain="inventario_logistica",
+                heuristic_intent={"intent": "stock_balance", "domain": "inventario_logistica", "confidence": 0.91},
+                llm_intent=StructuredQueryIntent(
+                    raw_query="saldo empleado 1214730857 con nombre y movil asignada",
+                    domain_code="inventario_logistica",
+                    operation="stock_balance",
+                    template_id="inventory_material_stock_mobile",
+                    confidence=0.93,
+                    source="inventory_stock_pre_router",
+                    filters={"cedula": "1214730857", "stock_scope": "movil"},
+                ),
+                candidate_capabilities=[{"capability_id": "inventory_stock_balance_by_mobile"}],
+                ai_dictionary_context={
+                    "fields": [
+                        {"logical_name": "cedula", "table_name": "cinco_base_de_personal", "supports_filter": True},
+                        {"logical_name": "movil", "table_name": "cinco_base_de_personal", "supports_filter": True},
+                    ],
+                    "relations": [],
+                    "rules": [],
+                    "synonyms": [],
+                    "tables": [
+                        {"table_name": "logistica_movimientos_entrega"},
+                        {"table_name": "logistica_movimientos_consumo"},
+                        {"table_name": "cinco_base_de_personal"},
+                    ],
+                },
+                action_risk={"level": "low"},
+                knowledge_governance_signals={"explicit_change_request": False, "explicit_apply_request": False},
+            )
+
+        self.assertEqual(str(result.get("final_intent") or ""), "analytics_query")
+        self.assertEqual(str(result.get("final_domain") or ""), "inventario_logistica")
+        self.assertTrue(bool(result.get("should_execute_query")))
+        self.assertTrue(bool(result.get("should_use_sql_assisted")))
+        self.assertFalse(bool(result.get("should_fallback")))
+        self.assertEqual(str((result.get("filters") or {}).get("cedula") or ""), "1214730857")
+
+    def test_inventory_cross_with_employee_data_does_not_fall_back_to_clarification(self):
+        service = self._service()
+
+        result = service.arbitrate(
+            original_question="inventario de la cuadrilla TIRAN224 con datos del empleado",
+            candidate_domain="ausentismo",
+            heuristic_intent={"intent": "attendance_query", "domain": "ausentismo", "confidence": 0.44},
+            llm_intent=StructuredQueryIntent(
+                raw_query="inventario de la cuadrilla TIRAN224 con datos del empleado",
+                domain_code="inventario_logistica",
+                operation="stock_balance",
+                template_id="inventory_material_stock_mobile",
+                confidence=0.88,
+                source="rules",
+                filters={"movil": "TIRAN224", "stock_scope": "movil"},
+            ),
+            candidate_capabilities=[{"capability_id": "inventory_stock_balance_by_mobile"}],
+            ai_dictionary_context={
+                "fields": [
+                    {"logical_name": "cedula", "table_name": "cinco_base_de_personal", "supports_filter": True},
+                    {"logical_name": "movil", "table_name": "cinco_base_de_personal", "supports_filter": True},
+                ],
+                "tables": [
+                    {"table_name": "logistica_movimientos_entrega"},
+                    {"table_name": "logistica_movimientos_consumo"},
+                    {"table_name": "cinco_base_de_personal"},
+                ],
+                "relations": [],
+                "rules": [],
+                "synonyms": [],
+            },
+            action_risk={"level": "low"},
+            knowledge_governance_signals={"explicit_change_request": False, "explicit_apply_request": False},
+        )
+
+        self.assertEqual(str(result.get("final_intent") or ""), "analytics_query")
+        self.assertEqual(str(result.get("final_domain") or ""), "inventario_logistica")
+        self.assertTrue(bool(result.get("should_execute_query")))
+        self.assertFalse(bool(result.get("should_fallback")))
+
     def test_birthday_queries_expose_structural_semantic_inference(self):
         service = self._service()
 

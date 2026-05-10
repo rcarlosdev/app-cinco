@@ -1,3 +1,4 @@
+//frontend/src/modules/programacion/ia-dev/chat/types.ts
 import type {
   IADevAction,
   IADevChartPayload,
@@ -36,6 +37,7 @@ export type NormalizedAssistantPayload = {
   chart: IADevChartPayload | null;
   charts: IADevChartPayload[];
   table: NormalizedTable | null;
+  extraTables: NormalizedTable[];
   labels: string[];
   series: number[];
   meta: Record<string, unknown>;

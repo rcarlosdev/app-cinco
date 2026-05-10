@@ -257,6 +257,111 @@ class QueryIntelligenceDomainRescueTests(SimpleTestCase):
         )
         self.assertNotIn("personal_status", dict(intent_resolver.last_memory_hints or {}))
 
+    def test_saldo_empleado_con_nombre_y_movil_asignada_is_stable_10_de_10(self):
+        class _InventorySemanticResolverStub:
+            @staticmethod
+            def build_semantic_context(*, domain_code, include_dictionary):
+                self.assertEqual(domain_code, "inventario_logistica")
+                self.assertTrue(include_dictionary)
+                return {
+                    "domain_code": "inventario_logistica",
+                    "tables": [
+                        {"table_name": "logistica_movimientos_entrega"},
+                        {"table_name": "logistica_movimientos_consumo"},
+                        {"table_name": "cinco_base_de_personal"},
+                    ],
+                    "column_profiles": [
+                        {"table_name": "cinco_base_de_personal", "logical_name": "cedula", "column_name": "cedula"},
+                        {"table_name": "cinco_base_de_personal", "logical_name": "movil", "column_name": "movil"},
+                    ],
+                    "dictionary": {
+                        "fields": [
+                            {"logical_name": "cedula", "table_name": "cinco_base_de_personal", "supports_filter": True},
+                            {"logical_name": "movil", "table_name": "cinco_base_de_personal", "supports_filter": True},
+                        ],
+                        "relations": [],
+                        "rules": [],
+                        "synonyms": [],
+                    },
+                    "supports_sql_assisted": True,
+                    "source_of_truth": {"used_dictionary": True, "used_yaml": True},
+                }
+
+            @staticmethod
+            def resolve_query(*, message, intent, base_classification, semantic_context_override=None):
+                self.assertEqual(str(base_classification.get("domain") or ""), "inventario_logistica")
+                return ResolvedQuerySpec(
+                    intent=intent,
+                    semantic_context=dict(semantic_context_override or _InventorySemanticResolverStub.build_semantic_context(
+                        domain_code="inventario_logistica",
+                        include_dictionary=True,
+                    )),
+                    normalized_filters=dict(intent.filters or {}),
+                    normalized_period={},
+                    mapped_columns={"cedula": "cedula", "movil": "movil"},
+                    warnings=[],
+                )
+
+        execution_planner = Mock()
+        execution_planner.plan.return_value = QueryExecutionPlan(
+            strategy="sql_assisted",
+            reason="inventory_material_stock_mobile",
+            domain_code="inventario_logistica",
+            capability_id="inventory_stock_balance_by_mobile",
+            sql_query="SELECT saldo_movil FROM demo WHERE cedula = '1214730857'",
+            constraints={"filters": {"cedula": "1214730857", "stock_scope": "movil"}},
+            policy={"allowed": True},
+            metadata={"capability_id": "inventory_stock_balance_by_mobile"},
+        )
+        execution_planner.execute_sql_assisted.return_value = {
+            "ok": True,
+            "response": {"reply": "ok"},
+            "used_legacy": False,
+        }
+
+        service = ChatApplicationService(
+            semantic_business_resolver=_InventorySemanticResolverStub(),
+            query_execution_planner=execution_planner,
+        )
+        message = "saldo empleado 1214730857 con nombre y movil asignada"
+
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_MODE": "active",
+                "IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0",
+                "IA_DEV_USE_OPENAI_INTENT_ARBITRATION": "0",
+            },
+            clear=False,
+        ):
+            for _ in range(10):
+                run_context = RunContext.create(message=message)
+                observability = _ObservabilityStub()
+                payload = service._resolve_query_intelligence(
+                    message=message,
+                    base_classification={
+                        "domain": "empleados",
+                        "intent": "empleados_query",
+                        "needs_database": True,
+                    },
+                    run_context=run_context,
+                    observability=observability,
+                )
+
+                self.assertEqual(str(payload.get("intent", {}).get("domain_code") or ""), "inventario_logistica")
+                self.assertEqual(str(payload.get("execution_plan", {}).get("capability_id") or ""), "inventory_stock_balance_by_mobile")
+                self.assertEqual(str(payload.get("intent", {}).get("filters", {}).get("cedula") or ""), "1214730857")
+                self.assertEqual(str(payload.get("intent_arbitration", {}).get("final_domain") or ""), "inventario_logistica")
+                self.assertEqual(str(payload.get("semantic_orchestrator", {}).get("domain") or ""), "inventario_logistica")
+                self.assertEqual(str(payload.get("semantic_orchestrator", {}).get("capability") or ""), "inventory_stock_balance_by_mobile")
+                self.assertFalse(bool(payload.get("execution_result", {}).get("used_legacy")))
+                self.assertNotEqual(
+                    str(payload.get("intent_arbitration", {}).get("final_domain") or "").strip().lower(),
+                    "empleados",
+                )
+                self.assertTrue(any(item.get("event_type") == "planner_called" for item in observability.events))
+
     def test_resolve_query_intelligence_rescues_general_to_empleados(self):
         semantic_resolver = Mock()
         semantic_resolver.build_semantic_context.return_value = {

@@ -342,6 +342,43 @@ class IntentArbitrationService:
         should_use_handler = bool(decision.get("should_use_handler"))
         should_fallback = bool(decision.get("should_fallback"))
         executable_analytics = bool(semantic_inference.get("executable_analytics"))
+        guarded_inventory_employee_stock = self._is_inventory_employee_stock_query(
+            semantic_inference.get("original_question") or ""
+        )
+        inventory_sql_executable = bool(
+            final_domain == "inventario_logistica"
+            and str(semantic_inference.get("operation") or "").strip().lower() == "stock_balance"
+            and bool(dictionary_payload.get("has_real_data"))
+            and bool(
+                str((semantic_inference.get("filters") or {}).get("cedula") or "").strip()
+                or str((semantic_inference.get("filters") or {}).get("movil") or "").strip()
+            )
+            and bool(semantic_inference.get("should_use_sql_assisted"))
+        )
+        if guarded_inventory_employee_stock:
+            final_intent = "analytics_query"
+            final_domain = "inventario_logistica"
+            confidence = max(confidence, self.confidence_threshold)
+            low_confidence = False
+            should_create_kpro = False
+            should_execute_query = True
+            should_use_sql_assisted = has_real_data
+            should_use_handler = False
+            should_fallback = False
+            clarification = ""
+            reasoning_summary = (
+                "La frase 'saldo ... empleado/tecnico <cedula>' corresponde a saldo de inventario por movil. "
+                "Se conserva inventario_logistica y empleados queda solo para enrichment."
+            )
+        if final_intent in {"operational_question", "fallback"} and (executable_analytics or inventory_sql_executable):
+            final_intent = "analytics_query"
+            confidence = max(confidence, self.confidence_threshold)
+            reasoning_summary = (
+                "La solicitud ya tiene una ruta analitica ejecutable con soporte estructural del dominio; "
+                "se mantiene como analytics_query para preservar SQL assisted y evitar desviar la consulta."
+            )
+            clarification = ""
+            should_fallback = False
 
         if final_intent == "analytics_query":
             if executable_analytics:
@@ -589,16 +626,27 @@ class IntentArbitrationService:
         llm_payload: dict[str, Any],
         dictionary_context: dict[str, Any],
     ) -> dict[str, Any]:
+        if cls._is_inventory_employee_stock_query(original_question):
+            return {
+                **InventorySemanticResolver().infer_for_arbitration(
+                    message=original_question,
+                    dictionary_context=dictionary_context,
+                ),
+                "original_question": original_question,
+            }
         normalized_candidate_domain = normalizar_codigo_dominio(
             llm_payload.get("domain")
             or candidate_domain
             or ""
         )
         if normalized_candidate_domain == "inventario_logistica":
-            return InventorySemanticResolver().infer_for_arbitration(
-                message=original_question,
-                dictionary_context=dictionary_context,
-            )
+            return {
+                **InventorySemanticResolver().infer_for_arbitration(
+                    message=original_question,
+                    dictionary_context=dictionary_context,
+                ),
+                "original_question": original_question,
+            }
         normalized_query = cls._normalize_text(original_question)
         fields = [item for item in list(dictionary_context.get("fields") or []) if isinstance(item, dict)]
         tables = [item for item in list(dictionary_context.get("tables") or []) if isinstance(item, dict)]
@@ -690,6 +738,7 @@ class IntentArbitrationService:
             "has_group_by": bool(valid_group_dimensions),
             "executable_analytics": executable_analytics,
             "explanation": explanation[:280],
+            "original_question": original_question,
         }
 
     @staticmethod
@@ -698,6 +747,27 @@ class IntentArbitrationService:
         normalized = re.sub(r"\s+", " ", lowered)
         normalized = normalized.replace("cumpleaños", "cumpleanos")
         return normalized
+
+    @classmethod
+    def _is_inventory_employee_stock_query(cls, value: str) -> bool:
+        normalized = cls._normalize_text(value)
+        if re.search(
+            r"\bsaldo(?:\s+de)?(?:\s+materiales?)?\s+(?:del?\s+)?(?:emplead\w*|tecnico)\s+[0-9]{5,15}\b",
+            normalized,
+        ):
+            return True
+        has_inventory_signal = bool(
+            re.search(
+                r"\b(inventario|logistica|material(?:es)?|ferretero(?:s)?|serial(?:es)?|equipo(?:s)?|stock|saldo(?:s)?|consumo(?:s)?|operacion_hfc|operacion\s+hfc|hfc)\b",
+                normalized,
+            )
+        )
+        has_operational_holder = bool(
+            re.search(r"\b(movil|cuadrilla|brigada|cedula|tecnico|emplead\w*|responsable)\b", normalized)
+            or re.search(r"\b[0-9]{5,15}\b", normalized)
+            or "datos del empleado" in normalized
+        )
+        return has_inventory_signal and has_operational_holder
 
     @classmethod
     def _concept_aliases_from_dictionary(

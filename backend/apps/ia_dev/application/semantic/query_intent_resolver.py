@@ -53,6 +53,9 @@ class QueryIntentResolver:
         r"operacion_hfc|operacion\s+hfc|hfc"
         r")\b"
     )
+    _INVENTORY_EMPLOYEE_STOCK_RE = re.compile(
+        r"\bsaldo(?:\s+de)?(?:\s+materiales?)?\s+(?:del?\s+)?(?:emplead\w*|tecnico)\s+([0-9]{5,15})\b"
+    )
 
     def __init__(self):
         self.model = resolve_model_name("query_intent")
@@ -273,6 +276,8 @@ class QueryIntentResolver:
                 "end_date": end.isoformat(),
             }
         metrics = self._extract_metrics(normalized=normalized, operation=operation)
+        if domain == "inventario_logistica" and operation == "stock_balance":
+            metrics = []
 
         return StructuredQueryIntent(
             raw_query=message,
@@ -410,6 +415,7 @@ class QueryIntentResolver:
         llm_domain = normalizar_codigo_dominio(llm.domain_code)
         fallback_domain = normalizar_codigo_dominio(fallback.domain_code)
         normalized_raw_query = QueryIntentResolver._normalize_text(fallback.raw_query)
+        guarded_cedula = QueryIntentResolver._match_inventory_employee_stock_query(normalized_raw_query)
 
         operation = str(llm.operation or fallback.operation or "summary").strip().lower()
         template_id = str(llm.template_id or fallback.template_id or "").strip().lower()
@@ -514,13 +520,55 @@ class QueryIntentResolver:
             merged_filters = dict(fallback_filters)
             merged_filters.setdefault("indicador_ausentismo", "SI")
 
+        if guarded_cedula:
+            resolved_domain = "inventario_logistica"
+            operation = "stock_balance"
+            template_id = "inventory_material_stock_mobile"
+            merged_filters.pop("search", None)
+            merged_filters["cedula"] = guarded_cedula
+            merged_filters.setdefault("stock_scope", "movil")
+            merged_group_by = []
+
+        if QueryIntentResolver._is_inventory_operational_cross_query(normalized_raw_query):
+            resolved_domain = "inventario_logistica"
+            merged_filters.update(
+                {
+                    key: value
+                    for key, value in fallback_filters.items()
+                    if value not in (None, "")
+                }
+            )
+            if QueryIntentResolver._has_inventory_domain_signal(normalized_raw_query):
+                merged_filters.pop("serial", None)
+
         if (fallback_domain or resolved_domain) == "inventario_logistica" and re.search(
             r"\b(stock|saldo|existencia(?:s)?)\b", normalized_raw_query
         ):
             operation = "stock_balance"
-            template_id = str(fallback.template_id or template_id or "").strip().lower()
+            template_id = QueryIntentResolver._resolve_template_id(
+                normalized=normalized_raw_query,
+                domain_code="inventario_logistica",
+                operation=operation,
+                dimension_tokens=merged_group_by,
+            )
             resolved_domain = "inventario_logistica"
             merged_filters.update(fallback_filters)
+            if re.search(r"\b(?:cuadrilla|brigada|movil|m[oó]vil|asignacion|asignaci[oó]n)\b", normalized_raw_query):
+                merged_filters.pop("serial", None)
+
+        if (fallback_domain or resolved_domain) == "inventario_logistica" and re.search(
+            r"\binventario\s+de\s+la\s+(?:cuadrilla|brigada|movil|m[oó]vil)\b", normalized_raw_query
+        ):
+            operation = "stock_balance"
+            template_id = QueryIntentResolver._resolve_template_id(
+                normalized=normalized_raw_query,
+                domain_code="inventario_logistica",
+                operation=operation,
+                dimension_tokens=merged_group_by,
+            )
+            resolved_domain = "inventario_logistica"
+            merged_filters.update(fallback_filters)
+            merged_filters.pop("serial", None)
 
         return StructuredQueryIntent(
             raw_query=fallback.raw_query,
@@ -552,6 +600,19 @@ class QueryIntentResolver:
         dimension_tokens: list[str] | None = None,
     ) -> str:
         if normalizar_codigo_dominio(domain_code) == "inventario_logistica" and operation == "stock_balance":
+            if re.search(r"\bmateriales?\s+critic(?:o|os|a|as)\b", normalized) and re.search(
+                r"\b(?:emplead\w*|tecnico|técnico|cedula|movil|m[oó]vil)\b",
+                normalized,
+            ):
+                return "inventory_material_critical_by_employee"
+            if (
+                QueryIntentResolver._is_inventory_operational_cross_query(normalized)
+                and re.search(
+                    r"\b(por\s+(?:tecnico|emplead\w*|cedula|movil|cuadrilla|brigada)|con\s+datos\s+del?\s+emplead\w*|mostrando\s+movil|saldo\s+total|total\s+de\s+materiales)\b",
+                    normalized,
+                )
+            ):
+                return "inventory_material_stock_mobile"
             if re.search(r"\b(?:bodega|almacen|operacion[_\s-]?hfc)\b", normalized):
                 return "inventory_material_stock_by_warehouse"
             if re.search(r"\b(?:cuadrilla|brigada|movil|empleado|tecnico)\b", normalized):
@@ -593,6 +654,9 @@ class QueryIntentResolver:
 
     @staticmethod
     def _extract_entity(*, message: str, normalized: str) -> tuple[str, str]:
+        guarded_cedula = QueryIntentResolver._match_inventory_employee_stock_query(normalized)
+        if guarded_cedula:
+            return "cedula", guarded_cedula
         match = re.search(r"\b\d{6,13}\b", normalized)
         if match:
             return "cedula", "".join(ch for ch in match.group(0) if ch.isdigit())
@@ -604,6 +668,10 @@ class QueryIntentResolver:
     @staticmethod
     def _extract_filters(*, normalized: str, semantic_context: dict[str, Any] | None = None) -> dict[str, Any]:
         filters: dict[str, Any] = {}
+        guarded_cedula = QueryIntentResolver._match_inventory_employee_stock_query(normalized)
+        if guarded_cedula:
+            filters["cedula"] = guarded_cedula
+            filters["stock_scope"] = "movil"
         estado_match = re.search(
             r"\bestado(?:\s+del?\s+\w+)?\s+(?:es\s+)?([a-z_]+)\b",
             str(normalized or ""),
@@ -999,6 +1067,7 @@ class QueryIntentResolver:
             "carpeta",
             "tipo_labor",
             "movil",
+            "cedula",
             "centro_costo",
             "birth_month",
         }
@@ -1019,6 +1088,10 @@ class QueryIntentResolver:
                     "personal por tipo",
                 }
             )
+        if normalized_dimension == "movil":
+            aliases.update({"cuadrilla", "cuadrillas", "brigada", "brigadas"})
+        if normalized_dimension == "cedula":
+            aliases.update({"cedula", "cédula", "tecnico", "técnico"})
         if normalized_dimension == "centro_costo":
             aliases.update({"centro costo", "centro de costo", "centros de costo", "cc"})
         if normalized_dimension.endswith("a"):
@@ -1236,6 +1309,19 @@ class QueryIntentResolver:
             filters.setdefault("fnacimiento_month", cls._extract_birthday_month_filter(cls._normalize_text(message)))
             operation = str(fallback.operation or operation or "").strip().lower()
             template_id = str(fallback.template_id or template_id or "").strip().lower()
+        normalized_message = cls._normalize_text(message)
+        if (
+            normalizar_codigo_dominio(domain_code) == "inventario_logistica"
+            and str(operation or "").strip().lower() == "stock_balance"
+        ):
+            template_id = cls._resolve_template_id(
+                normalized=normalized_message,
+                domain_code="inventario_logistica",
+                operation="stock_balance",
+                dimension_tokens=group_by,
+            )
+            if re.search(r"\b(?:cuadrilla|brigada|movil|m[oó]vil|asignacion|asignaci[oó]n)\b", normalized_message):
+                filters.pop("serial", None)
 
         return StructuredQueryIntent(
             raw_query=fallback.raw_query,
@@ -1308,9 +1394,31 @@ class QueryIntentResolver:
         clean = "".join(ch for ch in normalized if not unicodedata.combining(ch))
         return QueryIntentResolver._apply_common_business_typos(clean)
 
+    @classmethod
+    def _match_inventory_employee_stock_query(cls, normalized: str) -> str:
+        match = cls._INVENTORY_EMPLOYEE_STOCK_RE.search(str(normalized or ""))
+        if not match:
+            return ""
+        return "".join(ch for ch in str(match.group(1) or "") if ch.isdigit())
+
+    @classmethod
+    def _is_inventory_operational_cross_query(cls, normalized: str) -> bool:
+        text = str(normalized or "")
+        if cls._match_inventory_employee_stock_query(text):
+            return True
+        has_inventory_signal = bool(cls._INVENTORY_DOMAIN_SIGNAL_RE.search(text))
+        has_operational_holder = bool(
+            re.search(r"\b(movil|cuadrilla|brigada|cedula|tecnico|emplead\w*|responsable)\b", text)
+            or re.search(r"\b[0-9]{5,15}\b", text)
+            or "datos del empleado" in text
+        )
+        return has_inventory_signal and has_operational_holder
+
     @staticmethod
     def _resolve_domain(*, normalized: str, base_domain: str, semantic_context: dict[str, Any] | None = None) -> str:
         domain = normalizar_codigo_dominio(base_domain)
+        if QueryIntentResolver._is_inventory_operational_cross_query(normalized):
+            return "inventario_logistica"
         dimension_tokens = QueryIntentResolver._collect_dimension_signal_tokens(
             semantic_context=semantic_context or {},
             domain_code="empleados",

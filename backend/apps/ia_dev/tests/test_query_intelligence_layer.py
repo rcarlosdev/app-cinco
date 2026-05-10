@@ -107,6 +107,25 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(str(intent.filters.get("stock_scope") or ""), "bodega")
         self.assertNotEqual(intent.template_id, "aggregate_by_group_and_period")
 
+    def test_query_intent_resolver_saldo_empleado_con_nombre_y_movil_asignada_stays_in_inventory(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="saldo empleado 1214730857 con nombre y movil asignada",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "empleados_query",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+
+        self.assertEqual(intent.domain_code, "inventario_logistica")
+        self.assertEqual(intent.operation, "stock_balance")
+        self.assertEqual(intent.template_id, "inventory_material_stock_mobile")
+        self.assertEqual(str(intent.filters.get("cedula") or ""), "1214730857")
+        self.assertEqual(str(intent.filters.get("stock_scope") or ""), "movil")
+
     def test_query_intent_resolver_ignores_unrelated_attendance_memory_for_inventory(self):
         resolver = QueryIntentResolver()
         with patch.dict(
@@ -601,6 +620,33 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         )
         merged = QueryIntentResolver._merge_intents(fallback=fallback, llm=llm)
         self.assertEqual(merged.domain_code, "empleados")
+
+    def test_query_intent_resolver_merge_keeps_inventory_stock_mobile_over_serial_traceability(self):
+        fallback = StructuredQueryIntent(
+            raw_query="inventario de la cuadrilla TIRAN224 con datos del empleado",
+            domain_code="inventario_logistica",
+            operation="stock_balance",
+            template_id="inventory_material_stock_mobile",
+            entity_type="movil",
+            entity_value="TIRAN224",
+            filters={"movil": "TIRAN224", "stock_scope": "movil"},
+            source="rules",
+        )
+        llm = StructuredQueryIntent(
+            raw_query="inventario de la cuadrilla TIRAN224 con datos del empleado",
+            domain_code="inventario_logistica",
+            operation="detail",
+            template_id="inventory_traceability_by_serial",
+            entity_type="serial",
+            entity_value="TIRAN224",
+            filters={"serial": "TIRAN224", "movil": "TIRAN224"},
+            source="openai",
+        )
+        merged = QueryIntentResolver._merge_intents(fallback=fallback, llm=llm)
+        self.assertEqual(str(merged.operation or ""), "stock_balance")
+        self.assertEqual(str(merged.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(merged.filters.get("movil") or ""), "TIRAN224")
+        self.assertNotIn("serial", dict(merged.filters or {}))
 
     def test_query_intent_resolver_detects_group_by_area_and_rolling_period_from_concentration_question(self):
         resolver = QueryIntentResolver()

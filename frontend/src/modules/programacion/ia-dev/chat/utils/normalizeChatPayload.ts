@@ -291,6 +291,12 @@ export const normalizeChatPayload = (
   const table = normalizeTable(
     data.table ?? (response as Record<string, unknown> | undefined)?.table,
   );
+  const extraTables = asArray(
+    data.extra_tables ??
+      (response as Record<string, unknown> | undefined)?.extra_tables,
+  )
+    .map((item) => normalizeTable(item))
+    .filter((item): item is NonNullable<typeof item> => item != null);
 
   const rawChart = isValidChart(data.chart)
     ? data.chart
@@ -340,6 +346,7 @@ export const normalizeChatPayload = (
     kpis.length ||
     insights.length ||
     table?.rows.length ||
+    extraTables.length ||
     chart ||
     charts.length ||
     (labels.length && series.length),
@@ -360,6 +367,7 @@ export const normalizeChatPayload = (
     chart,
     charts,
     table,
+    extraTables,
     labels,
     series,
     meta,

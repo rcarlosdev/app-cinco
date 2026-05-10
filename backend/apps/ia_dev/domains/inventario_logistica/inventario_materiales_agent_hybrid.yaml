@@ -526,6 +526,24 @@ tables:
         allowed_operations: [select, search]
         is_selectable: true
 
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
       bodega:
         data_type: string
         semantic_role: warehouse
@@ -541,6 +559,15 @@ tables:
         semantic_role: responsible_person
         business_concepts: [movement_responsibility]
         synonyms: [responsable, usuario, quien recibió, quien recibio, recibido por]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, mÃ³vil, cuadrilla, brigada, asignacion, asignaciÃ³n]
         allowed_operations: [select, filter, group_by]
         is_groupable: true
         is_filterable: true
@@ -665,6 +692,15 @@ tables:
         data_type: string
         semantic_role: identification_document
         synonyms: [cedula, identificacion, documento]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
         allowed_operations: [select, filter, group_by]
         is_groupable: true
         is_filterable: true
@@ -972,6 +1008,24 @@ tables:
         is_filterable: true
         missing_metadata_allowed: true
 
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
       documento:
         data_type: string
         semantic_role: supporting_document
@@ -1047,6 +1101,24 @@ tables:
         allowed_operations: [select, search]
         is_selectable: true
 
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
       bodega:
         data_type: string
         semantic_role: source_warehouse
@@ -1119,6 +1191,84 @@ tables:
         synonyms: [familia, categoria, categoría, tipo]
         allowed_operations: [select, filter, group_by]
         is_groupable: true
+        is_filterable: true
+
+  cinco_base_de_personal:
+    domain_code: inventario_materiales
+    schema_name: bd_c3nc4s1s
+    business_name: Base oficial de personal
+    material_family: contexto_operativo
+    primary_role: employee_context
+    description: Tabla oficial para enriquecer consultas logisticas por cedula o movil.
+    sync_to_dd_tablas: true
+    columns:
+      cedula:
+        data_type: string
+        required: true
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+      nombre:
+        data_type: string
+        semantic_role: employee_name
+        synonyms: [nombre, nombres]
+        allowed_operations: [select, filter, group_by]
+        is_filterable: true
+      apellido:
+        data_type: string
+        semantic_role: employee_last_name
+        synonyms: [apellido, apellidos]
+        allowed_operations: [select, filter, group_by]
+        is_filterable: true
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, mÃ³vil, cuadrilla, brigada, asignacion, asignaciÃ³n]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+      area:
+        data_type: string
+        semantic_role: organizational_dimension
+        synonyms: [area, Ã¡rea]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      carpeta:
+        data_type: string
+        semantic_role: folder_dimension
+        synonyms: [carpeta]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      cargo:
+        data_type: string
+        semantic_role: job_title
+        synonyms: [cargo]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      tipo_labor:
+        data_type: string
+        semantic_role: labor_type
+        synonyms: [tipo labor, tipo_labor]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      estado:
+        data_type: string
+        semantic_role: employee_status
+        synonyms: [estado, estado empleado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      codigo_sap:
+        data_type: string
+        semantic_role: sap_employee_code
+        synonyms: [codigo sap, cÃ³digo sap]
+        allowed_operations: [select, filter, group_by]
         is_filterable: true
 
   logistica_base_seriales:
@@ -1501,6 +1651,106 @@ relationships:
     join_purpose: conectar asociaciones/salidas con estado e historial del serial
     sync_to_dd_relaciones: true
 
+  entrega_cedula_to_personal:
+    from_table: logistica_movimientos_entrega
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer entregas con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  entrega_movil_to_personal:
+    from_table: logistica_movimientos_entrega
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer entregas con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  consumo_cedula_to_personal:
+    from_table: logistica_movimientos_consumo
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer consumos con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  consumo_movil_to_personal:
+    from_table: logistica_movimientos_consumo
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer consumos con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  cobro_cedula_to_personal:
+    from_table: logistica_movimientos_cobro
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer cobros con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  cobro_movil_to_personal:
+    from_table: logistica_movimientos_cobro
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer cobros con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  devolucion_cedula_to_personal:
+    from_table: logistica_movimientos_devolucion
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer devoluciones con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  devolucion_movil_to_personal:
+    from_table: logistica_movimientos_devolucion
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer devoluciones con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  serial_cedula_to_personal:
+    from_table: logistica_base_seriales
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer seriales con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  serial_movil_to_personal:
+    from_table: logistica_base_seriales
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer seriales con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
 # -------------------------------------------------------------------
 # 6. CONCEPTOS DE NEGOCIO -> metadata semántica
 # -------------------------------------------------------------------
@@ -1559,8 +1809,7 @@ business_concepts:
       - descripcion
       - estado_actual
       - ubicacion_actual
-      - responsable
-      - ultimo_movimiento
+      - fecha_estado_actual
       - historial
 
   consumo_movil_sin_validar:
@@ -1891,15 +2140,6 @@ groupable_dimensions:
       - logistica_seriales_asociados.bodega
     allowed_operations: [group_by, filter, select]
 
-  responsable:
-    description: Agrupación por responsable, técnico, custodio o usuario.
-    synonyms: [responsable, técnico, tecnico, usuario, custodio, cuadrilla]
-    canonical_fields:
-      - logistica_movimientos_entrada.cedula
-      - logistica_movimientos_consumo.cedula
-      - logistica_movimientos_devolucion.cedula
-      - logistica_base_seriales.cedula
-    allowed_operations: [group_by, filter, select]
 
   movil:
     description: Agrupación por móvil o unidad móvil.
@@ -1959,11 +2199,16 @@ groupable_dimensions:
     allowed_operations: [group_by, filter, select]
 
   cedula:
-    description: Agrupacion o filtro por cedula del responsable o tecnico.
-    synonyms: [cedula, documento identidad, identificacion]
+    description: Agrupacion o filtro por cedula de empleado o tecnico operativo.
+    synonyms: [cedula, documento identidad, identificacion, empleado, tecnico, responsable]
     canonical_fields:
-      - logistica_movimientos_consumo.cedula
+      - logistica_movimientos_entrada.cedula
       - logistica_movimientos_entrega.cedula
+      - logistica_movimientos_devolucion.cedula
+      - logistica_movimientos_consumo.cedula
+      - logistica_movimientos_cobro.cedula
+      - logistica_base_seriales.cedula
+      - cinco_base_de_personal.cedula
     allowed_operations: [group_by, filter, select]
 
   proveedor:
