@@ -32,6 +32,16 @@ def _contexto_inventario() -> dict:
         field("base_codigos", "codigo", "codigo", group=True),
         field("base_codigos", "descripcion", "descripcion", group=True),
         field("base_codigos", "tipo", "tipo", group=True),
+        field("cinco_base_de_personal", "cedula", "cedula", group=True, identifier=True),
+        field("cinco_base_de_personal", "nombre", "nombre"),
+        field("cinco_base_de_personal", "apellido", "apellido"),
+        field("cinco_base_de_personal", "movil", "movil", group=True),
+        field("cinco_base_de_personal", "area", "area", group=True),
+        field("cinco_base_de_personal", "carpeta", "carpeta", group=True),
+        field("cinco_base_de_personal", "cargo", "cargo", group=True),
+        field("cinco_base_de_personal", "tipo_labor", "tipo_labor", group=True),
+        field("cinco_base_de_personal", "estado", "estado", group=True),
+        field("cinco_base_de_personal", "codigo_sap", "codigo_sap"),
         field("base_codigo_seriales", "codigo", "codigo", group=True),
         field("base_codigo_seriales", "descripcion", "descripcion", group=True),
         field("base_codigo_seriales", "familia", "familia", group=True),
@@ -42,6 +52,9 @@ def _contexto_inventario() -> dict:
         field("logistica_base_seriales", "bodega", "bodega", group=True),
         field("logistica_base_seriales", "tecnico_cedula", "cedula", group=True),
         field("logistica_base_seriales", "fecha", "fecha", date=True),
+        field("logistica_base_seriales", "fecha_ingreso", "fecha_ingreso", date=True),
+        field("logistica_base_seriales", "ticket", "ticket"),
+        field("logistica_base_seriales", "fecha_edit", "fecha_edit", date=True),
         field("logistica_seriales_asociados", "serial", "numero_serial"),
         field("logistica_seriales_asociados", "bodega_salida", "bodega", group=True),
         field("logistica_seriales_asociados", "estado", "estado", group=True),
@@ -68,15 +81,22 @@ def _contexto_inventario() -> dict:
                 field(table_name, "cantidad", "cantidad", metric=True),
                 field(table_name, "fecha", "f_consumo", date=True),
                 field(table_name, "bodega", "bodega", group=True),
+                field(table_name, "cedula", "cedula", group=True),
+                field(table_name, "movil", "movil", group=True),
             ]
         )
     fields.extend(
         [
             field("logistica_movimientos_entrada", "estado", "estado", group=True),
             field("logistica_movimientos_entrada", "movimiento", "movimiento", group=True),
+            field("logistica_movimientos_entrega", "cedula", "cedula", group=True),
+            field("logistica_movimientos_entrega", "movil", "movil", group=True),
+            field("logistica_movimientos_devolucion", "cedula", "cedula", group=True),
             field("logistica_movimientos_consumo", "estado", "estado", group=True),
             field("logistica_movimientos_consumo", "orden_trabajo", "orden_trabajo", group=True),
             field("logistica_movimientos_consumo", "tipo", "tipo", group=True),
+            field("logistica_movimientos_consumo", "movil", "movil", group=True),
+            field("logistica_movimientos_consumo", "cedula", "cedula", group=True),
             field("logistica_movimientos_traslado", "movimiento", "movimiento", group=True),
             field("logistica_movimientos_traslado", "estado", "estado", group=True),
         ]
@@ -88,6 +108,7 @@ def _contexto_inventario() -> dict:
         "tables": [
             {"table_name": "logistica_base_seriales", "table_fqn": "logistica_base_seriales", "es_principal": True},
             {"table_name": "base_codigos", "table_fqn": "base_codigos"},
+            {"table_name": "cinco_base_de_personal", "table_fqn": "bd_c3nc4s1s.cinco_base_de_personal"},
             {"table_name": "base_codigo_seriales", "table_fqn": "base_codigo_seriales"},
             {"table_name": "logistica_movimientos_consumo", "table_fqn": "logistica_movimientos_consumo"},
             {"table_name": "logistica_movimientos_traslado", "table_fqn": "logistica_movimientos_traslado"},
@@ -102,7 +123,11 @@ def _contexto_inventario() -> dict:
         "columns": [
             {
                 "table_name": item["table_name"],
-                "table_fqn": "bd_c3nc4s1s.facturacion_facturado_wfm" if item["table_name"] == "facturacion_facturado_wfm" else item["table_name"],
+                "table_fqn": (
+                    "bd_c3nc4s1s.facturacion_facturado_wfm"
+                    if item["table_name"] == "facturacion_facturado_wfm"
+                    else ("bd_c3nc4s1s.cinco_base_de_personal" if item["table_name"] == "cinco_base_de_personal" else item["table_name"])
+                ),
                 "column_name": item["column_name"],
                 "nombre_columna_logico": item["campo_logico"],
             }
@@ -111,7 +136,11 @@ def _contexto_inventario() -> dict:
         "column_profiles": [
             {
                 "table_name": item["table_name"],
-                "table_fqn": "bd_c3nc4s1s.facturacion_facturado_wfm" if item["table_name"] == "facturacion_facturado_wfm" else item["table_name"],
+                "table_fqn": (
+                    "bd_c3nc4s1s.facturacion_facturado_wfm"
+                    if item["table_name"] == "facturacion_facturado_wfm"
+                    else ("bd_c3nc4s1s.cinco_base_de_personal" if item["table_name"] == "cinco_base_de_personal" else item["table_name"])
+                ),
                 "logical_name": item["campo_logico"],
                 "column_name": item["column_name"],
                 "supports_filter": bool(item.get("es_filtro")),
@@ -123,10 +152,24 @@ def _contexto_inventario() -> dict:
             }
             for item in fields
         ],
-        "dictionary": {"fields": fields, "relations": [], "rules": []},
+        "dictionary": {
+            "fields": fields,
+            "relations": [
+                {"join_sql": "logistica_movimientos_entrega.cedula = cinco_base_de_personal.cedula"},
+                {"join_sql": "logistica_movimientos_entrega.movil = cinco_base_de_personal.movil"},
+                {"join_sql": "logistica_movimientos_consumo.cedula = cinco_base_de_personal.cedula"},
+                {"join_sql": "logistica_movimientos_consumo.movil = cinco_base_de_personal.movil"},
+                {"join_sql": "logistica_movimientos_devolucion.cedula = cinco_base_de_personal.cedula"},
+                {"join_sql": "logistica_movimientos_devolucion.movil = cinco_base_de_personal.movil"},
+                {"join_sql": "logistica_movimientos_cobro.cedula = cinco_base_de_personal.cedula"},
+                {"join_sql": "logistica_movimientos_cobro.movil = cinco_base_de_personal.movil"},
+            ],
+            "rules": [],
+        },
         "allowed_tables": [
             "logistica_base_seriales",
             "base_codigos",
+            "bd_c3nc4s1s.cinco_base_de_personal",
             "base_codigo_seriales",
             "logistica_movimientos_consumo",
             "logistica_movimientos_traslado",
@@ -141,6 +184,36 @@ def _contexto_inventario() -> dict:
         "allowed_columns": sorted({str(item["column_name"]) for item in fields}),
         "aliases": {},
     }
+
+
+def _contexto_inventario_sin_movil_fisico() -> dict:
+    context = _contexto_inventario()
+    target_tables = {
+        "logistica_movimientos_entrega",
+        "logistica_movimientos_consumo",
+        "logistica_movimientos_cobro",
+        "logistica_movimientos_devolucion",
+    }
+    filtered_fields = []
+    for item in list(((context.get("dictionary") or {}).get("fields") or [])):
+        if str(item.get("table_name") or "") in target_tables and str(item.get("column_name") or "") == "movil":
+            continue
+        filtered_fields.append(item)
+    context["dictionary"]["fields"] = filtered_fields
+
+    filtered_columns = []
+    filtered_profiles = []
+    for item in list(context.get("columns") or []):
+        if str(item.get("table_name") or "") in target_tables and str(item.get("column_name") or "") == "movil":
+            continue
+        filtered_columns.append(item)
+    for item in list(context.get("column_profiles") or []):
+        if str(item.get("table_name") or "") in target_tables and str(item.get("column_name") or "") == "movil":
+            continue
+        filtered_profiles.append(item)
+    context["columns"] = filtered_columns
+    context["column_profiles"] = filtered_profiles
+    return context
 
 
 class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
@@ -278,8 +351,44 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
 
         self.assertEqual(plan.strategy, "fallback")
         self.assertTrue(bool((plan.metadata or {}).get("blocked_legacy_fallback")))
-        self.assertEqual(str((plan.metadata or {}).get("analytics_router_decision") or ""), "runtime_only_fallback")
-        self.assertEqual(str((plan.metadata or {}).get("runtime_only_fallback_reason") or ""), "missing_dictionary_column")
+
+    def test_mobile_stock_uses_personal_bridge_when_movement_tables_lack_movil(self):
+        self.semantic_context = _contexto_inventario_sin_movil_fisico()
+        resolved = self._plan_for("inventario de la cuadrilla TIRAN224")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertEqual(str(plan.reason or ""), "inventory_material_stock_mobile")
+        self.assertIn("EXISTS (SELECT 1 FROM bd_c3nc4s1s.cinco_base_de_personal AS p", str(plan.sql_query or ""))
+        self.assertIn("p.movil = 'TIRAN224'", str(plan.sql_query or ""))
+        self.assertEqual(str((plan.metadata or {}).get("analytics_router_decision") or ""), "join_aware_sql")
+
+    def test_serial_holder_detail_does_not_require_movil_on_serial_base(self):
+        resolved = self._plan_for("equipos cargados a la movil 98562719")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertEqual(str(plan.reason or ""), "inventory_serial_by_operational_holder")
+        self.assertIn("s.cedula = '98562719'", str(plan.sql_query or ""))
+        self.assertNotIn("s.movil AS movil", str(plan.sql_query or ""))
 
     def test_planner_blocks_transfer_destination_when_physical_column_is_missing(self):
         resolved = self._plan_for("traslados por bodega destino")
@@ -356,6 +465,25 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertIn("saldo_movil", str(plan.sql_query or ""))
         self.assertNotIn("facturacion_facturado_wfm", str(plan.sql_query or ""))
 
+    def test_planner_aplica_filtro_operativo_en_stock_por_cuadrilla(self):
+        resolved = self._plan_for("inventario de la cuadrilla TIRAN224")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertIn("TIRAN224", str(plan.sql_query or ""))
+        self.assertIn("cinco_base_de_personal", str(plan.sql_query or ""))
+        self.assertIn("estado_empleado", str(plan.sql_query or ""))
+
     def test_saldo_empleado_routes_mobile_stock_capability(self):
         resolved = self._plan_for("saldo empleado 98672304")
 
@@ -373,7 +501,167 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
         self.assertEqual(plan.strategy, "sql_assisted")
         self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_mobile")
-        self.assertIn("saldo_movil", str(plan.sql_query or ""))
+        self.assertIn("AS saldo", str(plan.sql_query or ""))
+        self.assertIn("estado_empleado", str(plan.sql_query or ""))
+
+    def test_materiales_del_tecnico_numeric_routes_mobile_stock_with_employee_join(self):
+        resolved = self._plan_for("materiales del tecnico 1214730857 con datos del empleado")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "1214730857")
+        self.assertIn("WHERE cedula = '1214730857'", str(plan.sql_query or ""))
+        self.assertIn("FROM bd_c3nc4s1s.cinco_base_de_personal AS p WHERE p.cedula = '1214730857'", str(plan.sql_query or ""))
+        self.assertIn("estado_empleado", str(plan.sql_query or ""))
+
+    def test_equipos_cargados_a_movil_numerica_routes_serial_holder_detail(self):
+        resolved = self._plan_for("equipos cargados a la movil 98562719")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_by_operational_holder")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_serial_by_operational_holder")
+        self.assertIn("cedula = '98562719'", str(plan.sql_query or ""))
+        self.assertIn("s.numero_serial AS numero_serial", str(plan.sql_query or ""))
+        self.assertIn("s.fecha_ingreso AS fecha_ingreso", str(plan.sql_query or ""))
+        self.assertIn("s.ticket AS ticket", str(plan.sql_query or ""))
+        self.assertIn("s.fecha_edit AS fecha_edit", str(plan.sql_query or ""))
+        self.assertNotIn("cantidad", str(plan.sql_query or ""))
+
+    def test_inventory_by_quadrilla_with_employee_data_keeps_material_detail_and_mobile_context(self):
+        resolved = self._plan_for("inventario de la cuadrilla TIRAN224 con datos del empleado")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_mobile")
+        self.assertIn("GROUP BY mov.codigo, mov.cedula, COALESCE(emp.movil, '')", str(plan.sql_query or ""))
+        self.assertIn("AS saldo", str(plan.sql_query or ""))
+        self.assertIn("AS tipo", str(plan.sql_query or ""))
+        self.assertIn("p.movil = 'TIRAN224'", str(plan.sql_query or ""))
+        self.assertIn("estado_empleado", str(plan.sql_query or ""))
+        supplemental = list((plan.metadata or {}).get("supplemental_queries") or [])
+        self.assertEqual(len(supplemental), 1)
+        self.assertIn("logistica_base_seriales", str(supplemental[0].get("query") or ""))
+        self.assertIn("estado_empleado", str(supplemental[0].get("query") or ""))
+
+    def test_saldo_por_tecnico_en_operacion_hfc_keeps_balance_by_codigo(self):
+        resolved = self._plan_for("saldo por tecnico en operacion_hfc mostrando cedula, nombre, movil y total de materiales")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_mobile")
+        self.assertIn("mov.codigo AS codigo", str(plan.sql_query or ""))
+        self.assertIn("AS descripcion", str(plan.sql_query or ""))
+        self.assertIn("AS tipo", str(plan.sql_query or ""))
+        self.assertIn("AS empleado", str(plan.sql_query or ""))
+        self.assertIn("AS estado_empleado", str(plan.sql_query or ""))
+        self.assertIn("SUM(mov.entregas - mov.devoluciones - mov.consumos - mov.cobros) AS saldo", str(plan.sql_query or ""))
+        self.assertIn("GROUP BY mov.codigo, mov.cedula, COALESCE(emp.movil, '')", str(plan.sql_query or ""))
+        self.assertNotIn("WHERE mov.bodega = 'operacion_hfc'", str(plan.sql_query or ""))
+        self.assertIn("bodega = 'operacion_hfc'", str(plan.sql_query or ""))
+        self.assertNotIn("saldo_total_materiales", str(plan.sql_query or ""))
+        self.assertFalse(bool((plan.metadata or {}).get("supplemental_queries")))
+
+    def test_inventario_por_cuadrilla_mantiene_codigo_en_lugar_de_saldo_agregado(self):
+        resolved = self._plan_for("inventario por cuadrilla mostrando movil, cedula del empleado, nombre y saldo total")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertIn("mov.codigo AS codigo", str(plan.sql_query or ""))
+        self.assertIn("AS descripcion", str(plan.sql_query or ""))
+        self.assertIn("AS tipo", str(plan.sql_query or ""))
+        self.assertIn("AS estado_empleado", str(plan.sql_query or ""))
+        self.assertIn("GROUP BY mov.codigo, mov.cedula, COALESCE(emp.movil, '')", str(plan.sql_query or ""))
+        self.assertNotIn("saldo_total_materiales", str(plan.sql_query or ""))
+        supplemental = list((plan.metadata or {}).get("supplemental_queries") or [])
+        self.assertEqual(len(supplemental), 1)
+        self.assertEqual(str(supplemental[0].get("name") or ""), "serializados_equipos")
+        self.assertNotIn("ACTIVO", str(supplemental[0].get("query") or ""))
+
+    def test_materiales_criticos_por_empleado_en_operacion_hfc_uses_recent_consumption_threshold(self):
+        resolved = self._plan_for(
+            "materiales criticos por empleado en operacion_hfc cruzando saldo, cedula, movil y datos del empleado"
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_critical_by_employee")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_mobile")
+        self.assertIn("DATE(f_consumo) >= DATE_SUB(CURDATE(), INTERVAL 8 DAY)", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(cons.consumo_ultimos_8_dias, 0) / 8", str(plan.sql_query or ""))
+        self.assertIn("bal.saldo_actual < ((COALESCE(cons.consumo_ultimos_8_dias, 0) / 8) * 3)", str(plan.sql_query or ""))
+        self.assertIn("AS estado_critico", str(plan.sql_query or ""))
+        self.assertIn("AS estado_empleado", str(plan.sql_query or ""))
+
+    def test_consumos_de_movil_aplican_filtro_operativo_y_mes(self):
+        resolved = self._plan_for("consumos de la movil TIRAN314 el 05 de mayo")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN314")
+        self.assertIn("MONTH(f_consumo) = 5", str(plan.sql_query or ""))
+        self.assertIn("movil = 'TIRAN314'", str(plan.sql_query or ""))
 
     def test_planner_builds_transfer_warehouse_without_destination_column(self):
         resolved = self._plan_for("traslado bodega por codigo")

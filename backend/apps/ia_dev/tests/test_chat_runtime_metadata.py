@@ -608,6 +608,30 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         self.assertTrue(bool(route.get("planner_was_authority")))
         self.assertEqual(str(route.get("reason") or ""), "query_execution_planner_sql_assisted_authority")
 
+    def test_inventory_employee_stock_route_guard_disables_legacy_path(self):
+        route = ChatApplicationService._enforce_inventory_employee_stock_route(
+            message="saldo empleado 1214730857 con nombre y movil asignada",
+            route={
+                "routing_mode": "capability",
+                "selected_capability_id": "empleados.count.active.v1",
+                "use_legacy": True,
+                "legacy_capability_path_used": True,
+            },
+            query_intelligence={
+                "execution_plan": {
+                    "strategy": "sql_assisted",
+                    "domain_code": "inventario_logistica",
+                    "capability_id": "inventory_stock_balance_by_mobile",
+                    "metadata": {"capability_id": "inventory_stock_balance_by_mobile"},
+                }
+            },
+        )
+
+        self.assertFalse(bool(route.get("use_legacy")))
+        self.assertFalse(bool(route.get("legacy_capability_path_used")))
+        self.assertEqual(str(route.get("selected_capability_compat_id") or ""), "inventory_stock_balance_by_mobile")
+        self.assertEqual(str(route.get("reason") or ""), "inventory_employee_stock_route_guard")
+
     def test_record_runtime_resolution_event_includes_compiler_and_satisfaction(self):
         observability = _ObservabilityStub()
         run_context = RunContext.create(message="x", session_id="sess-1", reset_memory=False)

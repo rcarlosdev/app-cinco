@@ -130,6 +130,7 @@ export type IADevChatResponse = {
     labels?: unknown[];
     insights?: string[];
     table?: IADevTablePayload;
+    extra_tables?: IADevTablePayload[];
     chart?: IADevChartPayload;
     charts?: IADevChartPayload[];
     meta?: Record<string, unknown>;

@@ -30,6 +30,17 @@ class SemanticOrchestratorService:
         "external_source_pending",
         "real_ambiguity_detected",
     }
+    INVENTORY_EMPLOYEE_STOCK_RE = re.compile(
+        r"\bsaldo(?:\s+de)?(?:\s+materiales?)?\s+(?:del?\s+)?(?:emplead\w*|tecnico)\s+([0-9]{5,15})\b"
+    )
+    INVENTORY_DOMAIN_SIGNAL_RE = re.compile(
+        r"\b("
+        r"inventario|logistica|material(?:es)?|ferretero(?:s)?|serial(?:es)?|equipo(?:s)?|"
+        r"stock|saldo(?:s)?|existencia(?:s)?|bodega(?:s)?|almacen|almacenes|"
+        r"kardex|traslado(?:s)?|entrada(?:s)?|salida(?:s)?|devolucion(?:es)?|consumo(?:s)?|"
+        r"operacion_hfc|operacion\s+hfc|hfc"
+        r")\b"
+    )
 
     def __init__(
         self,
@@ -398,7 +409,7 @@ class SemanticOrchestratorService:
         candidate_agent: str | None,
         contract_payload: dict[str, Any],
     ) -> str:
-        if "saldo empleado" in normalized or "saldo del empleado" in normalized:
+        if self._is_inventory_operational_cross_query(normalized):
             return "inventario_logistica"
         if re.search(r"\bausenc(?:ia|ias)|ausent(?:e|es|ismo)\b", normalized) and "empleado" in normalized:
             return "ausentismo"
@@ -437,6 +448,12 @@ class SemanticOrchestratorService:
         del filters
         confidence = 0.72
         if domain == "inventario_logistica":
+            if any(token in normalized for token in ("equipo", "equipos", "serial", "serializados")) and any(
+                token in normalized for token in ("cargados", "asociados", "movil", "cuadrilla", "brigada", "cedula", "tecnico")
+            ):
+                return "inventory_serial_by_holder", "inventory_serial_by_operational_holder", 0.92
+            if self._is_inventory_operational_cross_query(normalized):
+                return "inventory_stock_by_mobile", "inventory_stock_balance_by_mobile", 0.92
             if "kardex" in normalized:
                 return "inventory_kardex", "inventory_kardex_consolidated", 0.93
             if "facturacion" in normalized or "facturación" in normalized:
@@ -478,6 +495,10 @@ class SemanticOrchestratorService:
     @staticmethod
     def _extract_filters(*, normalized: str, raw_message: str) -> dict[str, Any]:
         filters: dict[str, Any] = {}
+        guarded_cedula = SemanticOrchestratorService._match_inventory_employee_stock_query(normalized)
+        if guarded_cedula:
+            filters["cedula"] = guarded_cedula
+            filters["stock_scope"] = "movil"
         if re.search(r"\boperacion[_\s-]?hfc\b", normalized):
             filters["bodega"] = "operacion_hfc"
         code_match = re.search(r"\bkardex\s+del?\s+c[oó]digo\s+([a-z0-9_-]+)\b", normalized)
@@ -497,8 +518,11 @@ class SemanticOrchestratorService:
     @staticmethod
     def _extract_entities(*, normalized: str, raw_message: str) -> dict[str, Any]:
         entities: dict[str, Any] = {}
+        guarded_cedula = SemanticOrchestratorService._match_inventory_employee_stock_query(normalized)
         numeric_id = re.search(r"\b([0-9]{5,15})\b", raw_message)
-        if numeric_id:
+        if guarded_cedula:
+            entities["cedula"] = guarded_cedula
+        elif numeric_id:
             entities["cedula"] = str(numeric_id.group(1) or "").strip()
         movil_match = re.search(r"\b([A-Z]{2,}[A-Z0-9_-]*\d{2,})\b", raw_message)
         if movil_match and "cedula" not in entities:
@@ -511,6 +535,8 @@ class SemanticOrchestratorService:
 
     @staticmethod
     def _extract_dimensions(*, normalized: str) -> list[str]:
+        if SemanticOrchestratorService._match_inventory_employee_stock_query(normalized):
+            return []
         dimensions: list[str] = []
         for token, dimension in (
             ("bodega", "bodega"),
@@ -727,6 +753,26 @@ class SemanticOrchestratorService:
             char for char in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(char)
         )
         return re.sub(r"\s+", " ", lowered)
+
+    @classmethod
+    def _match_inventory_employee_stock_query(cls, normalized: str) -> str:
+        match = cls.INVENTORY_EMPLOYEE_STOCK_RE.search(str(normalized or ""))
+        if not match:
+            return ""
+        return "".join(ch for ch in str(match.group(1) or "") if ch.isdigit())
+
+    @classmethod
+    def _is_inventory_operational_cross_query(cls, normalized: str) -> bool:
+        text = str(normalized or "")
+        if cls._match_inventory_employee_stock_query(text):
+            return True
+        has_inventory_signal = bool(cls.INVENTORY_DOMAIN_SIGNAL_RE.search(text))
+        has_operational_holder = bool(
+            re.search(r"\b(movil|cuadrilla|brigada|cedula|tecnico|emplead\w*|responsable)\b", text)
+            or re.search(r"\b[0-9]{5,15}\b", text)
+            or "datos del empleado" in text
+        )
+        return has_inventory_signal and has_operational_holder
 
     @staticmethod
     def _base_output() -> dict[str, Any]:

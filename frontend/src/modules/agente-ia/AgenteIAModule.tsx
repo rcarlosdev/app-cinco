@@ -2,10 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
-import { MessageSquare, Plus } from "lucide-react";
-import ChatComposer from "@/modules/programacion/ia-dev/chat/components/ChatComposer";
-import ChatMessageItem from "@/modules/programacion/ia-dev/chat/components/ChatMessage";
-import ScrollToBottomButton from "@/modules/programacion/ia-dev/chat/components/ScrollToBottomButton";
 import { type ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
 import { mergeStreamingResponse } from "@/modules/programacion/ia-dev/chat/utils/mergeStreamingResponse";
 import { normalizeChatPayload } from "@/modules/programacion/ia-dev/chat/utils/normalizeChatPayload";
@@ -13,12 +9,22 @@ import { usePromptHistory } from "@/modules/programacion/ia-dev/chat/hooks/usePr
 import { useSmartAutoScroll } from "@/modules/programacion/ia-dev/chat/hooks/useSmartAutoScroll";
 import { useIADevChatTransport } from "@/modules/programacion/ia-dev/chat/hooks/useIADevChatTransport";
 import { createIADevTicket, type IADevAction } from "@/services/ia-dev.service";
+import ChatPanel from "@/modules/agente-ia/components/ChatPanel";
+import DashboardPanel from "@/modules/agente-ia/components/DashboardPanel";
+import SplitLayout from "@/modules/agente-ia/components/SplitLayout";
+import { mockAnalyticsResponse } from "@/modules/agente-ia/mock/mockAnalyticsResponse";
 import {
   clearAgenteIAChatHistory,
   loadAgenteIAChatHistory,
   saveAgenteIAChatHistory,
   type AgenteIAChatThread,
 } from "@/modules/agente-ia/persistence/chatSessionStorage";
+import {
+  loadSplitViewState,
+  saveSplitViewState,
+} from "@/modules/agente-ia/persistence/splitViewStorage";
+import { buildDashboardSnapshot } from "@/modules/agente-ia/utils/buildDashboardSnapshot";
+import HistoryPanel from "@/modules/agente-ia/components/HistoryPanel";
 
 const INITIAL_ASSISTANT_MESSAGE =
   "Hola, soy Agente IA. Escribe tu consulta para comenzar.";
@@ -104,7 +110,9 @@ const buildChatPreview = (messages: ChatMessageModel[]) => {
   const latestMessage = meaningfulMessages[meaningfulMessages.length - 1];
   if (!latestMessage) return "Sin mensajes aun";
 
-  const compact = latestMessage.content.replace(/\s+/g, " ").trim();
+  const previewText =
+    latestMessage.normalized?.summary || latestMessage.content || "";
+  const compact = previewText.replace(/\s+/g, " ").trim();
   return compact.length > 86 ? `${compact.slice(0, 86)}...` : compact;
 };
 
@@ -137,26 +145,22 @@ const AgenteIAModule = () => {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const undoStackRef = useRef<string[]>([]);
   const redoStackRef = useRef<string[]>([]);
+
   const [initialHistoryState] = useState(() => {
     const persistedHistory = loadAgenteIAChatHistory();
-    if (persistedHistory && persistedHistory.chats.length > 0) {
-      return {
-        chats: sortChatsByRecent(persistedHistory.chats),
-        activeChatId:
-          persistedHistory.activeChatId ??
-          persistedHistory.chats[0]?.id ??
-          null,
-        restoredFromHistory: true,
-      };
-    }
+    const initialChat = createNewChat();
 
-    const initialChat = createInitialChat();
     return {
-      chats: [initialChat],
+      chats:
+        persistedHistory && persistedHistory.chats.length > 0
+          ? [initialChat, ...sortChatsByRecent(persistedHistory.chats)]
+          : [initialChat],
       activeChatId: initialChat.id,
       restoredFromHistory: false,
     };
   });
+
+  const [initialSplitViewState] = useState(() => loadSplitViewState());
   const { pushPrompt, navigate, resetNavigation } = usePromptHistory();
   const { sendMessage, lastError: transportError } = useIADevChatTransport();
   const {
@@ -181,6 +185,20 @@ const AgenteIAModule = () => {
     null,
   );
   const [composerResetSignal, setComposerResetSignal] = useState(0);
+  const [historyCollapsed, setHistoryCollapsed] = useState(
+    initialSplitViewState.historyCollapsed,
+  );
+  const [chatCollapsed, setChatCollapsed] = useState(
+    initialSplitViewState.chatCollapsed,
+  );
+  const [dashboardCollapsed, setDashboardCollapsed] = useState(
+    initialSplitViewState.dashboardCollapsed,
+  );
+  const [layoutSizes, setLayoutSizes] = useState(initialSplitViewState.sizes);
+  const [activeTabletTab, setActiveTabletTab] = useState<
+    "history" | "chat" | "dashboard"
+  >(initialSplitViewState.activeTabletTab);
+
   const resolvedActiveChatId = useMemo(() => {
     if (activeChatId && chats.some((chat) => chat.id === activeChatId)) {
       return activeChatId;
@@ -201,6 +219,18 @@ const AgenteIAModule = () => {
     [messageWindowSize, messages],
   );
   const hasCollapsedMessages = messages.length > messageWindowSize;
+  const dashboardSnapshot = useMemo(
+    () => buildDashboardSnapshot(messages),
+    [messages],
+  );
+
+  const hasDashboardWorkspace = Boolean(
+  dashboardSnapshot.hasStructuredContent && dashboardSnapshot.widgets.length > 0,
+);
+
+const shouldUseWorkspaceLayout =
+  hasDashboardWorkspace && messages.some((message) => message.role === "assistant");
+
   const effectiveChatStatus = useMemo(() => {
     if (transportError) {
       return "No fue posible conectar con el servicio en este momento.";
@@ -221,6 +251,7 @@ const AgenteIAModule = () => {
     messages.length,
     transportError,
   ]);
+
   const historyDateFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat("es-CO", {
@@ -266,6 +297,25 @@ const AgenteIAModule = () => {
       activeChatId: nextActiveChatId,
     });
   }, [activeChat, chats]);
+
+  useEffect(() => {
+    if (!shouldUseWorkspaceLayout) return;
+
+    saveSplitViewState({
+      sizes: layoutSizes,
+      activeTabletTab,
+      historyCollapsed,
+      chatCollapsed,
+      dashboardCollapsed,
+    });
+  }, [
+    activeTabletTab,
+    chatCollapsed,
+    dashboardCollapsed,
+    historyCollapsed,
+    layoutSizes,
+    shouldUseWorkspaceLayout,
+  ]);
 
   useEffect(() => {
     if (!activeChat?.id) return;
@@ -353,6 +403,7 @@ const AgenteIAModule = () => {
     if (isSubmitting || chatId === activeChatId) return;
 
     setActiveChatId(chatId);
+    setHistoryCollapsed(false);
     resetComposerForChatChange();
   };
 
@@ -360,6 +411,7 @@ const AgenteIAModule = () => {
     if (isSubmitting) return;
     if (activeChat && !chatHasUserMessages(activeChat)) {
       resetComposerForChatChange();
+      setHistoryCollapsed(false);
       return;
     }
 
@@ -371,6 +423,7 @@ const AgenteIAModule = () => {
       ]).slice(0, MAX_CHAT_HISTORY),
     );
     setActiveChatId(nextChat.id);
+    setHistoryCollapsed(false);
     resetComposerForChatChange();
   };
 
@@ -380,6 +433,53 @@ const AgenteIAModule = () => {
     }
 
     return historyDateFormatter.format(new Date(chat.updatedAt));
+  };
+
+  const appendMockDemo = () => {
+    if (!activeChat || isSubmitting) return;
+
+    const userMessageId = createMessageId("user");
+    const assistantMessageId = createMessageId("assistant");
+    const prompt =
+      "Muestrame un ejemplo de dashboard para materiales criticos por empleado.";
+    const normalizedPayload = normalizeChatPayload(mockAnalyticsResponse);
+    const submittedAt = new Date().toISOString();
+
+    updateActiveChat((chat) => {
+      const nextMessages = [
+        ...chat.messages,
+        {
+          id: userMessageId,
+          role: "user" as const,
+          content: prompt,
+          createdAt: Date.now(),
+          status: "final" as const,
+        },
+        {
+          id: assistantMessageId,
+          role: "assistant" as const,
+          content: mockAnalyticsResponse.reply,
+          createdAt: Date.now(),
+          status: "final" as const,
+          response: mockAnalyticsResponse,
+          normalized: normalizedPayload,
+          actions: [],
+          memoryCandidates: [],
+          pendingProposals: [],
+        },
+      ];
+
+      return {
+        ...chat,
+        sessionId: mockAnalyticsResponse.session_id,
+        chatStatus: "Demo local cargada",
+        messages: nextMessages,
+        title: buildChatTitle(nextMessages, prompt),
+        updatedAt: submittedAt,
+      };
+    });
+
+    notifyContentChanged("new-message", { behavior: "smooth", force: true });
   };
 
   const submitChat = async (overridePrompt?: string) => {
@@ -422,7 +522,9 @@ const AgenteIAModule = () => {
     pushPrompt(value);
     resetNavigation();
     setStreamingMessageId(assistantMessageId);
+    setHistoryCollapsed(false);
     notifyContentChanged("user-submit", { behavior: "smooth", force: true });
+    setActiveTabletTab("chat");
 
     try {
       setIsSubmitting(true);
@@ -542,8 +644,9 @@ const AgenteIAModule = () => {
     if (action.type === "render_chart") {
       updateActiveChat((chat) => ({
         ...chat,
-        chatStatus: "La visualizacion ya se muestra integrada en la respuesta.",
+        chatStatus: "La visualizacion ya se muestra en el panel derecho.",
       }));
+      setActiveTabletTab("dashboard");
       return;
     }
     if (!isKnownNonQueryAction(action)) {
@@ -577,12 +680,9 @@ const AgenteIAModule = () => {
         chatStatus: `Ticket ${created.ticket.ticket_id} creado`,
       }));
     } catch {
-      appendAssistantMessage(
-        "No fue posible crear el ticket en este momento.",
-        {
-          status: "error",
-        },
-      );
+      appendAssistantMessage("No fue posible crear el ticket en este momento.", {
+        status: "error",
+      });
       updateActiveChat((chat) => ({
         ...chat,
         chatStatus: "Error al crear ticket",
@@ -596,182 +696,78 @@ const AgenteIAModule = () => {
     <div className="w-full min-w-0 overflow-hidden">
       <PageBreadcrumb pageTitle={["Agente IA"]} />
 
-      <div className="h-[calc(100vh-190px)] min-h-[680px] w-full min-w-0">
-        <div className="mx-auto h-full max-w-[1400px] min-w-0">
-          <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white lg:flex-row dark:border-gray-800 dark:bg-white/3">
-            <aside className="flex w-full shrink-0 flex-col border-b border-gray-200 bg-gray-50/80 lg:h-full lg:w-80 lg:border-r lg:border-b-0 dark:border-gray-800 dark:bg-gray-900/60">
-              <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-800">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 dark:text-white/90">
-                      Historico de chats
-                    </p>
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-300">
-                      Conversaciones recientes.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={startNewChat}
-                    disabled={isSubmitting}
-                    className="bg-brand-500 hover:bg-brand-600 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white transition disabled:cursor-not-allowed disabled:opacity-70"
-                    title="Nuevo chat"
-                  >
-                    <Plus size={18} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-300">
-                {chats.length}{" "}
-                {chats.length === 1 ? "conversacion" : "conversaciones"}
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-auto p-3">
-                <div className="space-y-2">
-                  {chats.map((chat) => {
-                    const isActive = chat.id === resolvedActiveChatId;
-
-                    return (
-                      <button
-                        key={chat.id}
-                        type="button"
-                        onClick={() => openChat(chat.id)}
-                        disabled={isSubmitting}
-                        className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                          isActive
-                            ? "border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-500/10"
-                            : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:hover:bg-gray-800/80"
-                        } disabled:cursor-not-allowed disabled:opacity-70`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <span
-                            className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
-                              isActive
-                                ? "bg-brand-500 text-white"
-                                : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                            }`}
-                          >
-                            <MessageSquare size={16} />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="line-clamp-2 text-sm font-semibold text-gray-800 dark:text-white/90">
-                                {chat.title}
-                              </p>
-                              <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400">
-                                {formatChatTimestamp(chat)}
-                              </span>
-                            </div>
-                            <p className="mt-1 line-clamp-2 text-xs text-gray-500 dark:text-gray-300">
-                              {buildChatPreview(chat.messages)}
-                            </p>
-                            {chat.sessionId && (
-                              <span className="mt-2 inline-flex rounded-full border border-gray-300 px-2 py-0.5 text-[10px] font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                                Sesion activa
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </aside>
-
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white/90">
-                    <MessageSquare size={16} />
-                    Agente Conversacional
-                  </div>
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-300">
-                    Consulta informacion, revisa respuestas y continua tu
-                    conversacion en un solo lugar.
-                  </p>
-                </div>
-              </div>
-
-              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90">
-                    {activeChat?.title || "Nuevo chat"}
-                  </p>
-                  <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-300">
-                    {effectiveChatStatus}
-                  </p>
-                  {streamingMessageId && (
-                    <p className="text-brand-600 dark:text-brand-300 mt-1 text-xs font-medium">
-                      Agente escribiendo...
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="relative min-h-0 flex-1">
-                <div ref={chatScrollRef} className="h-full overflow-auto p-4">
-                  <div className="space-y-3">
-                    {hasCollapsedMessages && (
-                      <div className="flex justify-center">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateActiveChat((chat) => ({
-                              ...chat,
-                              messageWindowSize: Math.min(
-                                chat.messages.length,
-                                chat.messageWindowSize + 80,
-                              ),
-                            }))
-                          }
-                          className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-                        >
-                          Cargar mensajes anteriores (
-                          {messages.length - visibleMessages.length})
-                        </button>
-                      </div>
-                    )}
-
-                    {visibleMessages.map((message) => (
-                      <ChatMessageItem
-                        key={message.id}
-                        message={message}
-                        isBusy={isSubmitting}
-                        onActionClick={(action) => {
-                          void handleActionClick(action);
-                        }}
-                        variant="clean"
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {showScrollButton && (
-                  <ScrollToBottomButton
-                    onClick={onScrollToBottomClick}
-                    unreadCount={unreadCount}
-                  />
-                )}
-              </div>
-
-              <ChatComposer
-                value={chatInput}
-                disabled={isSubmitting}
-                isGenerating={Boolean(streamingMessageId)}
-                resetSignal={composerResetSignal}
-                onChange={setChatInputTracked}
-                onSubmit={() => {
-                  void submitChat();
-                }}
-                onNavigateHistory={(direction) => {
-                  setChatInputTracked(navigate(direction, chatInput));
-                }}
-                onUndo={undoChatInput}
-                onRedo={redoChatInput}
-              />
-            </div>
+      <div className="h-[calc(100vh-190px)] min-h-180 w-full min-w-0">
+        <div className="mx-auto h-full max-w-395 min-w-0">
+          <section className="h-full overflow-hidden rounded-[32px] border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950">
+            <SplitLayout
+              hasDashboard={shouldUseWorkspaceLayout}
+              sizes={layoutSizes}
+              activeTabletTab={activeTabletTab}
+              historyCollapsed={historyCollapsed}
+              chatCollapsed={chatCollapsed}
+              dashboardCollapsed={dashboardCollapsed}
+              onSizesChange={setLayoutSizes}
+              onTabletTabChange={setActiveTabletTab}
+              onToggleHistory={() => setHistoryCollapsed((prev) => !prev)}
+              onToggleChat={() => setChatCollapsed((prev) => !prev)}
+              onToggleDashboard={() => setDashboardCollapsed((prev) => !prev)}
+              history={
+                <HistoryPanel
+                  threads={chats.filter((chat) => chatHasUserMessages(chat))}
+                  activeChatId={resolvedActiveChatId}
+                  isSubmitting={isSubmitting}
+                  onOpenChat={openChat}
+                  onStartNewChat={startNewChat}
+                  formatChatTimestamp={formatChatTimestamp}
+                  buildChatPreview={buildChatPreview}
+                />
+              }
+              chat={
+                <ChatPanel
+                  chatTitle={activeChat?.title || "Nuevo chat"}
+                  chatStatus={effectiveChatStatus}
+                  streaming={Boolean(streamingMessageId)}
+                  visibleMessages={visibleMessages}
+                  messages={messages}
+                  hasCollapsedMessages={hasCollapsedMessages}
+                  isSubmitting={isSubmitting}
+                  unreadCount={unreadCount}
+                  showScrollButton={showScrollButton}
+                  chatInput={chatInput}
+                  composerResetSignal={composerResetSignal}
+                  chatScrollRef={chatScrollRef}
+                  onLoadOlderMessages={() =>
+                    updateActiveChat((chat) => ({
+                      ...chat,
+                      messageWindowSize: Math.min(
+                        chat.messages.length,
+                        chat.messageWindowSize + 80,
+                      ),
+                    }))
+                  }
+                  onActionClick={(action) => {
+                    void handleActionClick(action);
+                  }}
+                  onSubmit={() => {
+                    void submitChat();
+                  }}
+                  onInputChange={setChatInputTracked}
+                  onNavigateHistory={(direction) => {
+                    setChatInputTracked(navigate(direction, chatInput));
+                  }}
+                  onUndo={undoChatInput}
+                  onRedo={redoChatInput}
+                  onScrollToBottomClick={onScrollToBottomClick}
+                  onLoadDemo={appendMockDemo}
+                />
+              }
+              dashboard={
+                <DashboardPanel
+                  snapshot={dashboardSnapshot}
+                  onLoadDemo={appendMockDemo}
+                />
+              }
+            />
           </section>
         </div>
       </div>

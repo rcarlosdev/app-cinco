@@ -8,6 +8,17 @@ from typing import Any
 class EmployeeIdentifierService:
     _DETAIL_PREFIX_RE = r"(?:info|informacion|detalle|datos|ficha)"
     _MOVIL_TOKEN_RE = r"(?:[a-z][a-z0-9_-]*(?:[\s_-]*\d+[a-z0-9_-]*)+|\d{3,5})"
+    _NON_MOVIL_PREFIXES = (
+        "empleado",
+        "empleados",
+        "tecnico",
+        "tecnicos",
+        "cuadrilla",
+        "brigada",
+        "responsable",
+        "usuario",
+        "persona",
+    )
     _MOVIL_PATTERNS = (
         re.compile(
             rf"\bmovil(?:\s+(?:de|del|la|el))?\s+(?P<token>{_MOVIL_TOKEN_RE})\b",
@@ -43,6 +54,9 @@ class EmployeeIdentifierService:
     def is_movil_candidate(cls, value: Any) -> bool:
         normalized = cls.normalize_movil_value(value)
         if not normalized:
+            return False
+        normalized_lower = normalized.lower()
+        if any(normalized_lower.startswith(prefix) for prefix in cls._NON_MOVIL_PREFIXES):
             return False
         if re.fullmatch(r"\d{3,5}", normalized):
             return True

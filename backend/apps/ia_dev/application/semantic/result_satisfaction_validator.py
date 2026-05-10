@@ -76,12 +76,12 @@ class ResultSatisfactionValidator:
         )
         expected_template = str(((resolved_query.intent.template_id if resolved_query else "") or "")).strip().lower()
         if asks_count or expected_template.startswith("count_") or "count" in expected_metrics:
-            has_numeric_kpi = any(isinstance(value, (int, float)) for value in kpis.values())
+            has_numeric_kpi = any(self._is_numeric_like(value) for value in kpis.values())
             if not has_numeric_kpi and rows:
                 for row in rows:
                     if not isinstance(row, dict):
                         continue
-                    if any(isinstance(value, (int, float)) for value in row.values()):
+                    if any(self._is_numeric_like(value) for value in row.values()):
                         has_numeric_kpi = True
                         break
             checks["has_numeric_kpi"] = has_numeric_kpi
@@ -344,9 +344,20 @@ class ResultSatisfactionValidator:
                 normalized_key = str(key or "").strip().lower()
                 if normalized_key in group_aliases or isinstance(value, bool):
                     continue
-                if isinstance(value, (int, float)):
+                if cls._is_numeric_like(value):
                     return True
         return False
+
+    @staticmethod
+    def _is_numeric_like(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        text = str(value or "").strip()
+        if not text:
+            return False
+        return bool(re.fullmatch(r"-?\d+(?:\.\d+)?", text))
 
     @staticmethod
     def _resolve_expected_cedula(message: str, *, resolved_query: ResolvedQuerySpec | None) -> str:

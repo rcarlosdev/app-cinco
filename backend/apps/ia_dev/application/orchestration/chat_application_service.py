@@ -931,6 +931,11 @@ class ChatApplicationService:
                 query_intelligence=query_intelligence,
                 execution_meta=execution,
             )
+            route = self._enforce_inventory_employee_stock_route(
+                message=message,
+                route=route,
+                query_intelligence=query_intelligence,
+            )
             primary_response = precomputed_response
             self._save_task_state(
                 run_context=run_context,
@@ -1001,6 +1006,11 @@ class ChatApplicationService:
             route=route,
             query_intelligence=query_intelligence,
             execution_meta=execution_meta,
+        )
+        route = self._enforce_inventory_employee_stock_route(
+            message=message,
+            route=route,
+            query_intelligence=query_intelligence,
         )
         run_context.metadata["runtime_route"] = dict(route or {})
         response_flow = self._resolve_runtime_response_flow(
@@ -3437,6 +3447,21 @@ class ChatApplicationService:
         normalized = ChatApplicationService._normalize_text(message)
         if not normalized:
             return {}
+        month_map = {
+            "enero": "1",
+            "febrero": "2",
+            "marzo": "3",
+            "abril": "4",
+            "mayo": "5",
+            "junio": "6",
+            "julio": "7",
+            "agosto": "8",
+            "septiembre": "9",
+            "setiembre": "9",
+            "octubre": "10",
+            "noviembre": "11",
+            "diciembre": "12",
+        }
         warehouse = re.search(r"\bsaldo\s+(?:de\s+)?bodega\s+([a-z0-9_-]{2,})\b", normalized)
         if not warehouse:
             warehouse = re.search(r"\bstock\s+(?:de\s+)?bodega\s+([a-z0-9_-]{2,})\b", normalized)
@@ -3455,8 +3480,21 @@ class ChatApplicationService:
                 "strategy": "sql_assisted",
                 "execute": True,
             }
+        guarded_cedula = ChatApplicationService._match_inventory_employee_stock_query(normalized)
+        if guarded_cedula:
+            return {
+                "matched": True,
+                "pattern": "stock_balance_by_mobile_employee",
+                "domain": "inventario_logistica",
+                "intent": "stock_balance",
+                "scope": "movil",
+                "filters": {"cedula": guarded_cedula, "stock_scope": "movil"},
+                "capability": "inventory_stock_balance_by_mobile",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
         mobile = re.search(
-            r"\bsaldo\s+(?:empleado|tecnico|movil|mobile|cedula)\s+([0-9]{5,15})\b",
+            r"\bsaldo\s+(?:movil|mobile|cedula)\s+([0-9]{5,15})\b",
             normalized,
         )
         if not mobile:
@@ -3534,6 +3572,36 @@ class ChatApplicationService:
                 "filters": {"bodega": value, "stock_actual": "<CRITICO>"},
                 "capability": "inventory_stock_balance_by_warehouse",
                 "template_id": "inventory_material_stock_by_warehouse",
+                "strategy": "sql_assisted",
+                "execute": True,
+            }
+        consumption = re.search(
+            r"\bconsumos?\s+de\s+la\s+(?:movil|cuadrilla|brigada)\s+([a-z0-9_-]{3,})",
+            normalized,
+        )
+        if consumption:
+            filters = {"movil": str(consumption.group(1) or "").strip().upper()}
+            day_match = re.search(r"\bel\s+(\d{1,2})\s+de\s+([a-z]+)\b", normalized)
+            if day_match:
+                filters["day"] = str(int(day_match.group(1)))
+                month_value = month_map.get(str(day_match.group(2) or "").strip().lower())
+                if month_value:
+                    filters["month"] = month_value
+            else:
+                for month_name, month_value in month_map.items():
+                    if re.search(rf"\b{re.escape(month_name)}\b", normalized):
+                        filters["month"] = month_value
+                        break
+            return {
+                "matched": True,
+                "pattern": "consumption_by_mobile",
+                "domain": "inventario_logistica",
+                "intent": "consumption_query",
+                "operation": "aggregate",
+                "scope": "",
+                "filters": filters,
+                "capability": "inventory_consumption_by_dimension",
+                "template_id": "inventory_consumption_by_dimension",
                 "strategy": "sql_assisted",
                 "execute": True,
             }
@@ -5075,6 +5143,17 @@ class ChatApplicationService:
             return None
         return ChatApplicationService._normalize_digits(match.group(0)) or None
 
+    @classmethod
+    def _match_inventory_employee_stock_query(cls, message: str) -> str:
+        normalized = cls._normalize_text(message)
+        match = re.search(
+            r"\bsaldo(?:\s+de)?(?:\s+materiales?)?\s+(?:del?\s+)?(?:emplead\w*|tecnico)\s+([0-9]{5,15})\b",
+            str(normalized or ""),
+        )
+        if not match:
+            return ""
+        return cls._normalize_digits(match.group(1))
+
     @staticmethod
     def _normalize_digits(value: str) -> str:
         return "".join(ch for ch in str(value or "") if ch.isdigit())
@@ -5363,6 +5442,39 @@ class ChatApplicationService:
                 "planner_selected_strategy": "sql_assisted",
                 "legacy_capability_path_used": False,
                 "reason": "query_execution_planner_sql_assisted_authority",
+            }
+        )
+        return normalized_route
+
+    @classmethod
+    def _enforce_inventory_employee_stock_route(
+        cls,
+        *,
+        message: str,
+        route: dict[str, Any],
+        query_intelligence: dict[str, Any],
+    ) -> dict[str, Any]:
+        guarded_cedula = cls._match_inventory_employee_stock_query(message)
+        if not guarded_cedula:
+            return dict(route or {})
+        execution_plan = dict(query_intelligence.get("execution_plan") or {})
+        capability_id = str(
+            execution_plan.get("capability_id")
+            or (execution_plan.get("metadata") or {}).get("capability_id")
+            or ""
+        ).strip()
+        domain_code = str(execution_plan.get("domain_code") or "").strip().lower()
+        if domain_code != "inventario_logistica" or capability_id != "inventory_stock_balance_by_mobile":
+            return dict(route or {})
+        normalized_route = dict(route or {})
+        normalized_route.update(
+            {
+                "selected_capability_id": str(normalized_route.get("selected_capability_id") or "query_execution_planner.sql_assisted"),
+                "selected_capability_compat_id": capability_id,
+                "use_legacy": False,
+                "legacy_capability_path_used": False,
+                "runtime_authority": str(normalized_route.get("runtime_authority") or "query_execution_planner"),
+                "reason": "inventory_employee_stock_route_guard",
             }
         )
         return normalized_route

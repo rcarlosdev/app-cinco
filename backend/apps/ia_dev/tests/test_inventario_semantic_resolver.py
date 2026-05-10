@@ -8,6 +8,7 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import Struc
 from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import (
     InventorySemanticResolver,
 )
+from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.intent_arbitration_service import IntentArbitrationService
 
 
@@ -93,6 +94,57 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "98672304")
         self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "movil")
 
+    def test_inventario_cuadrilla_textual_resuelve_movil_y_no_serial(self):
+        resolved = self._resolve("inventario de la cuadrilla TIRAN224", operation="stock_balance")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "movil")
+        self.assertFalse(bool(resolved.normalized_filters.get("serial")))
+
+    def test_materiales_del_tecnico_numeric_prioriza_cedula(self):
+        resolved = self._resolve("materiales del tecnico 1214730857 con datos del empleado", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "1214730857")
+
+    def test_saldo_por_tecnico_en_operacion_hfc_prioriza_stock_movil(self):
+        resolved = self._resolve(
+            "saldo por tecnico en operacion_hfc mostrando cedula, nombre, movil y total de materiales",
+            operation="aggregate",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+        self.assertIn("cedula", list(resolved.intent.group_by or []))
+        self.assertIn("codigo", list(resolved.intent.group_by or []))
+
+    def test_inventario_por_cuadrilla_conserva_codigo_movil_y_cedula(self):
+        resolved = self._resolve(
+            "inventario por cuadrilla mostrando movil, cedula del empleado, nombre y saldo total",
+            operation="aggregate",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertIn("movil", list(resolved.intent.group_by or []))
+        self.assertIn("cedula", list(resolved.intent.group_by or []))
+        self.assertIn("codigo", list(resolved.intent.group_by or []))
+
+    def test_materiales_criticos_por_empleado_resuelve_template_dedicado(self):
+        resolved = self._resolve(
+            "materiales criticos por empleado en operacion_hfc cruzando saldo, cedula, movil y datos del empleado",
+            operation="aggregate",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_critical_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+
+    def test_equipos_cargados_a_movil_numerica_resuelve_serial_por_operador(self):
+        resolved = self._resolve("equipos cargados a la movil 98562719", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_by_operational_holder")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "98562719")
+
     def test_consumo_vs_facturacion_solo_sql_para_operacion_hfc(self):
         resolved = self._resolve("consumo vs facturacion operacion_hfc", operation="aggregate")
 
@@ -110,7 +162,7 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         resolved = self._resolve("saldo actual de la cÃ©dula 123456789", operation="aggregate")
 
         self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "123456789")
-        self.assertIn("cedula_o_responsable_no_validado_en_dictionary", list(resolved.warnings or []))
+        self.assertNotIn("cedula_o_responsable_no_validado_en_dictionary", list(resolved.warnings or []))
 
     def test_casos_nuevos_de_semantica_inventario_logistica(self):
         cases = [
@@ -278,3 +330,17 @@ class InventarioIntentArbitrationTests(SimpleTestCase):
         self.assertEqual(str(result.get("candidate_domain") or ""), "inventario_logistica")
         self.assertEqual(str(result.get("intent") or ""), "traceability_query")
         self.assertTrue(bool(result.get("should_use_sql_assisted")))
+
+
+class EmployeeIdentifierServiceTests(SimpleTestCase):
+    def test_extract_movil_identifier_descarta_prefijos_semanticos_genericos(self):
+        self.assertEqual(
+            EmployeeIdentifierService.extract_movil_identifier("información empleado 98672304"),
+            "",
+        )
+
+    def test_extract_movil_identifier_conserva_movil_operativa_real(self):
+        self.assertEqual(
+            EmployeeIdentifierService.extract_movil_identifier("información de TIRAN462"),
+            "TIRAN462",
+        )

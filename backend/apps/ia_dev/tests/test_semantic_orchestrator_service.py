@@ -11,6 +11,7 @@ def _inventory_dictionary_summary() -> dict:
     return {
         "table_names": [
             "base_codigos",
+            "cinco_base_de_personal",
             "logistica_movimientos_entrada",
             "logistica_movimientos_entrega",
             "logistica_movimientos_devolucion",
@@ -22,7 +23,7 @@ def _inventory_dictionary_summary() -> dict:
             "a_promedios_consumo",
             "bd_c3nc4s1s.facturacion_facturado_wfm",
         ],
-        "column_names": ["bodega", "codigo", "serial", "cedula", "movil", "orden_trabajo"],
+        "column_names": ["bodega", "codigo", "serial", "cedula", "movil", "orden_trabajo", "nombre", "apellido"],
         "joins": [
             {
                 "from_table": "logistica_movimientos_consumo",
@@ -33,6 +34,11 @@ def _inventory_dictionary_summary() -> dict:
                 "from_table": "a_promedios_consumo",
                 "to_table": "bd_c3nc4s1s.facturacion_facturado_wfm",
                 "join_sql": "a_promedios_consumo.ot = bd_c3nc4s1s.facturacion_facturado_wfm.ot",
+            },
+            {
+                "from_table": "logistica_movimientos_consumo",
+                "to_table": "cinco_base_de_personal",
+                "join_sql": "logistica_movimientos_consumo.cedula = cinco_base_de_personal.cedula",
             },
         ],
     }
@@ -223,6 +229,22 @@ class SemanticOrchestratorServiceTests(SimpleTestCase):
 
         self.assertEqual(str(result.get("domain") or ""), "inventario_logistica")
         self.assertEqual(str(result.get("agent_id") or ""), "inventario_logistica_agent")
+
+    def test_inventory_cross_with_employee_data_keeps_inventory_priority(self):
+        service = SemanticOrchestratorService()
+        result = service.orchestrate(
+            user_message="inventario de la cuadrilla TIRAN224 con datos del empleado",
+            candidate_domain="ausentismo",
+            candidate_agent="ausentismo_agent",
+            agent_contract=None,
+            ai_dictionary_summary=_inventory_dictionary_summary(),
+            domain_semantic_summary={},
+            memory_context={},
+            route_debug_hints={},
+        )
+
+        self.assertEqual(str(result.get("domain") or ""), "inventario_logistica")
+        self.assertEqual(str(result.get("capability") or ""), "inventory_stock_balance_by_mobile")
 
     def test_informacion_empleado_routes_to_empleados(self):
         service = SemanticOrchestratorService()
