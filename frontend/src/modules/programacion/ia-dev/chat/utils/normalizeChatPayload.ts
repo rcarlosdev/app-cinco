@@ -151,15 +151,34 @@ const normalizeTable = (value: unknown): NormalizedTable | null => {
 
   if (rows.length === 0) return null;
 
+  const exportRows = asArray(source.export_rows).filter(
+    (row): row is Record<string, unknown> =>
+      Boolean(row) && typeof row === "object",
+  );
+
   const columns = asArray(source.columns)
     .map((column) => asString(column))
     .filter(Boolean);
 
   const inferredColumns = columns.length > 0 ? columns : Object.keys(rows[0]);
+  const totalRecords =
+    asNumber(source.total_records) ?? asNumber(source.rowcount) ?? rows.length;
+  const returnedRecords = asNumber(source.returned_records) ?? rows.length;
+
   return {
     columns: inferredColumns,
     rows,
-    rowcount: asNumber(source.rowcount) ?? rows.length,
+    exportRows: exportRows.length > 0 ? exportRows : rows,
+    rowcount: totalRecords,
+    totalRecords,
+    returnedRecords,
+    exportRecords:
+      asNumber(source.export_records) ??
+      (exportRows.length > 0 ? exportRows.length : rows.length),
+    exportTruncated: Boolean(source.export_truncated),
+    exportLimit: asNumber(source.export_limit) ?? 0,
+    truncated: Boolean(source.truncated) || totalRecords > returnedRecords,
+    limit: asNumber(source.limit) ?? 0,
   };
 };
 

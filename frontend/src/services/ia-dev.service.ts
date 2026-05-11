@@ -35,7 +35,15 @@ export type IADevChartPayload = {
 export type IADevTablePayload = {
   columns?: string[];
   rows?: Array<Record<string, unknown>>;
+  export_rows?: Array<Record<string, unknown>>;
   rowcount?: number;
+  total_records?: number;
+  returned_records?: number;
+  export_records?: number;
+  export_truncated?: boolean;
+  export_limit?: number;
+  truncated?: boolean;
+  limit?: number;
 };
 
 export type IADevAction = {

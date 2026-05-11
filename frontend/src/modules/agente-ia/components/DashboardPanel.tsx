@@ -17,7 +17,7 @@ const DashboardPanel = ({
   onLoadDemo,
 }: DashboardPanelProps) => {
   return (
-    <section className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.045),_transparent_45%),linear-gradient(180deg,_rgba(248,250,252,0.96),_rgba(255,255,255,1))] dark:bg-gray-950">
+    <section className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,rgba(15,23,42,0.045),transparent_45%),linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,1))] dark:bg-none dark:bg-gray-950">
       <header className="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
