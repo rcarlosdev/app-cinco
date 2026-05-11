@@ -15,6 +15,15 @@ from apps.ia_dev.services.intent_arbitration_service import IntentArbitrationSer
 class InventarioSemanticResolverTests(SimpleTestCase):
     def setUp(self):
         self.resolver = InventorySemanticResolver()
+        self.resolver.semantic_plan_builder.memory_service.list_memory_snapshot = lambda: [
+            {"memory_key": "inventory.semantic.rule.material_claro"},
+            {"memory_key": "inventory.semantic.rule.kardex"},
+        ]
+        self.resolver.semantic_plan_builder.memory_service.ensure_confirmed_rules = lambda: {
+            "saved_keys": ["inventory.semantic.rule.material_claro"],
+            "error_count": 0,
+            "errors": [],
+        }
 
     def _resolve(self, message: str, operation: str = "detail"):
         return self.resolver.resolve_query(
@@ -28,6 +37,116 @@ class InventarioSemanticResolverTests(SimpleTestCase):
             ),
             semantic_context={},
         )
+
+    def _semantic_plan(self, resolved):
+        return dict(resolved.semantic_context.get("business_query_semantic_plan") or {})
+
+    def test_semantic_plan_familia_saldo_empleado(self):
+        cases = [
+            "saldo empleado 5098747",
+            "saldo del tecnico 5098747",
+            "saldo de inventario del empleado 5098747",
+            "saldo material empleado 5098747",
+            "saldo material claro empleado 5098747",
+            "saldo ferretero empleado 5098747",
+        ]
+
+        for message in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="stock_balance")
+                plan = self._semantic_plan(resolved)
+
+                self.assertEqual(str(resolved.intent.domain_code or ""), "inventario_logistica")
+                self.assertEqual(str(plan.get("intent") or ""), "stock_balance")
+                self.assertEqual(str((plan.get("entity") or {}).get("type") or ""), "empleado")
+                self.assertEqual(str((plan.get("entity") or {}).get("identifier") or ""), "5098747")
+                self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "cedula")
+                self.assertEqual(str(plan.get("candidate_capability") or ""), "inventory_stock_balance_by_mobile")
+                self.assertEqual(str((plan.get("output") or {}).get("grain") or ""), "saldo_por_codigo")
+                self.assertFalse(bool((plan.get("scope") or {}).get("include_serialized")))
+                self.assertEqual(str((plan.get("execution") or {}).get("capability") or ""), "inventory_stock_balance_by_mobile")
+
+    def test_semantic_plan_familia_kardex_empleado(self):
+        cases = [
+            "kardex empleado 5098747",
+            "kardex del tecnico 5098747",
+            "movimientos del empleado 5098747",
+            "entradas y salidas del tecnico 5098747",
+        ]
+
+        for message in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="detail")
+                plan = self._semantic_plan(resolved)
+
+                self.assertEqual(str(plan.get("intent") or ""), "movement_history")
+                self.assertEqual(str((plan.get("entity") or {}).get("type") or ""), "empleado")
+                self.assertEqual(str((plan.get("entity") or {}).get("identifier") or ""), "5098747")
+                self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "cedula")
+                self.assertEqual(str(plan.get("candidate_capability") or ""), "inventory_kardex_by_employee")
+                self.assertEqual(str((plan.get("output") or {}).get("grain") or ""), "movimiento_por_codigo")
+                self.assertFalse(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_semantic_plan_familia_movil_cuadrilla(self):
+        cases = [
+            ("inventario cuadrilla TIRAN224", True),
+            ("saldo movil TIRAN224", True),
+            ("inventario de la movil TIRAN314", True),
+            ("materiales de la cuadrilla TIRAN224", False),
+        ]
+
+        for message, include_serialized in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="stock_balance")
+                plan = self._semantic_plan(resolved)
+
+                self.assertEqual(str(plan.get("intent") or ""), "stock_balance")
+                self.assertEqual(str((plan.get("entity") or {}).get("type") or ""), "movil")
+                self.assertTrue(str((plan.get("entity") or {}).get("identifier") or "").startswith("TIRAN"))
+                self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "movil")
+                self.assertEqual(str(plan.get("candidate_capability") or ""), "inventory_stock_balance_by_mobile")
+                self.assertEqual(bool((plan.get("scope") or {}).get("include_serialized")), include_serialized)
+
+    def test_semantic_plan_familia_codigo(self):
+        cases = [
+            "kardex codigo 1020498",
+            "movimientos codigo 1020498",
+            "saldo codigo 1020498",
+        ]
+
+        for message in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="detail")
+                plan = self._semantic_plan(resolved)
+
+                self.assertEqual(str((plan.get("entity") or {}).get("type") or ""), "codigo")
+                self.assertEqual(str((plan.get("entity") or {}).get("identifier") or ""), "1020498")
+                self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "codigo")
+                self.assertEqual(str((plan.get("normalized_filters") or {}).get("codigo") or ""), "1020498")
+                self.assertNotIn("legacy", str(resolved.intent.template_id or ""))
+                self.assertNotIn("fallback", str(resolved.intent.template_id or ""))
+
+    def test_semantic_plan_familia_serializados(self):
+        cases = [
+            ("movimiento serial 254429139509", "serial"),
+            ("equipos cargados al empleado 98562719", "empleado"),
+            ("seriales perdidos", "serial"),
+            ("equipos en garantia", "serial"),
+        ]
+
+        for message, expected_entity in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="detail")
+                plan = self._semantic_plan(resolved)
+
+                self.assertEqual(str(plan.get("inventory_family") or ""), "serializados")
+                self.assertTrue(bool((plan.get("scope") or {}).get("include_serialized")))
+                self.assertEqual(str(plan.get("candidate_capability") or ""), str((plan.get("execution") or {}).get("capability") or ""))
+                self.assertIn("serializados", list((plan.get("scope") or {}).get("families") or []))
+                if expected_entity == "empleado":
+                    self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "cedula")
+                else:
+                    self.assertIn(str((plan.get("entity") or {}).get("field") or ""), {"serial", ""})
 
     def test_trazabilidad_del_serial(self):
         resolved = self._resolve("trazabilidad del serial ABC123")
@@ -107,6 +226,61 @@ class InventarioSemanticResolverTests(SimpleTestCase):
 
         self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
         self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "1214730857")
+
+    def test_kardex_del_tecnico_numeric_resuelve_kardex_operativo_por_cedula(self):
+        resolved = self._resolve("kardex del tecnico 5098747", operation="detail")
+        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+        self.assertEqual(str(resolved.intent.domain_code or ""), "inventario_logistica")
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.intent.operation or ""), "detail")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(inference.get("business_concept") or ""), "kardex_operativo_por_empleado")
+
+    def test_kardex_del_empleado_numeric_resuelve_kardex_operativo_por_cedula(self):
+        resolved = self._resolve("kardex del empleado 5098747", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertIn(
+            "serializados_employee_kardex_not_available",
+            list((resolved.semantic_context.get("resolved_semantic") or {}).get("limitations") or []),
+        )
+
+    def test_kardex_codigo_para_empleado_prioriza_kardex_por_empleado(self):
+        resolved = self._resolve("kardex del codigo 1025507 para el empleado 5098747", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(resolved.normalized_filters.get("codigo") or ""), "1025507")
+
+    def test_saldo_material_claro_empleado_resuelve_tipo_material(self):
+        resolved = self._resolve("saldo material claro empleado 5098747", operation="stock_balance")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "material")
+        self.assertFalse(bool(resolved.normalized_filters.get("codigo")))
+
+    def test_saldo_material_de_claro_empleado_resuelve_tipo_material(self):
+        resolved = self._resolve("saldo material de claro empleado 5098747", operation="stock_balance")
+
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "material")
+        self.assertFalse(bool(resolved.normalized_filters.get("codigo")))
+
+    def test_saldo_ferretero_empleado_resuelve_tipo_ferretero(self):
+        resolved = self._resolve("saldo ferretero empleado 5098747", operation="stock_balance")
+
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "ferretero")
+
+    def test_saldo_material_generico_empleado_incluye_material_y_ferretero(self):
+        resolved = self._resolve("saldo material empleado 5098747", operation="stock_balance")
+
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(list(resolved.normalized_filters.get("tipo") or []), ["material", "ferretero"])
+        self.assertFalse(bool(resolved.normalized_filters.get("codigo")))
 
     def test_saldo_por_tecnico_en_operacion_hfc_prioriza_stock_movil(self):
         resolved = self._resolve(

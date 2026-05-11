@@ -76,7 +76,25 @@ const DataTable = ({ tabs }: DataTableProps) => {
                   : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
               }`}
             >
-              {tab.label}
+              <span className="flex items-center gap-2">
+                <span>{tab.label}</span>
+                {tab.badges.length > 0 && (
+                  <span className="flex flex-wrap gap-1">
+                    {tab.badges.map((badge) => (
+                      <span
+                        key={`${tab.id}-${badge}`}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.08em] uppercase ${
+                          tab.id === activeTab.id
+                            ? "bg-white/15 text-white"
+                            : "bg-gray-100 text-gray-600 dark:bg-gray-900 dark:text-gray-300"
+                        }`}
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
             </button>
           ))}
         </div>
