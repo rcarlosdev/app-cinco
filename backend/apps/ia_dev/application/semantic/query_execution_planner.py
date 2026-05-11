@@ -516,6 +516,12 @@ class QueryExecutionPlanner:
                 returned_records=len(rows_payload),
                 execution_plan=execution_plan,
             )
+            export_rows_payload = self._resolve_sql_export_rows(
+                db_alias=db_alias,
+                sql_query=sql_query,
+                rows_payload=rows_payload,
+                result_metadata=result_metadata,
+            )
             supplemental_tables = self._execute_supplemental_inventory_queries(
                 db_alias=db_alias,
                 execution_plan=execution_plan,
@@ -526,6 +532,7 @@ class QueryExecutionPlanner:
                 execution_plan=execution_plan,
                 sql_query=sql_query,
                 rows=rows_payload,
+                export_rows=export_rows_payload,
                 columns=columns,
                 duration_ms=duration_ms,
                 db_alias=db_alias,
@@ -706,6 +713,57 @@ class QueryExecutionPlanner:
         if not base_query:
             return ""
         return f"SELECT COUNT(*) AS total_records FROM ({base_query}) AS sql_assisted_total LIMIT 1"
+
+    @staticmethod
+    def _max_sql_export_rows() -> int:
+        raw = str(os.getenv("IA_DEV_QUERY_SQL_ASSISTED_EXPORT_MAX_ROWS", "20000") or "20000").strip()
+        try:
+            value = int(raw)
+        except Exception:
+            value = 20000
+        return max(1, min(value, 100000))
+
+    @classmethod
+    def _build_export_rows_query(cls, *, sql_query: str, limit: int) -> str:
+        base_query = cls.TRAILING_LIMIT_RE.sub("", str(sql_query or "").strip()).strip().rstrip(";").strip()
+        if not base_query:
+            return ""
+        return f"SELECT * FROM ({base_query}) AS sql_assisted_export LIMIT {max(1, int(limit))}"
+
+    def _resolve_sql_export_rows(
+        self,
+        *,
+        db_alias: str,
+        sql_query: str,
+        rows_payload: list[dict[str, Any]],
+        result_metadata: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        total_records = int((result_metadata or {}).get("total_records") or len(rows_payload))
+        returned_records = int((result_metadata or {}).get("returned_records") or len(rows_payload))
+        export_limit = self._max_sql_export_rows()
+
+        if total_records <= returned_records or total_records <= len(rows_payload):
+            return rows_payload
+
+        query = self._build_export_rows_query(
+            sql_query=sql_query,
+            limit=min(total_records, export_limit),
+        )
+        if not query:
+            return rows_payload
+
+        try:
+            with connections[db_alias].cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                columns = [str(getattr(col, "name", col[0]) or "") for col in (cursor.description or [])]
+        except Exception:
+            return rows_payload
+
+        return [
+            {columns[idx]: row[idx] for idx in range(len(columns))}
+            for row in rows
+        ]
 
     def build_missing_context_response(
         self,
@@ -4906,6 +4964,7 @@ class QueryExecutionPlanner:
         execution_plan: QueryExecutionPlan,
         sql_query: str,
         rows: list[dict[str, Any]],
+        export_rows: list[dict[str, Any]] | None,
         columns: list[str],
         duration_ms: int,
         db_alias: str,
@@ -4928,6 +4987,10 @@ class QueryExecutionPlanner:
             "truncated": bool((result_metadata or {}).get("truncated")),
             "limit": int((result_metadata or {}).get("limit") or 0),
         }
+        export_rows = list(export_rows or rows or [])
+        export_rowcount = len(export_rows)
+        export_limit = self._max_sql_export_rows()
+        export_truncated = result_meta["total_records"] > export_rowcount
         kpis.setdefault("returned_records", result_meta["returned_records"])
         kpis.setdefault("total_records", result_meta["total_records"])
         compiler = str(metadata.get("compiler") or "default_sql_builder")
@@ -5189,9 +5252,13 @@ class QueryExecutionPlanner:
                 "table": {
                     "columns": list(columns or []),
                     "rows": list(rows or []),
-                    "rowcount": len(rows),
+                    "export_rows": export_rows,
+                    "rowcount": result_meta["total_records"],
                     "total_records": result_meta["total_records"],
                     "returned_records": result_meta["returned_records"],
+                    "export_records": export_rowcount,
+                    "export_truncated": export_truncated,
+                    "export_limit": export_limit,
                     "truncated": result_meta["truncated"],
                     "limit": result_meta["limit"],
                 },

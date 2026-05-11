@@ -20,7 +20,15 @@ export type NormalizedKPI = {
 export type NormalizedTable = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
+  exportRows: Array<Record<string, unknown>>;
   rowcount: number;
+  totalRecords: number;
+  returnedRecords: number;
+  exportRecords: number;
+  exportTruncated: boolean;
+  exportLimit: number;
+  truncated: boolean;
+  limit: number;
 };
 
 export type NormalizedHighlight = {
