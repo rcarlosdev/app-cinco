@@ -12,6 +12,11 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 
 
 class ResultSatisfactionValidator:
+    INVENTORY_BALANCE_FILTER_RE = re.compile(
+        r"\b(?:having|where)\s+saldo(?:\s*(?:<>|!=|>|>=)\s*0)\b",
+        re.IGNORECASE,
+    )
+
     def validate(
         self,
         *,
@@ -31,6 +36,18 @@ class ResultSatisfactionValidator:
         chart = dict(data.get("chart") or {})
         checks: dict[str, Any] = {}
         constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+
+        inventory_balance_filter_reason = self._detect_inventory_balance_filter_exclusion(
+            resolved_query=resolved_query,
+            execution_plan=execution_plan,
+        )
+        if inventory_balance_filter_reason:
+            checks["inventory_balance_filter_policy"] = inventory_balance_filter_reason
+            return SatisfactionValidation(
+                satisfied=False,
+                reason="inventory_balance_filter_excludes_zero_or_negative",
+                checks=checks,
+            )
 
         expected_filters = self._resolve_expected_filters(
             message=normalized_message,
@@ -399,3 +416,38 @@ class ResultSatisfactionValidator:
     @staticmethod
     def _normalize_text(value: str) -> str:
         return str(value or "").strip().lower()
+
+    @classmethod
+    def _detect_inventory_balance_filter_exclusion(
+        cls,
+        *,
+        resolved_query: ResolvedQuerySpec | None,
+        execution_plan: QueryExecutionPlan | None,
+    ) -> dict[str, Any] | None:
+        if execution_plan is None:
+            return None
+        template_id = str(((resolved_query.intent.template_id if resolved_query else "") or "")).strip().lower()
+        capability_id = str((execution_plan.capability_id or "")).strip().lower()
+        if capability_id not in {"inventory_stock_balance_by_mobile", "inventory_serial_by_operational_holder"} and template_id not in {
+            "inventory_material_stock_mobile",
+            "inventory_serial_by_operational_holder",
+        }:
+            return None
+        queries_to_check: list[tuple[str, str]] = []
+        sql_query = str(execution_plan.sql_query or "").strip()
+        if sql_query:
+            queries_to_check.append(("primary", sql_query))
+        for index, item in enumerate(list((execution_plan.metadata or {}).get("supplemental_queries") or [])):
+            if not isinstance(item, dict):
+                continue
+            supplemental_query = str(item.get("query") or "").strip()
+            if supplemental_query:
+                queries_to_check.append((str(item.get("name") or f"supplemental_{index}"), supplemental_query))
+        violations: list[str] = []
+        for scope, query in queries_to_check:
+            match = cls.INVENTORY_BALANCE_FILTER_RE.search(query)
+            if match:
+                violations.append(f"{scope}:{match.group(0)}")
+        if not violations:
+            return None
+        return {"violations": violations}

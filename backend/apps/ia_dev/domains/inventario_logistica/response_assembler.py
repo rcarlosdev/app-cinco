@@ -3,6 +3,25 @@ from __future__ import annotations
 from typing import Any
 
 
+def _inventory_type_scope_label(filters: dict[str, Any], raw_query: str) -> str:
+    tipo_filter = filters.get("tipo")
+    if isinstance(tipo_filter, (list, tuple, set)):
+        normalized = {str(value or "").strip().lower() for value in tipo_filter if str(value or "").strip()}
+        if normalized == {"material", "ferretero"}:
+            return "material claro y ferretero"
+    elif str(tipo_filter or "").strip().lower() == "material":
+        return "material claro"
+    elif str(tipo_filter or "").strip().lower() == "ferretero":
+        return "ferretero"
+    if "material claro" in raw_query or "material de claro" in raw_query:
+        return "material claro"
+    if "material ferretero" in raw_query or "ferretero" in raw_query:
+        return "ferretero"
+    if "material" in raw_query:
+        return "material claro y ferretero"
+    return "materiales"
+
+
 def build_inventory_business_response(
     *,
     resolved_query: dict[str, Any],
@@ -31,6 +50,7 @@ def build_inventory_business_response(
         movil = str(filters.get("movil") or "").strip()
         template_id = str(query_intent.get("template_id") or "")
         raw_query = str((query_intent.get("raw_query") or "")).lower()
+        material_scope_label = _inventory_type_scope_label(filters=filters, raw_query=raw_query)
         first_row = rows[0] if isinstance(rows[0], dict) else {}
         row_keys = {str(key) for row in rows if isinstance(row, dict) for key in row.keys()}
         invalid_count = 0
@@ -55,21 +75,62 @@ def build_inventory_business_response(
             riesgo = "Los materiales marcados como CRITICO no cubren tres dias de operacion con el ritmo reciente de consumo."
             recomendacion = "Prioriza reposicion o redistribucion sobre los codigos con mayor brecha frente al umbral."
             siguiente_accion = "Si quieres, puedo resumirlo por movil o mostrar solo los tecnicos con mayor brecha."
+        elif {"fecha", "tipo_movimiento", "codigo", "descripcion", "tipo", "cedula", "empleado", "movil", "cantidad", "efecto", "saldo_movimiento"} <= row_keys:
+            codigo_scope = str(filters.get("codigo") or "").strip()
+            cedula_scope = str(filters.get("cedula") or "").strip()
+            if not codigo_scope:
+                codigos = {
+                    str((row or {}).get("codigo") or "").strip()
+                    for row in rows
+                    if str((row or {}).get("codigo") or "").strip()
+                }
+                if len(codigos) == 1:
+                    codigo_scope = next(iter(codigos))
+            if not cedula_scope:
+                cedulas = {
+                    str((row or {}).get("cedula") or "").strip()
+                    for row in rows
+                    if str((row or {}).get("cedula") or "").strip()
+                }
+                if len(cedulas) == 1:
+                    cedula_scope = next(iter(cedulas))
+            if codigo_scope and cedula_scope:
+                dato = f"Se consolido el kardex del codigo {codigo_scope} para el empleado {cedula_scope}."
+            elif cedula_scope:
+                dato = f"Se consolido el kardex del empleado {cedula_scope}."
+            else:
+                dato = (
+                    "Se consolido el kardex operativo por empleado y codigo. "
+                    f"El detalle conserva fecha, movimiento, codigo, cantidad y efecto sobre saldo de {material_scope_label}."
+                )
+            hallazgo = (
+                "Cada fila muestra fecha, tipo de movimiento, codigo, descripcion, tipo, cedula, empleado, movil, "
+                "estado_empleado, bodega, orden_trabajo, ticket, entrada, salida, cantidad, efecto y saldo_movimiento."
+            )
+            if "serializados_employee_kardex_not_available" in limitations:
+                hallazgo += " El bloque serializado no se incluyo porque no hay trazabilidad cronologica confiable por cedula."
+            riesgo = (
+                "El saldo se calcula como corrida cronologica ascendente por codigo dentro de los movimientos auditados del empleado, "
+                "aunque la visualizacion pueda ordenarse descendente."
+            )
+            recomendacion = "Revisa primero consumos, cobros o devoluciones atipicas para detectar descuadres operativos."
+            siguiente_accion = "Si quieres, puedo filtrar el kardex por codigo o resumirlo por tipo de material."
         elif {"codigo", "descripcion", "tipo", "cedula", "movil", "saldo"} <= row_keys:
             scope = f" en {bodega}" if bodega else ""
             if "por cuadrilla" in raw_query:
                 dato = (
                     f"Se consolidaron {len(rows)} registros de inventario por cuadrilla, empleado y codigo{scope}. "
-                    "Cada fila conserva el detalle del material."
+                    f"Cada fila conserva el detalle de {material_scope_label}."
                 )
             else:
                 dato = (
-                    f"Se consolidaron {len(rows)} saldos de materiales por tecnico y codigo{scope}. "
+                    f"Se consolidaron {len(rows)} saldos de {material_scope_label} por tecnico y codigo{scope}. "
                     "El resultado conserva el detalle por cedula y codigo."
                 )
             hallazgo = (
                 "Cada fila muestra codigo, descripcion, tipo, cedula, empleado, movil, "
-                "entregas, devoluciones, consumos, cobros y saldo."
+                "entregas, devoluciones, consumos, cobros y saldo. "
+                "Se conservan saldos positivos, cero y negativos cuando existan."
             )
             riesgo = "No se devolvio un saldo agregado por empleado o cuadrilla; el saldo operativo se conserva por codigo."
             recomendacion = "Revisa primero codigos con saldo negativo, cero o movimientos atipicos para priorizar control operativo."
@@ -79,13 +140,13 @@ def build_inventory_business_response(
             if movil and employee_scope:
                 dato = (
                     f"Se encontraron {len(employee_scope)} empleados asociados a la movil {movil}. "
-                    "El inventario de materiales se calculo por codigo usando esas cedulas oficiales."
+                    f"El inventario de {material_scope_label} se calculo por codigo usando esas cedulas oficiales."
                 )
             elif movil:
-                dato = f"Se calculo el inventario de materiales de la movil {movil} por codigo."
+                dato = f"Se calculo el inventario de {material_scope_label} de la movil {movil} por codigo."
             else:
-                dato = f"Se obtuvieron {len(rows)} codigos con saldo de materiales en el alcance consultado."
-            hallazgo = "Cada fila muestra codigo, descripcion, tipo, movimientos y saldo actual del material."
+                dato = f"Se obtuvieron {len(rows)} codigos con saldo de {material_scope_label} en el alcance consultado."
+            hallazgo = f"Cada fila muestra codigo, descripcion, tipo, movimientos y saldo actual de {material_scope_label}."
             riesgo = "El saldo mostrado es operativo por codigo; no representa un saldo global agregado engañoso."
             recomendacion = "Valida primero los codigos con saldo negativo o con movimientos atipicos."
             siguiente_accion = "Si quieres, puedo resumir el mismo alcance por tecnico o abrir el detalle de un codigo puntual."

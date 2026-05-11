@@ -6,10 +6,15 @@ from datetime import date
 from typing import Any
 
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
+    BusinessQuerySemanticPlan,
     ResolvedQuerySpec,
     StructuredQueryIntent,
 )
 
+from .business_query_semantic_plan import (
+    INVENTORY_SEMANTIC_MATRIX,
+    InventoryBusinessQueryPlanner,
+)
 from .yaml_agent_loader import (
     get_business_concepts,
     get_business_rules,
@@ -37,12 +42,29 @@ MONTHS = {
 
 class InventorySemanticResolver:
     RUNTIME_DOMAIN_CODE = "inventario_logistica"
+    MATERIAL_CODE_STOPWORDS = {
+        "bodega",
+        "claro",
+        "cuadrilla",
+        "de",
+        "del",
+        "empleado",
+        "ferretero",
+        "ferretero",
+        "inventario",
+        "material",
+        "materiales",
+        "movil",
+        "saldo",
+        "tecnico",
+    }
 
     def __init__(self, *, yaml_path: str | None = None):
         self.config = load_inventory_agent_yaml(yaml_path)
         self.groupable_dimensions = get_groupable_dimensions(self.config)
         self.business_concepts = get_business_concepts(self.config)
         self.business_rules = get_business_rules(self.config)
+        self.semantic_plan_builder = InventoryBusinessQueryPlanner()
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -100,7 +122,21 @@ class InventorySemanticResolver:
         if match:
             return str(match.group(1) or "").strip()
         match = re.search(r"\bmaterial\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
-        return str(match.group(1) or "").strip() if match else ""
+        if not match:
+            return ""
+        candidate = str(match.group(1) or "").strip()
+        if self._normalize(candidate) in self.MATERIAL_CODE_STOPWORDS:
+            return ""
+        return candidate
+
+    def _resolve_inventory_type_filter(self, normalized: str) -> Any:
+        if "material de claro" in normalized or "material claro" in normalized:
+            return "material"
+        if any(token in normalized for token in ("material ferretero", "ferretero", "ferreteria")):
+            return "ferretero"
+        if re.search(r"\bmaterial(?:es)?\b", normalized):
+            return ["material", "ferretero"]
+        return ""
 
     def _extract_cedula(self, message: str) -> str:
         normalized = self._normalize(message)
@@ -188,6 +224,7 @@ class InventorySemanticResolver:
         project = self._extract_project(message)
         warehouse = self._extract_warehouse(message)
         month = self._extract_month(message)
+        inventory_type_filter = self._resolve_inventory_type_filter(normalized)
         filters: dict[str, Any] = {}
         if serial:
             filters["serial"] = serial
@@ -203,6 +240,8 @@ class InventorySemanticResolver:
             filters["cedula"] = cedula
         if operational_identifier:
             filters["movil"] = operational_identifier
+        if inventory_type_filter:
+            filters["tipo"] = inventory_type_filter
 
         intent = "movement_query"
         operation = "list"
@@ -359,7 +398,43 @@ class InventorySemanticResolver:
                 "logistica_seriales_asociados",
             ]
             candidate_fields = ["codigo", "serial", "cantidad", "fecha", "tipo_movimiento", "documento"]
-        elif "kardex" in normalized and codigo:
+        elif (
+            self._contains_any(normalized, ("kardex", "movimientos", "entradas y salidas"))
+            and cedula
+            and any(token in normalized for token in ("tecnico", "empleado", "cedula"))
+        ):
+            intent = "movement_history"
+            operation = "detail"
+            business_concept = "kardex_operativo_por_empleado"
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_devolucion",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+                "base_codigos",
+                "cinco_base_de_personal",
+            ]
+            candidate_fields = [
+                "fecha",
+                "tipo_movimiento",
+                "codigo",
+                "descripcion",
+                "tipo",
+                "cedula",
+                "empleado",
+                "movil",
+                "estado_empleado",
+                "bodega",
+                "orden_trabajo",
+                "ticket",
+                "entrada",
+                "salida",
+                "cantidad",
+                "efecto",
+                "saldo_movimiento",
+            ]
+            limitations.append("serializados_employee_kardex_not_available")
+        elif self._contains_any(normalized, ("kardex", "movimientos")) and codigo:
             intent = "movement_history"
             operation = "trace"
             business_concept = "kardex_consolidado"
@@ -653,7 +728,9 @@ class InventorySemanticResolver:
             ),
             "return_query": "inventory_returns_by_dimension",
             "movement_query": "inventory_entries_by_month" if "mes" in inferred_group_by else "inventory_movement_detail",
-            "movement_history": "inventory_kardex_consolidated",
+            "movement_history": "inventory_kardex_by_employee"
+            if str(inference.get("business_concept") or "") == "kardex_operativo_por_empleado"
+            else "inventory_kardex_consolidated",
             "reconciliation_query": "inventory_consumption_billing_operacion_hfc"
             if str(inference.get("business_concept") or "") == "consumo_vs_facturacion"
             and str(normalized_filters.get("bodega") or "") == "operacion_hfc"
@@ -671,13 +748,20 @@ class InventorySemanticResolver:
             if explicit_template_id.startswith("inventory_")
             else str(template_map.get(str(inference.get("intent") or ""), "inventory_movement_detail"))
         )
+        memory_seed_status = self.semantic_plan_builder.memory_service.ensure_confirmed_rules()
+        semantic_plan: BusinessQuerySemanticPlan = self.semantic_plan_builder.build_plan(
+            message=message,
+            inference=inference,
+            template_id=resolved_template_id,
+            semantic_context=semantic_context,
+        )
         resolved_intent = StructuredQueryIntent(
             raw_query=intent.raw_query,
             domain_code=self.RUNTIME_DOMAIN_CODE,
             operation=str(inference.get("operation") or intent.operation or "list"),
             template_id=resolved_template_id,
-            entity_type="serial" if normalized_filters.get("serial") else ("codigo" if normalized_filters.get("codigo") else ""),
-            entity_value=str(normalized_filters.get("serial") or normalized_filters.get("codigo") or ""),
+            entity_type=str(semantic_plan.main_entity.type or ""),
+            entity_value=str(semantic_plan.main_entity.identifier or ""),
             filters=normalized_filters,
             period=dict(intent.period or {}),
             group_by=inferred_group_by,
@@ -691,9 +775,19 @@ class InventorySemanticResolver:
             warnings.append("inventario_stock_pendiente_validacion_db_ai_dictionary")
         semantic_context = dict(semantic_context or {})
         semantic_context["inventory_semantic_inference"] = dict(inference)
+        semantic_context["inventory_semantic_matrix"] = list(INVENTORY_SEMANTIC_MATRIX)
+        semantic_context["business_query_semantic_plan"] = semantic_plan.as_dict()
+        semantic_context["inventory_semantic_plan"] = semantic_plan.as_dict()
+        semantic_context["semantic_memory_seed"] = dict(memory_seed_status or {})
         semantic_context.setdefault("resolved_semantic", {})
         semantic_context["resolved_semantic"]["inventory"] = dict(inference)
+        semantic_context["resolved_semantic"]["business_query_semantic_plan"] = semantic_plan.as_dict()
         semantic_context["resolved_semantic"]["limitations"] = limitations
+        semantic_context["resolved_semantic"]["rules_applied"] = list(semantic_plan.applicable_business_rules or [])
+        semantic_context["resolved_semantic"]["candidate_capability"] = str(semantic_plan.candidate_capability or "")
+        semantic_context["resolved_semantic"]["consulted_sources"] = list(semantic_plan.consulted_sources or [])
+        semantic_context["resolved_semantic"]["memory_keys_used"] = list(semantic_plan.memory_keys_used or [])
+        semantic_context["resolved_semantic"]["final_filters"] = dict(semantic_plan.normalized_filters or {})
         semantic_context["resolved_semantic"]["runtime_flow_hint"] = str(
             inference.get("expected_runtime_flow")
             or ("business_validation_required" if str(resolved_intent.template_id or "").strip() == "inventory_stock_balance_pending_validation" else "sql_assisted")

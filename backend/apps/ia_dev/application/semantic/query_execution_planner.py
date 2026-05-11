@@ -52,6 +52,7 @@ class QueryExecutionPlanner:
         domain_code = str(resolved_query.intent.domain_code or "").strip().lower()
         template_id = str(resolved_query.intent.template_id or "").strip().lower()
         constraints = self._build_constraints(resolved_query=resolved_query)
+        semantic_trace = self._semantic_trace_payload(resolved_query=resolved_query)
 
         capability_id = self._resolve_capability_id(
             domain_code=domain_code,
@@ -118,6 +119,7 @@ class QueryExecutionPlanner:
                             "template_id": template_id,
                             "operation": resolved_query.intent.operation,
                             "capability_id": capability_id,
+                            "semantic_trace": semantic_trace,
                             **dict(sql_metadata or {}),
                             **raw_query_fallback_meta,
                             **self._build_analytics_router_metadata(
@@ -141,6 +143,7 @@ class QueryExecutionPlanner:
                     },
                     metadata={
                         "template_id": template_id,
+                        "semantic_trace": semantic_trace,
                         **raw_query_fallback_meta,
                         **dict(sql_metadata or {}),
                         **analytics_router_metadata,
@@ -173,6 +176,7 @@ class QueryExecutionPlanner:
                     },
                     metadata={
                         "template_id": template_id,
+                        "semantic_trace": semantic_trace,
                         **raw_query_fallback_meta,
                         **dict(sql_metadata or {}),
                         **cleanup_metadata,
@@ -190,6 +194,7 @@ class QueryExecutionPlanner:
                 metadata={
                     "template_id": template_id,
                     "operation": resolved_query.intent.operation,
+                    "semantic_trace": semantic_trace,
                     **raw_query_fallback_meta,
                     **self._build_analytics_router_metadata(
                         domain_code=domain_code,
@@ -210,7 +215,7 @@ class QueryExecutionPlanner:
                 capability_id=capability_id,
                 constraints=constraints,
                 policy={"allowed": False, "reason": "fallback_legacy"},
-                metadata={"template_id": template_id, **raw_query_fallback_meta, **analytics_router_metadata},
+                metadata={"template_id": template_id, "semantic_trace": semantic_trace, **raw_query_fallback_meta, **analytics_router_metadata},
             )
 
         if domain_code == "general":
@@ -221,7 +226,7 @@ class QueryExecutionPlanner:
                 capability_id=capability_id,
                 constraints=constraints,
                 policy={"allowed": False, "reason": "fallback_legacy"},
-                metadata={"template_id": template_id, **raw_query_fallback_meta, **analytics_router_metadata},
+                metadata={"template_id": template_id, "semantic_trace": semantic_trace, **raw_query_fallback_meta, **analytics_router_metadata},
             )
 
         missing_context = self._detect_missing_context(resolved_query=resolved_query)
@@ -238,7 +243,7 @@ class QueryExecutionPlanner:
                     "reason": "missing_context",
                     "metadata": {"missing_context": missing_context},
                 },
-                metadata={"template_id": template_id, **raw_query_fallback_meta, **analytics_router_metadata},
+                metadata={"template_id": template_id, "semantic_trace": semantic_trace, **raw_query_fallback_meta, **analytics_router_metadata},
             )
 
         return QueryExecutionPlan(
@@ -256,6 +261,7 @@ class QueryExecutionPlanner:
             policy={"allowed": False, "reason": "fallback_legacy"},
             metadata={
                 "template_id": template_id,
+                "semantic_trace": semantic_trace,
                 **({"sql_reason": sql_reason} if sql_reason else {}),
                 **raw_query_fallback_meta,
                 **dict(sql_metadata or {}),
@@ -874,6 +880,12 @@ class QueryExecutionPlanner:
                 return "attendance.unjustified.summary.v1"
             return "attendance.unjustified.summary.v1"
         if normalized_domain == "inventario_logistica":
+            if self._should_route_kardex_codigo_employee_to_employee(
+                domain_code=normalized_domain,
+                template_id=template_id,
+                resolved_query=resolved_query,
+            ):
+                return "inventory_kardex_by_employee"
             if template_id == "inventory_material_stock_by_warehouse":
                 return "inventory_stock_balance_by_warehouse"
             if template_id == "inventory_material_stock_mobile":
@@ -902,6 +914,8 @@ class QueryExecutionPlanner:
                 return "inventory_entries_by_month"
             if template_id == "inventory_movement_detail":
                 return "inventory_movement_detail"
+            if template_id == "inventory_kardex_by_employee":
+                return "inventory_kardex_by_employee"
             if template_id == "inventory_kardex_consolidated":
                 return "inventory_kardex_consolidated"
             if template_id == "inventory_consumption_billing_operacion_hfc":
@@ -998,6 +1012,9 @@ class QueryExecutionPlanner:
             }:
                 metrics = [metric for metric in metrics if metric not in {"count", "percentage"}]
                 chart_requested = False
+            if template_id in {"inventory_kardex_by_employee", "inventory_kardex_consolidated"}:
+                result_shape = "table"
+                chart_requested = False
             if template_id in {"inventory_consumption_top", "inventory_consumption_by_dimension"}:
                 chart_requested = False
         return {
@@ -1012,6 +1029,25 @@ class QueryExecutionPlanner:
             "chart_requested": chart_requested,
             "operation": operation,
             "template_id": str(resolved_query.intent.template_id or ""),
+        }
+
+    @staticmethod
+    def _semantic_trace_payload(*, resolved_query: ResolvedQuerySpec) -> dict[str, Any]:
+        semantic_context = dict(resolved_query.semantic_context or {})
+        resolved_semantic = dict(semantic_context.get("resolved_semantic") or {})
+        return {
+            "original_query": str(resolved_query.intent.raw_query or ""),
+            "semantic_plan": dict(
+                semantic_context.get("business_query_semantic_plan")
+                or semantic_context.get("inventory_semantic_plan")
+                or {}
+            ),
+            "rules_applied": list(resolved_semantic.get("rules_applied") or []),
+            "consulted_sources": list(resolved_semantic.get("consulted_sources") or []),
+            "memory_keys_used": list(resolved_semantic.get("memory_keys_used") or []),
+            "final_filters": dict(resolved_semantic.get("final_filters") or resolved_query.normalized_filters or {}),
+            "candidate_capability": str(resolved_semantic.get("candidate_capability") or ""),
+            "blocked_reasons": list(resolved_semantic.get("limitations") or []),
         }
 
     @staticmethod
@@ -1261,7 +1297,24 @@ class QueryExecutionPlanner:
                 "db_alias": "logistica_cinco",
             }
 
+        if template_id == "inventory_kardex_by_employee":
+            return self._build_inventory_kardex_by_employee_sql(
+                resolved_query=resolved_query,
+                context=context,
+                limit=min(limit, 1000),
+            )
+
         if template_id == "inventory_kardex_consolidated":
+            if self._should_route_kardex_codigo_employee_to_employee(
+                domain_code=str(resolved_query.intent.domain_code or "").strip().lower(),
+                template_id=template_id,
+                resolved_query=resolved_query,
+            ):
+                return self._build_inventory_kardex_by_employee_sql(
+                    resolved_query=resolved_query,
+                    context=context,
+                    limit=min(limit, 1000),
+                )
             return self._build_inventory_kardex_sql(
                 resolved_query=resolved_query,
                 context=context,
@@ -1658,11 +1711,16 @@ class QueryExecutionPlanner:
         dimension_select = "mov.bodega AS bodega, " if "bodega" in dimensions else ""
         dimension_group = "mov.bodega, " if "bodega" in dimensions else ""
         warehouse_filter = str((filters or {}).get("bodega") or "").strip()
-        warehouse_where = (
-            f"WHERE mov.bodega = '{self._escape_literal(warehouse_filter)}' "
-            if warehouse_filter and "bodega" in dimensions
-            else ""
+        tipo_filter_sql = self._inventory_tipo_filter_sql(
+            filters=filters or {},
+            column_sql=f"cat.{tipo_catalog}",
         )
+        where_parts: list[str] = []
+        if warehouse_filter and "bodega" in dimensions:
+            where_parts.append(f"mov.bodega = '{self._escape_literal(warehouse_filter)}'")
+        if tipo_filter_sql:
+            where_parts.append(tipo_filter_sql)
+        where_sql = f"WHERE {' AND '.join(where_parts)} " if where_parts else ""
         query = (
             f"SELECT {dimension_select}mov.codigo AS codigo, "
             f"COALESCE(MAX(cat.{descripcion_catalog}), '') AS descripcion, "
@@ -1680,7 +1738,7 @@ class QueryExecutionPlanner:
             f"FROM ({movement['sql']}) AS mov "
             f"LEFT JOIN {catalog_table} AS cat ON cat.{codigo_catalog} = mov.codigo "
             f"{self._inventory_employee_join_clause(context=context, filters=filters or {})}"
-            f"{warehouse_where}"
+            f"{where_sql}"
             f"GROUP BY {dimension_group}mov.codigo "
             f"HAVING {saldo_alias} <> 0 OR registros_cantidad_invalida > 0 "
             f"ORDER BY {saldo_alias} ASC LIMIT {limit}"
@@ -1713,7 +1771,14 @@ class QueryExecutionPlanner:
                         else "entradas_no_traslado_bodega - entregas + devoluciones - cobros - traslados_otro_aliado"
                     )
                 ),
-                "filters_applied": {"bodega": warehouse_filter} if warehouse_filter and "bodega" in dimensions else {},
+                "filters_applied": {
+                    key: value
+                    for key, value in {
+                        "bodega": warehouse_filter if warehouse_filter and "bodega" in dimensions else "",
+                        "tipo": (filters or {}).get("tipo"),
+                    }.items()
+                    if value not in ("", None, [], ())
+                },
             }
         )
         enrichment_metadata = self._inventory_employee_enrichment_metadata(context=context, filters=filters or {})
@@ -1901,7 +1966,11 @@ class QueryExecutionPlanner:
             f"{employee_where_sql} "
             f"GROUP BY p.{cols['cedula']}"
         )
-        having_sql = f"HAVING {saldo_alias} <> 0 OR registros_cantidad_invalida > 0"
+        tipo_filter_sql = self._inventory_tipo_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['tipo']}",
+        )
+        where_sql = f" WHERE {tipo_filter_sql} " if tipo_filter_sql else ""
         query = (
             "SELECT "
             "mov.codigo AS codigo, "
@@ -1921,8 +1990,8 @@ class QueryExecutionPlanner:
             f"FROM ({movement['sql']}) AS mov "
             f"LEFT JOIN ({employee_subquery}) AS emp ON emp.cedula = mov.cedula "
             f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = mov.codigo "
+            f"{where_sql}"
             "GROUP BY mov.codigo, mov.cedula, COALESCE(emp.movil, '') "
-            f"{having_sql} "
             f"ORDER BY movil ASC, mov.cedula ASC, mov.codigo ASC LIMIT {limit}"
         )
         metadata = self._inventory_sql_metadata(
@@ -1940,6 +2009,7 @@ class QueryExecutionPlanner:
                 ),
                 "quantity_cast_policy": "case_when_regexp_then_cast_else_zero_report_invalid",
                 "formula_used": "saldo = entregas - devoluciones - consumos - cobros",
+                "balance_filter_policy": "include_positive_zero_negative",
                 "filters_applied": {
                     key: value
                     for key, value in {
@@ -1949,8 +2019,9 @@ class QueryExecutionPlanner:
                             filters=filters,
                             keys=("cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"),
                         ),
+                        "tipo": filters.get("tipo"),
                     }.items()
-                    if value
+                    if value not in ("", None, [], ())
                 },
                 "employee_stock_detail": True,
             }
@@ -2053,7 +2124,6 @@ class QueryExecutionPlanner:
             f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = s.{serial_cols['codigo']} "
             f"{where_sql}"
             f"GROUP BY s.{serial_cols['numero_serial']}, s.{serial_cols['codigo']}, s.{serial_cols['cedula']}, COALESCE(emp.movil, '') "
-            "HAVING saldo <> 0 "
             "ORDER BY movil ASC, cedula ASC, codigo ASC, serial ASC "
             f"LIMIT {limit}"
         )
@@ -2075,6 +2145,7 @@ class QueryExecutionPlanner:
                     set([serial_table.split(".")[-1], employee_table.split(".")[-1], catalog_table.split(".")[-1]])
                 ),
                 "formula_used": "saldo = en_movil + en_base - cobros",
+                "balance_filter_policy": "include_positive_zero_negative",
                 "serial_rules": {
                     "en_movil": "estado contiene MOVIL",
                     "en_base": "estado contiene BASE o BODEGA",
@@ -2136,6 +2207,10 @@ class QueryExecutionPlanner:
             nombre_sql=f"COALESCE(MAX(p.{cols['nombre']}), '')",
             apellido_sql=f"COALESCE(MAX(p.{cols['apellido']}), '')",
         )
+        tipo_filter_sql = self._inventory_tipo_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['tipo']}",
+        )
         query = (
             "SELECT "
             "bal.cedula AS cedula, "
@@ -2165,6 +2240,7 @@ class QueryExecutionPlanner:
             f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = bal.codigo "
             "WHERE COALESCE(cons.consumo_ultimos_8_dias, 0) > 0 "
             "AND bal.saldo_actual < ((COALESCE(cons.consumo_ultimos_8_dias, 0) / 8) * 3) "
+            f"{f'AND {tipo_filter_sql} ' if tipo_filter_sql else ''}"
             f"GROUP BY bal.cedula, COALESCE(p.{cols['movil']}, ''), bal.codigo, bal.saldo_actual, cons.consumo_ultimos_8_dias "
             "ORDER BY (umbral_3_dias - saldo_actual) DESC, movil ASC, bal.cedula ASC, bal.codigo ASC "
             f"LIMIT {limit}"
@@ -2204,8 +2280,9 @@ class QueryExecutionPlanner:
                             filters=filters,
                             keys=("cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"),
                         ),
+                        "tipo": filters.get("tipo"),
                     }.items()
-                    if value
+                    if value not in ("", None, [], ())
                 },
                 "critical_rule": "saldo_actual < ((consumo_ultimos_8_dias / 8) * 3)",
                 "critical_window_days": 8,
@@ -2355,10 +2432,149 @@ class QueryExecutionPlanner:
             {
                 "tables_detected": sorted(set([*list(movement.get("tables") or []), str(catalog["table"]).split(".")[-1]])),
                 "quantity_cast_policy": "case_when_regexp_then_cast_else_zero_report_invalid",
+                "formula_used": "entrega suma como entrada; devolucion, consumo, cobro y traslado restan como salida",
                 "result_overflow_policy": "requires_codigo_filter_or_export_when_result_exceeds_1000",
             }
         )
         return query, "inventory_kardex_consolidated", metadata
+
+    def _build_inventory_kardex_by_employee_sql(
+        self,
+        *,
+        resolved_query: ResolvedQuerySpec,
+        context: dict[str, Any],
+        limit: int,
+    ) -> tuple[str, str, dict[str, Any]]:
+        filters = dict(resolved_query.normalized_filters or {})
+        cedula_value = self._first_filter_value(
+            filters=filters,
+            keys=("cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"),
+        )
+        if not cedula_value:
+            return "", "inventory_kardex_by_employee_requires_cedula_filter", {
+                "compiler": "inventory_semantic_sql",
+                "compiler_used": "inventory_semantic_sql",
+                "fallback_reason": "inventory_kardex_by_employee_requires_cedula_filter",
+                "db_alias": "logistica_cinco",
+            }
+        movement = self._inventory_kardex_employee_subqueries(context=context, filters=filters)
+        personal = self._inventory_employee_mapping(context=context)
+        catalog = self._inventory_table_mapping(
+            context=context,
+            table_name="base_codigos",
+            required_columns=("codigo", "descripcion", "tipo"),
+        )
+        if not movement.get("ok"):
+            return "", str(movement.get("reason") or "inventory_kardex_by_employee_missing_dictionary_column"), dict(movement.get("metadata") or {})
+        if not personal:
+            return "", "inventory_employee_mapping_missing_dictionary_column", {}
+        if not catalog.get("ok"):
+            return "", str(catalog.get("reason") or "inventory_catalog_missing_dictionary_column"), dict(catalog.get("metadata") or {})
+        employee_cols = dict(personal.get("columns") or {})
+        catalog_cols = dict(catalog.get("columns") or {})
+        employee_table = str(personal.get("table") or "").strip()
+        catalog_table = str(catalog.get("table") or "").strip()
+        if not employee_table or not catalog_table:
+            return "", "inventory_kardex_by_employee_missing_dictionary_column", {}
+        employee_where = self._inventory_employee_filter_clause(context=context, table_alias="p", filters=filters)
+        employee_where_sql = f" WHERE {employee_where}" if employee_where else ""
+        employee_label = self._inventory_employee_label_sql(
+            nombre_sql="emp.nombre",
+            apellido_sql="emp.apellido",
+        )
+        employee_subquery = (
+            "SELECT "
+            f"p.{employee_cols['cedula']} AS cedula, "
+            f"COALESCE(MAX(p.{employee_cols['movil']}), '') AS movil, "
+            f"COALESCE(MAX(p.{employee_cols['nombre']}), '') AS nombre, "
+            f"COALESCE(MAX(p.{employee_cols['apellido']}), '') AS apellido, "
+            f"COALESCE(MAX(p.{employee_cols['estado']}), '') AS estado_empleado "
+            f"FROM {employee_table} AS p"
+            f"{employee_where_sql} "
+            f"GROUP BY p.{employee_cols['cedula']}"
+        )
+        tipo_filter_sql = self._inventory_tipo_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['tipo']}",
+        )
+        where_sql = f" WHERE {tipo_filter_sql} " if tipo_filter_sql else ""
+        optional_select_parts: list[str] = []
+        if bool(movement.get("has_orden_trabajo")):
+            optional_select_parts.append("k.orden_trabajo AS orden_trabajo, ")
+        if bool(movement.get("has_ticket")):
+            optional_select_parts.append("k.ticket AS ticket, ")
+        entrada_case_sql = "CASE WHEN k.tipo_movimiento = 'entrega' THEN k.cantidad ELSE 0 END"
+        salida_case_sql = (
+            "CASE WHEN k.tipo_movimiento IN ('devolucion', 'consumo', 'cobro') "
+            "THEN k.cantidad ELSE 0 END"
+        )
+        query = (
+            "SELECT "
+            "k.fecha AS fecha, "
+            "k.tipo_movimiento AS tipo_movimiento, "
+            "k.codigo AS codigo, "
+            f"COALESCE(cat.{catalog_cols['descripcion']}, '') AS descripcion, "
+            f"COALESCE(cat.{catalog_cols['tipo']}, '') AS tipo, "
+            "k.cedula AS cedula, "
+            f"{employee_label} AS empleado, "
+            "COALESCE(emp.movil, '') AS movil, "
+            "COALESCE(emp.estado_empleado, '') AS estado_empleado, "
+            "k.bodega AS bodega, "
+            f"{''.join(optional_select_parts)}"
+            f"{entrada_case_sql} AS entrada, "
+            f"{salida_case_sql} AS salida, "
+            "k.cantidad AS cantidad, "
+            "k.efecto AS efecto, "
+            "SUM(k.saldo_delta) OVER (PARTITION BY k.codigo, k.cedula ORDER BY k.fecha ASC, k.movimiento_id ASC) AS saldo_movimiento "
+            f"FROM ({movement['sql']}) AS k "
+            f"LEFT JOIN ({employee_subquery}) AS emp ON emp.cedula = k.cedula "
+            f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = k.codigo "
+            f"{where_sql}"
+            f"ORDER BY k.fecha DESC, k.movimiento_id DESC LIMIT {limit}"
+        )
+        metadata = self._inventory_sql_metadata(
+            table=str(movement.get("primary_table") or ""),
+            columns=[*list(movement.get("columns") or []), *list(employee_cols.values()), *list(catalog_cols.values())],
+            metric_used="saldo_movimiento",
+            aggregation_used="running_sum_by_employee_code",
+            dimensions_used=["fecha", "cedula", "codigo"],
+            concept_field="kardex_operativo_por_empleado",
+        )
+        metadata.update(
+            {
+                "tables_detected": sorted(
+                    set([*list(movement.get("tables") or []), employee_table.split(".")[-1], catalog_table.split(".")[-1]])
+                ),
+                "quantity_cast_policy": "case_when_regexp_then_cast_else_zero_report_invalid",
+                "formula_used": "entrega suma como entrada; devolucion, consumo y cobro restan como salida sobre el saldo por codigo",
+                "balance_filter_policy": "include_positive_zero_negative",
+                "filters_applied": {
+                    key: value
+                    for key, value in {
+                        "cedula": cedula_value,
+                        "codigo": filters.get("codigo"),
+                        "tipo": filters.get("tipo"),
+                    }.items()
+                    if value not in ("", None, [], ())
+                },
+                "limitations": ["serializados_employee_kardex_not_available"],
+                "insights": [
+                    "Kardex por empleado/tecnico resuelto por cedula usando movimientos auditados de materiales y ferretero.",
+                    "No se incluyo kardex serializado porque las tablas disponibles no exponen una trazabilidad cronologica confiable por cedula.",
+                ],
+                "employee_stock_detail": True,
+            }
+        )
+        metadata["joins_used"] = list(
+            dict.fromkeys(
+                [
+                    *list(metadata.get("joins_used") or []),
+                    "employee_detail_by_cedula",
+                    "catalog_by_codigo",
+                ]
+            )
+        )
+        return query, "inventory_kardex_by_employee", metadata
 
     def _build_inventory_consumption_billing_sql(
         self,
@@ -3017,8 +3233,8 @@ class QueryExecutionPlanner:
     def _inventory_kardex_subqueries(self, *, context: dict[str, Any], codigo_value: str) -> dict[str, Any]:
         specs = [
             ("logistica_movimientos_entrada", "ingreso", "entrada", ("codigo", "cantidad", "f_consumo", "id", "estado"), "COALESCE({estado}, '') <> 'traslado_bodega'"),
-            ("logistica_movimientos_entrega", "entrega", "salida", ("codigo", "cantidad", "f_consumo", "id"), ""),
-            ("logistica_movimientos_devolucion", "devolucion", "entrada", ("codigo", "cantidad", "f_consumo", "id"), ""),
+            ("logistica_movimientos_entrega", "entrega", "entrada", ("codigo", "cantidad", "f_consumo", "id"), ""),
+            ("logistica_movimientos_devolucion", "devolucion", "salida", ("codigo", "cantidad", "f_consumo", "id"), ""),
             ("logistica_movimientos_consumo", "consumo", "salida", ("codigo", "cantidad", "f_consumo", "id"), ""),
             ("logistica_movimientos_cobro", "cobro", "salida", ("codigo", "cantidad", "f_consumo", "id"), ""),
             ("logistica_movimientos_traslado", "traslado", "salida", ("codigo", "cantidad", "f_consumo", "id", "movimiento"), "{movimiento} IN ('TRASLADO_BODEGA', 'TRASLADOS_OTRO_ALIADO')"),
@@ -3052,6 +3268,176 @@ class QueryExecutionPlanner:
             "columns": sorted(set(columns_used)),
             "primary_table": "logistica_movimientos_entrada",
         }
+
+    def _inventory_kardex_employee_subqueries(self, *, context: dict[str, Any], filters: dict[str, Any]) -> dict[str, Any]:
+        required_by_table = {
+            "logistica_movimientos_entrega": ("id", "codigo", "cantidad", "f_consumo", "cedula", "bodega"),
+            "logistica_movimientos_devolucion": ("id", "codigo", "cantidad", "f_consumo", "cedula", "bodega"),
+            "logistica_movimientos_consumo": ("id", "codigo", "cantidad", "f_consumo", "cedula", "bodega"),
+            "logistica_movimientos_cobro": ("id", "codigo", "cantidad", "f_consumo", "cedula", "bodega"),
+        }
+        mappings: dict[str, dict[str, Any]] = {}
+        for table_name, columns in required_by_table.items():
+            mapping = self._inventory_table_mapping(context=context, table_name=table_name, required_columns=columns)
+            if not mapping.get("ok"):
+                return mapping
+            mappings[table_name] = mapping
+
+        def optional_column_sql(*, table_ref: str, column_aliases: tuple[str, ...], table_alias: str) -> str:
+            profile = self._find_context_profile_for_table(
+                context=context,
+                table_ref=table_ref,
+                logical_names=column_aliases,
+                column_names=column_aliases,
+            )
+            column_name = str((profile or {}).get("column_name") or "").strip()
+            if column_name and self._is_safe_identifier(column_name):
+                return f"{table_alias}.{column_name}"
+            return "''"
+
+        subqueries: list[str] = []
+        columns_used: set[str] = set()
+        tables_used: list[str] = []
+        codigo_value = self._first_filter_value(
+            filters=filters,
+            keys=("codigo", "codigo_material", "material_codigo"),
+        )
+        optional_profiles: dict[str, dict[str, dict[str, Any]]] = {}
+        for table_name, mapping in mappings.items():
+            table_ref = str(mapping["table"])
+            optional_profiles[table_name] = {
+                "orden_trabajo": self._find_context_profile_for_table(
+                    context=context,
+                    table_ref=table_ref,
+                    logical_names=("orden_trabajo", "ot", "idorden_de_trabajo"),
+                    column_names=("orden_trabajo", "ot", "idorden_de_trabajo"),
+                ),
+                "ticket": self._find_context_profile_for_table(
+                    context=context,
+                    table_ref=table_ref,
+                    logical_names=("ticket",),
+                    column_names=("ticket",),
+                ),
+            }
+        has_orden_trabajo = any(
+            str((profile_map.get("orden_trabajo") or {}).get("column_name") or "").strip()
+            for profile_map in optional_profiles.values()
+        )
+        has_ticket = any(
+            str((profile_map.get("ticket") or {}).get("column_name") or "").strip()
+            for profile_map in optional_profiles.values()
+        )
+        for table_name, movement_label, effect_label, sign, direction in (
+            ("logistica_movimientos_entrega", "entrega", "suma", 1, "entrada"),
+            ("logistica_movimientos_devolucion", "devolucion", "resta", -1, "salida"),
+            ("logistica_movimientos_consumo", "consumo", "resta", -1, "salida"),
+            ("logistica_movimientos_cobro", "cobro", "resta", -1, "salida"),
+        ):
+            mapping = mappings[table_name]
+            table_ref = str(mapping["table"])
+            cols = dict(mapping["columns"])
+            where_clause = self._inventory_operational_filter_clause(
+                context=context,
+                table_ref=table_ref,
+                filters=filters,
+                table_alias="src",
+            )
+            if not where_clause:
+                return {
+                    "ok": False,
+                    "reason": "inventory_kardex_by_employee_filter_not_audited",
+                    "metadata": {
+                        "compiler": "inventory_semantic_sql",
+                        "compiler_used": "inventory_semantic_sql",
+                        "fallback_reason": "inventory_kardex_by_employee_filter_not_audited",
+                        "db_alias": "logistica_cinco",
+                    },
+                }
+            if codigo_value:
+                codigo_profile = self._find_context_profile_for_table(
+                    context=context,
+                    table_ref=table_ref,
+                    logical_names=("codigo",),
+                    column_names=("codigo",),
+                )
+                codigo_column = str((codigo_profile or {}).get("column_name") or "").strip()
+                qualified_codigo = self._qualify_inventory_column(
+                    table_alias="src",
+                    column_name=codigo_column,
+                )
+                if qualified_codigo:
+                    where_clause = (
+                        f"({where_clause}) AND {qualified_codigo} = '{self._escape_literal(codigo_value)}'"
+                    )
+            quantity_sql = self._inventory_safe_quantity_sql(cols["cantidad"])
+            optional_select_sql = ""
+            if has_orden_trabajo:
+                orden_trabajo_sql = optional_column_sql(
+                    table_ref=table_ref,
+                    column_aliases=("orden_trabajo", "ot", "idorden_de_trabajo"),
+                    table_alias="src",
+                )
+                optional_select_sql += f"{orden_trabajo_sql} AS orden_trabajo, "
+            if has_ticket:
+                ticket_sql = optional_column_sql(
+                    table_ref=table_ref,
+                    column_aliases=("ticket",),
+                    table_alias="src",
+                )
+                optional_select_sql += f"{ticket_sql} AS ticket, "
+            subqueries.append(
+                "SELECT "
+                f"src.{cols['f_consumo']} AS fecha, "
+                f"'{movement_label}' AS tipo_movimiento, "
+                f"src.{cols['codigo']} AS codigo, "
+                f"src.{cols['cedula']} AS cedula, "
+                f"src.{cols['bodega']} AS bodega, "
+                f"{optional_select_sql}"
+                f"{quantity_sql} AS cantidad, "
+                f"'{effect_label}' AS efecto, "
+                f"({sign} * ({quantity_sql})) AS saldo_delta, "
+                f"src.{cols['id']} AS movimiento_id "
+                f"FROM {table_ref} AS src WHERE {where_clause}"
+            )
+            columns_used.update(cols.values())
+            tables_used.append(table_ref.split(".")[-1])
+        return {
+            "ok": True,
+            "sql": " UNION ALL ".join(subqueries),
+            "tables": tables_used,
+            "columns": sorted(
+                columns_used
+                | ({"orden_trabajo"} if has_orden_trabajo else set())
+                | ({"ticket"} if has_ticket else set())
+            ),
+            "has_orden_trabajo": has_orden_trabajo,
+            "has_ticket": has_ticket,
+            "primary_table": str(mappings["logistica_movimientos_entrega"]["table"]),
+        }
+
+    def _should_route_kardex_codigo_employee_to_employee(
+        self,
+        *,
+        domain_code: str,
+        template_id: str,
+        resolved_query: ResolvedQuerySpec,
+    ) -> bool:
+        if str(domain_code or "").strip().lower() != "inventario_logistica":
+            return False
+        if str(template_id or "").strip().lower() != "inventory_kardex_consolidated":
+            return False
+        filters = dict(resolved_query.normalized_filters or {})
+        cedula_value = self._first_filter_value(
+            filters=filters,
+            keys=("cedula", "cedula_empleado", "identificacion", "documento", "id_empleado"),
+        )
+        codigo_value = self._first_filter_value(
+            filters=filters,
+            keys=("codigo", "codigo_material", "material_codigo"),
+        )
+        raw_query = str(resolved_query.intent.raw_query or "").strip().lower()
+        mentions_employee_scope = any(token in raw_query for token in ("empleado", "tecnico", "cedula"))
+        return bool(cedula_value and codigo_value and mentions_employee_scope)
 
     def _inventory_balance_subquery(
         self,
@@ -4890,6 +5276,26 @@ class QueryExecutionPlanner:
     @staticmethod
     def _escape_literal(value: str) -> str:
         return str(value or "").replace("'", "''")
+
+    def _inventory_tipo_filter_sql(self, *, filters: dict[str, Any], column_sql: str) -> str:
+        raw_tipo = filters.get("tipo")
+        normalized_values: list[str] = []
+        if isinstance(raw_tipo, (list, tuple, set)):
+            normalized_values = [
+                str(value or "").strip().lower()
+                for value in raw_tipo
+                if str(value or "").strip()
+            ]
+        elif str(raw_tipo or "").strip():
+            normalized_values = [str(raw_tipo or "").strip().lower()]
+        normalized_values = list(dict.fromkeys(normalized_values))
+        if not normalized_values:
+            return ""
+        escaped_values = [f"'{self._escape_literal(value)}'" for value in normalized_values]
+        normalized_column = f"LOWER(COALESCE({column_sql}, ''))"
+        if len(escaped_values) == 1:
+            return f"{normalized_column} = {escaped_values[0]}"
+        return f"{normalized_column} IN ({', '.join(escaped_values)})"
 
     @staticmethod
     def _record_event(*, observability, event_type: str, source: str, meta: dict[str, Any]) -> None:

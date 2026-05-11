@@ -2,6 +2,87 @@ Micro resumen actualizado
 
 No reauditar arquitectura ni contratos. No tocar `fallback_policy`. No reabrir discovery del dominio. Continuar desde el estado actual de `inventario_logistica`.
 
+## Capa semantica empresarial vigente
+
+- Antes de `QueryExecutionPlanner`, `InventorySemanticResolver` produce `BusinessQuerySemanticPlan`.
+- El plan semantico es la capa oficial para ordenar:
+  - `domain`
+  - `intent`
+  - `entity`
+  - `governed_physical_field`
+  - `grouping_dimension`
+  - `inventory_family`
+  - `scope`
+  - `output`
+  - `candidate_capability`
+  - `normalized_filters`
+  - `requires_enrichment`
+  - `applicable_business_rules`
+  - `possible_alerts`
+  - `known_limitations`
+  - `execution`
+- El plan semantico se publica en:
+  - `semantic_context.business_query_semantic_plan`
+  - `semantic_context.inventory_semantic_plan`
+  - `semantic_context.resolved_semantic.business_query_semantic_plan`
+- `QueryExecutionPlanner` sigue siendo la unica autoridad para:
+  - seleccionar SQL seguro,
+  - decidir estrategia,
+  - decidir ejecucion,
+  - bloquear faltantes o rutas inseguras.
+- El planner ahora adjunta `metadata.semantic_trace` con:
+  - consulta original
+  - plan semantico
+  - reglas aplicadas
+  - fuentes consultadas
+  - memorias consultadas
+  - capability candidata
+  - filtros finales
+  - razones de bloqueo si aplica
+
+## Matriz semantica de inventario activa
+
+- `saldo + empleado/tecnico + cedula`
+  - `intent: stock_balance`
+  - `capability: inventory_stock_balance_by_mobile`
+  - `entity.field: cedula`
+  - `output.grain: saldo_por_codigo`
+- `saldo + movil/cuadrilla + valor alfanumerico`
+  - `intent: stock_balance`
+  - `capability: inventory_stock_balance_by_mobile`
+  - `entity.field: movil`
+  - `scope.include_serialized: true` para inventario generico por movil/cuadrilla
+- `kardex|movimientos|entradas y salidas + empleado/tecnico + cedula`
+  - `intent: movement_history`
+  - `capability: inventory_kardex_by_employee`
+  - `entity.field: cedula`
+- `kardex|movimientos + codigo`
+  - `intent: movement_history`
+  - `capability: inventory_kardex_consolidated`
+  - `entity.field: codigo`
+- `serial|seriales|equipos|cpe`
+  - `intent: serial_holder_query` o trazabilidad serializada segun alcance
+  - `familia: serializados`
+  - `regla: conteo, no cantidad`
+
+## Memoria persistida requerida
+
+- Las reglas confirmadas de esta capa se siembran en `ai_dictionary.ia_dev_business_memory`.
+- Prefijo oficial de memoria: `inventory.semantic.*`
+- Reglas persistidas:
+  - `material_claro`
+  - `ferretero`
+  - `material_generico`
+  - `saldo_inventario`
+  - `kardex`
+  - `kardex_empleado`
+  - `movil_cuadrilla`
+  - `inventario_generico`
+  - `enrichment_historico`
+  - `serializados`
+  - `gpt_semantiza_planner_ejecuta`
+- Toda siembra deja rastro en `ia_dev_memory_audit_trail`.
+
 ## Hechos confirmados, no revalidar
 
 ### Arquitectura/runtime
@@ -149,7 +230,10 @@ Estado vigente confirmado
 - La salida de materiales con alcance operativo ahora conserva detalle por `codigo + cedula + movil`.
 - El enrichment de empleados ya incluye `estado_empleado`.
 - Para enrichment historico de inventario no se excluyen empleados por `estado = 'ACTIVO'`.
-- Las consultas explicitamente materiales siguen devolviendo solo materiales.
+- Los saldos de inventario nunca deben filtrar solo positivos ni excluir ceros o negativos.
+- Las consultas explicitamente de `material claro` o `material de claro` filtran solo `tipo = 'material'`.
+- Las consultas explicitamente de `ferretero` o `material ferretero` filtran solo `tipo = 'ferretero'`.
+- Las consultas de `material` generico deben incluir `tipo IN ('material', 'ferretero')` dentro de la misma tabla operativa.
 - Las consultas explicitamente seriales/equipos/CPE seguiran usando su ruta serializada dedicada.
 
 Regla obligatoria persistida
@@ -160,6 +244,14 @@ Si el usuario consulta `inventario`, `saldo`, `inventario por cuadrilla`, `inven
 2. Serializados/Equipos/CPE
 
 Bloque A obligatorio: materiales/ferretero
+
+Regla semantica vigente para `tipo` en inventario operativo:
+
+- `material claro` y `material de claro` significan solo registros catalogados con `tipo = 'material'`.
+- `ferretero` y `material ferretero` significan solo registros catalogados con `tipo = 'ferretero'`.
+- `material` sin apellido significa `material claro + ferretero` en la misma tabla.
+- La columna `tipo` se mantiene.
+- Cuando haya que distinguir frente a ferretero, el lenguaje empresarial debe decir `material claro` y no solo `material`.
 
 Columnas de salida operativa:
 
@@ -180,6 +272,8 @@ Columnas de salida operativa:
 Formula obligatoria:
 
 - `saldo = entregas - devoluciones - consumos - cobros`
+- No usar `HAVING saldo > 0`, `WHERE saldo > 0` ni `HAVING saldo <> 0` en consultas de saldo operativo por empleado, tecnico, movil, cuadrilla, bodega o codigo.
+- En inventario, los saldos `0` y negativos son informacion operacional critica.
 
 Bloque B obligatorio: serializados/equipos
 
@@ -208,6 +302,7 @@ Reglas serializados:
 - `en_base = estado contiene BASE o BODEGA`
 - `cobros = estado contiene COBRO`
 - `saldo = en_movil + en_base - cobros`
+- No usar `HAVING saldo > 0`, `WHERE saldo > 0` ni `HAVING saldo <> 0`.
 
 Reglas de empleados persistidas
 
@@ -298,7 +393,6 @@ LEFT JOIN (
 ) AS emp ON emp.cedula = mov.cedula
 LEFT JOIN base_codigos AS cat ON cat.codigo = mov.codigo
 GROUP BY mov.codigo, mov.cedula, COALESCE(emp.movil, '')
-HAVING saldo <> 0
 ORDER BY movil ASC, mov.cedula ASC, mov.codigo ASC
 LIMIT 500
 ```
@@ -338,7 +432,6 @@ LEFT JOIN (
 ) AS emp ON emp.cedula = s.cedula
 LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo
 GROUP BY s.numero_serial, s.codigo, s.cedula, COALESCE(emp.movil, '')
-HAVING saldo <> 0
 ORDER BY movil ASC, cedula ASC, codigo ASC, serial ASC
 LIMIT 500
 ```
@@ -424,6 +517,7 @@ Pruebas que blindan este estado
 - `apps.ia_dev.tests.test_inventario_semantic_resolver`
 - `apps.ia_dev.tests.test_inventario_runtime_sql_alignment`
 - `apps.ia_dev.tests.test_inventory_response_assembler`
+- `apps.ia_dev.tests.test_query_intelligence_layer`
 
 Comando de verificacion usado
 
@@ -443,6 +537,93 @@ Si el usuario pide inventario o saldo con alcance de tecnico, empleado, movil o 
 2. bloque serializados/equipos
 
 Ambos con enrichment de `cinco_base_de_personal`, incluyendo `estado_empleado`, y sin excluir empleados inactivos.
+
+## Estado validado 2026-05-11
+
+- Consultas reproducidas:
+  - `kardex del tecnico 5098747`
+  - `kardex del empleado 5098747`
+- Regla semantica nueva confirmada:
+  - `kardex del tecnico {cedula}`
+  - `kardex del empleado {cedula}`
+  - `kardex de la cedula {cedula}`
+  - se interpreta como `inventario_logistica` con filtro principal `cedula`
+- Ruta correcta:
+  - `template_id = inventory_kardex_by_employee`
+  - `capability = inventory_kardex_by_employee`
+  - SQL seguro sobre:
+    - `logistica_movimientos_entrega`
+    - `logistica_movimientos_devolucion`
+    - `logistica_movimientos_consumo`
+    - `logistica_movimientos_cobro`
+  - enrichment historico con `bd_c3nc4s1s.cinco_base_de_personal`
+  - catalogo con `base_codigos`
+- Causa exacta del bloqueo anterior:
+  - el resolver solo reconocia `kardex` cuando habia `codigo`
+  - `kardex del tecnico/empleado 5098747` caia por descarte en `inventory_movement_detail`
+  - esa ruta intentaba usar un SQL viejo sobre `a_promedios_consumo`
+  - al no ser una ruta valida para este caso, terminaba bloqueada como `missing_dictionary_column`
+- Regla operativa persistida:
+  - Kardex por empleado/tecnico se resuelve por cedula usando movimientos de materiales/ferretero, conservando fecha, tipo de movimiento, codigo, descripcion, tipo, cantidad y efecto sobre saldo.
+  - `entrega` suma como `entrada` y no debe invertirse como `salida`
+  - `devolucion` resta como `salida`
+  - `consumo` resta
+  - `cobro` resta
+  - el saldo acumulado se calcula en orden cronologico ascendente por `fecha, movimiento_id`, aunque la vista pueda ordenarse descendente
+  - no recalcular saldo sobre solo el subconjunto visible cuando exista historico anterior
+  - no filtrar solo saldos positivos
+  - incluir positivos, cero y negativos cuando aplique
+  - no excluir empleados inactivos en enrichment historico
+- Columnas devueltas validadas en runtime:
+  - `fecha, tipo_movimiento, codigo, descripcion, tipo, cedula, empleado, movil, estado_empleado, bodega, orden_trabajo, entrada, salida, cantidad, efecto, saldo_movimiento`
+- Estado runtime validado:
+  - `final_domain = inventario_logistica`
+  - `planner_called = true`
+  - `execute = true`
+  - `legacy_used = false`
+  - `fallback_reason = ''`
+  - `rowcount = 500` en ambos casos reproducidos
+- Limitacion explicitada:
+  - no bloquear toda la consulta por serializados
+  - si el usuario pide kardex generico por empleado, responder materiales/ferretero
+  - aclarar que no hay trazabilidad cronologica confiable por cedula para serializados con las tablas hoy auditadas
+
+## Estado validado 2026-05-11 kardex codigo + empleado
+
+- Consulta reproducida: `kardex del codigo 1025507 para el empleado 5098747`
+- Causa exacta corregida:
+  - la combinacion `codigo + empleado` estaba cayendo en `inventory_kardex_consolidated`
+  - esa ruta ignoraba el filtro de `cedula` y mostraba kardex global del codigo
+  - en `_inventory_kardex_subqueries(...)` la tabla `logistica_movimientos_entrega` estaba mapeada como `salida`
+  - la tabla `logistica_movimientos_devolucion` estaba mapeada como `entrada`, contradiciendo la formula vigente del saldo por empleado
+  - por eso aparecian filas como `movimiento=entrega, entrada=0, salida=100` y el saldo acumulado quedaba invertido
+- Regla documentada:
+  - `Kardex materiales/ferretero: entrega suma como entrada; consumo, cobro y devolucion restan como salida. El saldo acumulado debe calcularse en orden cronologico y no debe invertir el signo de entregas.`
+
+## Regla nueva confirmada
+
+- Los saldos de inventario nunca deben filtrar solo positivos.
+- En consultas por empleado, tecnico, movil, cuadrilla, bodega o codigo se deben devolver saldos positivos, cero y negativos.
+- `HAVING saldo <> 0` tambien es incorrecto cuando excluye saldos en cero.
+- Si la consulta es generica de inventario o saldo sin familia explicita, mantener ambos bloques cuando apliquen:
+  - materiales/ferretero
+  - serializados/equipos
+
+## Estado validado 2026-05-10
+
+- Consulta reproducida: `SALDO DEL EMPLEADO 5098747`
+- Interpretacion confirmada:
+  - `5098747` se interpreta como `cedula`
+  - `final_domain = inventario_logistica`
+  - `capability = inventory_stock_balance_by_mobile`
+- Falla confirmada antes de la correccion:
+  - SQL principal tenia `HAVING saldo <> 0 OR registros_cantidad_invalida > 0`
+  - SQL suplementario serializado tenia `HAVING saldo <> 0`
+  - por eso el runtime excluia saldos en cero
+- Correccion aplicada:
+  - se removio el filtro por saldo en materiales
+  - se removio el filtro por saldo en serializados
+  - el validador ahora rechaza planes SQL de inventario que vuelvan a filtrar `saldo <> 0`, `saldo > 0` o equivalentes
 
 ## Frontend architecture validada
 
@@ -616,6 +797,17 @@ El frontend final ya consume este sobre:
 6. badges contextuales intent/domain/agent
 7. empty state elegante
 8. loading state persistente mientras llega nueva estructura
+
+## Regla UI persistida para tabs operativos
+
+- El frontend debe nombrar tabs operativos por tipo empresarial inferido, no por posicion tecnica `Principal` o `Adicional`.
+- Si una tabla contiene `codigo, descripcion, tipo, entregas, devoluciones, consumos, cobros, saldo`, el tab debe mostrarse como `Materiales / Ferretero`.
+- Si una tabla contiene `serial, codigo, descripcion, familia, estado, en_movil, en_base, cobros, saldo`, el tab debe mostrarse como `Serializados / Equipos`.
+- Si no se puede inferir el tipo empresarial:
+  - usar `Tabla principal`
+  - usar `Tabla adicional {n}`
+- Si en el futuro `data.extra_tables` envia `name`, `title` o `key`, el frontend debe preferir ese nombre para la tab adicional.
+- En esta fase no separar `Materiales` y `Ferretero` en tabs distintas; ambos siguen compartiendo la misma tabla y se distinguen por la columna `tipo`.
 
 ## Historial y UX confirmados
 

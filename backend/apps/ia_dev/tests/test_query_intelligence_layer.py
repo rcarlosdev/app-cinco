@@ -1948,6 +1948,59 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         )
         self.assertTrue(validation.satisfied)
         self.assertEqual(validation.reason, "ok")
+
+    def test_result_satisfaction_validator_rejects_inventory_balance_sql_that_filters_zero_or_negative(self):
+        validator = ResultSatisfactionValidator()
+        resolved_query = ResolvedQuerySpec(
+            intent=StructuredQueryIntent(
+                raw_query="SALDO DEL EMPLEADO 5098747",
+                domain_code="inventario_logistica",
+                operation="stock_balance",
+                template_id="inventory_material_stock_mobile",
+                filters={"cedula": "5098747", "stock_scope": "movil"},
+                group_by=["codigo"],
+                metrics=[],
+                confidence=0.95,
+                source="inventory_yaml_semantic_resolver",
+            ),
+            normalized_filters={"cedula": "5098747", "stock_scope": "movil"},
+        )
+        execution_plan = QueryExecutionPlan(
+            strategy="sql_assisted",
+            reason="inventory_material_stock_mobile",
+            domain_code="inventario_logistica",
+            capability_id="inventory_stock_balance_by_mobile",
+            sql_query="SELECT codigo, SUM(x) AS saldo FROM demo GROUP BY codigo HAVING saldo <> 0",
+            constraints={"filters": {"cedula": "5098747"}},
+            metadata={
+                "supplemental_queries": [
+                    {
+                        "name": "serializados_equipos",
+                        "query": "SELECT serial, SUM(x) AS saldo FROM demo GROUP BY serial HAVING saldo <> 0",
+                    }
+                ]
+            },
+        )
+        response = {
+            "reply": "Saldo del empleado 5098747",
+            "data": {
+                "table": {
+                    "columns": ["codigo", "cedula", "saldo"],
+                    "rows": [{"codigo": "MAT-001", "cedula": "5098747", "saldo": "5"}],
+                    "rowcount": 1,
+                }
+            },
+        }
+
+        validation = validator.validate(
+            message="SALDO DEL EMPLEADO 5098747",
+            response=response,
+            resolved_query=resolved_query,
+            execution_plan=execution_plan,
+        )
+
+        self.assertFalse(validation.satisfied)
+        self.assertEqual(validation.reason, "inventory_balance_filter_excludes_zero_or_negative")
         self.assertEqual(list(validation.checks.get("expected_group_by") or []), [])
 
     def test_query_shape_key_generalizes_birthday_month_queries(self):

@@ -220,6 +220,15 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
     def setUp(self):
         self.planner = QueryExecutionPlanner()
         self.resolver = InventorySemanticResolver()
+        self.resolver.semantic_plan_builder.memory_service.list_memory_snapshot = lambda: [
+            {"memory_key": "inventory.semantic.rule.kardex"},
+            {"memory_key": "inventory.semantic.rule.saldo_inventario"},
+        ]
+        self.resolver.semantic_plan_builder.memory_service.ensure_confirmed_rules = lambda: {
+            "saved_keys": ["inventory.semantic.rule.kardex"],
+            "error_count": 0,
+            "errors": [],
+        }
         self.run_context = RunContext.create(message="demo inventario", session_id="inv-test")
         self.semantic_context = _contexto_inventario()
 
@@ -253,6 +262,10 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertEqual(plan.strategy, "sql_assisted")
         self.assertEqual(str((plan.metadata or {}).get("compiler") or ""), "inventory_semantic_sql")
         self.assertEqual(str((plan.metadata or {}).get("db_alias") or ""), "logistica_cinco")
+        self.assertEqual(
+            str((((plan.metadata or {}).get("semantic_trace") or {}).get("semantic_plan") or {}).get("candidate_capability") or ""),
+            "inventory_traceability_by_serial",
+        )
 
     def test_planner_builds_material_stock_after_db_validation(self):
         resolved = self._plan_for("stock de materiales por bodega")
@@ -269,6 +282,14 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
 
         self.assertEqual(plan.strategy, "sql_assisted")
         self.assertEqual(str(plan.reason or ""), "inventory_material_stock_by_warehouse")
+        self.assertEqual(
+            str((((plan.metadata or {}).get("semantic_trace") or {}).get("semantic_plan") or {}).get("intent") or ""),
+            "stock_balance",
+        )
+        self.assertIn(
+            "ai_dictionary.dd_campos",
+            list((((plan.metadata or {}).get("semantic_trace") or {}).get("consulted_sources") or [])),
+        )
         self.assertIn("logistica_movimientos_entrada", str(plan.sql_query or ""))
         self.assertIn("logistica_movimientos_entrega", str(plan.sql_query or ""))
         self.assertIn("logistica_movimientos_devolucion", str(plan.sql_query or ""))
@@ -297,6 +318,10 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertEqual(str(plan.reason or ""), "inventory_material_stock_by_warehouse")
         self.assertEqual(str((plan.metadata or {}).get("analytics_router_decision") or ""), "join_aware_sql")
         self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("bodega"), "operacion_hfc")
+        self.assertEqual(
+            str(((((plan.metadata or {}).get("semantic_trace") or {}).get("semantic_plan") or {}).get("entity") or {}).get("field") or ""),
+            "bodega",
+        )
         self.assertIn("WHERE mov.bodega = 'operacion_hfc'", str(plan.sql_query or ""))
         self.assertIn("logistica_movimientos_entrada", str(plan.sql_query or ""))
         self.assertIn("logistica_movimientos_entrega", str(plan.sql_query or ""))
@@ -523,6 +548,97 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertIn("FROM bd_c3nc4s1s.cinco_base_de_personal AS p WHERE p.cedula = '1214730857'", str(plan.sql_query or ""))
         self.assertIn("estado_empleado", str(plan.sql_query or ""))
 
+    def test_kardex_del_tecnico_routes_employee_kardex_sql(self):
+        resolved = self._plan_for("kardex del tecnico 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_kardex_by_employee")
+        self.assertIn("logistica_movimientos_entrega", str(plan.sql_query or ""))
+        self.assertIn("logistica_movimientos_devolucion", str(plan.sql_query or ""))
+        self.assertIn("logistica_movimientos_consumo", str(plan.sql_query or ""))
+        self.assertIn("logistica_movimientos_cobro", str(plan.sql_query or ""))
+        self.assertIn("PARTITION BY k.codigo, k.cedula", str(plan.sql_query or ""))
+        self.assertIn("AS saldo_movimiento", str(plan.sql_query or ""))
+        self.assertIn("AS tipo_movimiento", str(plan.sql_query or ""))
+        self.assertNotIn("a_promedios_consumo", str(plan.sql_query or ""))
+        self.assertEqual(str((plan.metadata or {}).get("balance_filter_policy") or ""), "include_positive_zero_negative")
+
+    def test_kardex_del_empleado_routes_employee_kardex_sql(self):
+        resolved = self._plan_for("kardex del empleado 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.domain_code or ""), "inventario_logistica")
+        self.assertEqual(str(plan.reason or ""), "inventory_kardex_by_employee")
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("cedula"), "5098747")
+        self.assertIn("WHERE src.cedula = '5098747'", str(plan.sql_query or ""))
+        self.assertIn("employee_detail_by_cedula", list((plan.metadata or {}).get("joins_used") or []))
+        self.assertIn(
+            "serializados_employee_kardex_not_available",
+            list((plan.metadata or {}).get("limitations") or []),
+        )
+
+    def test_kardex_codigo_para_empleado_routes_employee_kardex_sql(self):
+        resolved = self._plan_for("kardex del codigo 1025507 para el empleado 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(plan.capability_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(plan.reason or ""), "inventory_kardex_by_employee")
+        self.assertIn("CASE WHEN k.tipo_movimiento = 'entrega' THEN k.cantidad ELSE 0 END AS entrada", str(plan.sql_query or ""))
+        self.assertIn("CASE WHEN k.tipo_movimiento IN ('devolucion', 'consumo', 'cobro') THEN k.cantidad ELSE 0 END AS salida", str(plan.sql_query or ""))
+        self.assertIn("src.cedula = '5098747'", str(plan.sql_query or ""))
+        self.assertIn("src.codigo = '1025507'", str(plan.sql_query or ""))
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("codigo"), "1025507")
+
+    def test_kardex_consolidated_maps_entrega_as_entrada_and_devolucion_as_salida(self):
+        resolved = self._plan_for("kardex codigo 1025507")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        sql_query = str(plan.sql_query or "")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_kardex_consolidated")
+        self.assertIn("'entrega' AS movimiento, codigo AS codigo, CASE", sql_query)
+        self.assertIn("AS entrada, 0 AS salida", sql_query)
+        self.assertIn("'devolucion' AS movimiento, codigo AS codigo, 0 AS entrada, CASE", sql_query)
+        self.assertIn("SUM(kardex.entrada - kardex.salida) OVER", sql_query)
+
     def test_equipos_cargados_a_movil_numerica_routes_serial_holder_detail(self):
         resolved = self._plan_for("equipos cargados a la movil 98562719")
 
@@ -622,6 +738,85 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertEqual(len(supplemental), 1)
         self.assertEqual(str(supplemental[0].get("name") or ""), "serializados_equipos")
         self.assertNotIn("ACTIVO", str(supplemental[0].get("query") or ""))
+
+    def test_saldo_del_empleado_5098747_no_filtra_ceros_ni_negativos(self):
+        resolved = self._plan_for("SALDO DEL EMPLEADO 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.domain_code or ""), "inventario_logistica")
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertIn("WHERE cedula = '5098747'", str(plan.sql_query or ""))
+        self.assertNotIn("HAVING saldo > 0", str(plan.sql_query or ""))
+        self.assertNotIn("WHERE saldo > 0", str(plan.sql_query or ""))
+        self.assertNotIn("HAVING saldo <> 0", str(plan.sql_query or ""))
+        supplemental = list((plan.metadata or {}).get("supplemental_queries") or [])
+        self.assertEqual(len(supplemental), 1)
+        self.assertEqual(str(supplemental[0].get("name") or ""), "serializados_equipos")
+        self.assertNotIn("HAVING saldo > 0", str(supplemental[0].get("query") or ""))
+        self.assertNotIn("WHERE saldo > 0", str(supplemental[0].get("query") or ""))
+        self.assertNotIn("HAVING saldo <> 0", str(supplemental[0].get("query") or ""))
+
+    def test_saldo_material_claro_empleado_aplica_where_tipo_material(self):
+        resolved = self._plan_for("saldo material claro empleado 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "material")
+        self.assertIn("LOWER(COALESCE(cat.tipo, '')) = 'material'", str(plan.sql_query or ""))
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("tipo"), "material")
+
+    def test_saldo_ferretero_empleado_aplica_where_tipo_ferretero(self):
+        resolved = self._plan_for("saldo ferretero empleado 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "ferretero")
+        self.assertIn("LOWER(COALESCE(cat.tipo, '')) = 'ferretero'", str(plan.sql_query or ""))
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("tipo"), "ferretero")
+
+    def test_saldo_material_generico_empleado_aplica_where_tipo_in_material_y_ferretero(self):
+        resolved = self._plan_for("saldo material empleado 5098747")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(list(resolved.normalized_filters.get("tipo") or []), ["material", "ferretero"])
+        self.assertIn("LOWER(COALESCE(cat.tipo, '')) IN ('material', 'ferretero')", str(plan.sql_query or ""))
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("tipo"), ["material", "ferretero"])
 
     def test_materiales_criticos_por_empleado_en_operacion_hfc_uses_recent_consumption_threshold(self):
         resolved = self._plan_for(

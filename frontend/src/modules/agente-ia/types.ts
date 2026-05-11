@@ -14,6 +14,7 @@ export type DashboardWidgetType = "kpi" | "chart" | "table" | "insights";
 export type DashboardTableTab = {
   id: string;
   label: string;
+  badges: string[];
   table: NormalizedTable;
 };
 
