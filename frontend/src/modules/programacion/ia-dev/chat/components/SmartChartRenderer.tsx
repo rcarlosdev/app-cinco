@@ -12,6 +12,7 @@ import IADevChartPanel from "@/modules/programacion/ia-dev/components/IADevChart
 
 type SmartChartRendererProps = {
   payload: NormalizedAssistantPayload;
+  variant?: "full" | "clean";
 };
 
 const asNumber = (value: unknown): number => {
@@ -64,7 +65,11 @@ const toEmbeddedChartPayload = (
   };
 };
 
-const SmartChartRenderer = ({ payload }: SmartChartRendererProps) => {
+const SmartChartRenderer = ({
+  payload,
+  variant = "full",
+}: SmartChartRendererProps) => {
+  const showDetails = variant === "full";
   const config = useMemo(
     () =>
       selectBestChartConfig({
@@ -98,6 +103,7 @@ const SmartChartRenderer = ({ payload }: SmartChartRendererProps) => {
   if (!config || !chartPayload) return null;
 
   const valueKey = config.valueKeys[0];
+  const showChartHeader = variant === "full";
 
   return (
     <section className="space-y-2">
@@ -116,10 +122,15 @@ const SmartChartRenderer = ({ payload }: SmartChartRendererProps) => {
         )}
       </div>
 
-      <IADevChartPanel chart={chartPayload} embedded />
+      <IADevChartPanel
+        chart={chartPayload}
+        embedded
+        showDetails={showDetails}
+        showHeader={showChartHeader}
+      />
 
       {payload.highlight && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-200">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/8 dark:text-emerald-200">
           Lider actual: <strong>{payload.highlight.label}</strong> con{" "}
           <strong>{formatValue(payload.highlight.value)}</strong>
           {typeof payload.highlight.share === "number" ? (
@@ -129,17 +140,19 @@ const SmartChartRenderer = ({ payload }: SmartChartRendererProps) => {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
-          tipo: {config.type}
-        </span>
-        <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
-          metrica principal: {valueKey}
-        </span>
-        <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
-          puntos: {chartData.length}
-        </span>
-      </div>
+      {showDetails && (
+        <div className="flex flex-wrap gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
+            tipo: {config.type}
+          </span>
+          <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
+            metrica principal: {valueKey}
+          </span>
+          <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-gray-700">
+            puntos: {chartData.length}
+          </span>
+        </div>
+      )}
     </section>
   );
 };

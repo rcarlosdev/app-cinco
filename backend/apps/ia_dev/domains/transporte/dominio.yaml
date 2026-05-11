@@ -1,0 +1,97 @@
+dominio: transporte
+nombre_dominio: Transporte
+objetivo_negocio: Analizar la programacion de rutas operativas y su asignacion de tecnicos sobre la base Nokia.
+entidad_principal: ruta_programada
+estado_dominio: partial
+nivel_madurez: growing
+nivel_confianza_esquema: 0.82
+tablas_asociadas:
+  - schema_name: cincosas_cincosas
+    table_name: nokia_base_ruta_programacion
+    nombre_tabla_logico: rutas_programadas
+    rol: hechos
+  - schema_name: cincosas_cincosas
+    table_name: cinco_base_de_personal
+    nombre_tabla_logico: empleados_maestro
+    rol: dimension
+columnas_clave:
+  - table_name: nokia_base_ruta_programacion
+    column_name: fprogramacion
+    nombre_columna_logico: fecha_programacion
+  - table_name: nokia_base_ruta_programacion
+    column_name: wp
+    nombre_columna_logico: ruta
+  - table_name: nokia_base_ruta_programacion
+    column_name: sitio
+    nombre_columna_logico: sitio
+  - table_name: nokia_base_ruta_programacion
+    column_name: cedula
+    nombre_columna_logico: tecnico
+  - table_name: nokia_base_ruta_programacion
+    column_name: estado
+    nombre_columna_logico: estado
+  - table_name: nokia_base_ruta_programacion
+    column_name: razon
+    nombre_columna_logico: razon
+  - table_name: nokia_base_ruta_programacion
+    column_name: proyecto
+    nombre_columna_logico: proyecto
+  - table_name: nokia_base_ruta_programacion
+    column_name: region
+    nombre_columna_logico: region
+  - table_name: nokia_base_ruta_programacion
+    column_name: ciudad
+    nombre_columna_logico: ciudad
+  - table_name: cinco_base_de_personal
+    column_name: nombre
+    nombre_columna_logico: nombre_tecnico
+  - table_name: cinco_base_de_personal
+    column_name: apellido
+    nombre_columna_logico: apellido_tecnico
+  - table_name: cinco_base_de_personal
+    column_name: supervisor
+    nombre_columna_logico: supervisor
+  - table_name: cinco_base_de_personal
+    column_name: area
+    nombre_columna_logico: area
+  - table_name: cinco_base_de_personal
+    column_name: cargo
+    nombre_columna_logico: cargo
+  - table_name: cinco_base_de_personal
+    column_name: zona_nodo
+    nombre_columna_logico: sede
+joins_conocidos:
+  - nombre_relacion: ruta_programada_empleado
+    condicion: nokia_base_ruta_programacion.cedula = cinco_base_de_personal.cedula
+    cardinalidad: many_to_one
+filtros_soportados:
+  - fecha_inicio
+  - fecha_fin
+  - estado
+  - proyecto
+  - region
+  - ciudad
+  - tecnico
+group_by_soportados:
+  - fecha_programacion
+  - estado
+  - proyecto
+  - region
+  - ciudad
+  - tecnico
+  - supervisor
+  - sede
+metricas_soportadas:
+  - total_rutas
+  - total_tecnicos
+sensitividades:
+  - low
+  - medium
+capacidades:
+  - capability_id: transport.routes.schedule.summary.v1
+    nombre: resumen_programacion_rutas
+    tipo: analytics
+skills_metadata: []
+flags:
+  delegation_enabled: true
+  sql_asistido_permitido: true

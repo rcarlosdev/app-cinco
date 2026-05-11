@@ -95,6 +95,23 @@ class ObservabilityService:
         data["enabled"] = True
         return data
 
+    def list_events(
+        self,
+        *,
+        window_seconds: int = 3600,
+        limit: int = 5000,
+        event_types: list[str] | None = None,
+        created_after: int | None = None,
+    ) -> list[dict]:
+        if not self.enabled:
+            return []
+        return self.store.list_observability_events(
+            window_seconds=window_seconds,
+            limit=limit,
+            event_types=event_types,
+            created_after=created_after,
+        )
+
     @contextmanager
     def measure(self, *, event_type: str, source: str, meta: dict | None = None):
         started = time.perf_counter()

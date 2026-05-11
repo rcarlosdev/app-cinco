@@ -61,11 +61,11 @@ class PolicyGuard:
                 metadata={"routing_mode": routing_mode},
             )
 
-        if routing_mode in {"intent", "capability_shadow"}:
+        if routing_mode == "intent":
             return PolicyDecision(
                 action=PolicyAction.ALLOW,
                 policy_id="policy.base.allow.non_blocking_mode",
-                reason="Intent/shadow mode preserves legacy compatibility.",
+                reason="Intent mode preserves legacy compatibility.",
                 metadata={
                     "routing_mode": routing_mode,
                     "capability_id": capability_id,

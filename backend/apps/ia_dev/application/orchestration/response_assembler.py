@@ -29,8 +29,7 @@ class LegacyResponseAssembler:
         memory_effects: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # Defensive deep-copy to avoid shared nested references between
-        # `legacy_response` and metadata snapshots (e.g. query_intelligence.precomputed_response).
-        # Shared references can become circular once we inject capability_shadow into orchestrator.
+        # `legacy_response` and metadata snapshots.
         response = ensure_chat_response_contract(copy.deepcopy(legacy_response))
 
         # Always expose memory loop outputs for incremental frontend adoption.
@@ -47,6 +46,7 @@ class LegacyResponseAssembler:
             run_context=run_context,
         )
         self._inject_frontend_presentation(response=response)
+        self._inject_business_response_summary(response=response)
         self._inject_query_intelligence_semantic_diagnostics(
             response=response,
             run_context=run_context,
@@ -56,98 +56,6 @@ class LegacyResponseAssembler:
             run_context=run_context,
         )
 
-        if not run_context.is_shadow_mode and not run_context.is_capability_mode_requested:
-            return response
-
-        orchestrator = copy.deepcopy(response.get("orchestrator") or {})
-        proactive_loop = copy.deepcopy(dict(run_context.metadata.get("proactive_loop") or {}))
-        query_intelligence = copy.deepcopy(dict(run_context.metadata.get("query_intelligence") or {}))
-        orchestrator["capability_shadow"] = {
-            "run_id": run_context.run_id,
-            "trace_id": run_context.trace_id,
-            "routing_mode": run_context.routing_mode,
-            "planned_capability": copy.deepcopy(planned_capability),
-            "route": copy.deepcopy(route),
-            "policy": {
-                "action": policy_decision.action.value,
-                "policy_id": policy_decision.policy_id,
-                "reason": policy_decision.reason,
-                "metadata": dict(policy_decision.metadata or {}),
-            },
-            "divergence": copy.deepcopy(divergence),
-            "memory": {
-                "candidate_count": len(response.get("memory_candidates") or []),
-                "pending_proposals_count": len(response.get("pending_proposals") or []),
-            },
-            "proactive_loop": proactive_loop,
-            "query_intelligence": query_intelligence,
-        }
-        response["orchestrator"] = orchestrator
-
-        trace = copy.deepcopy(response.get("trace") or [])
-        trace.append(
-            self._trace_event(
-                phase="capability_planner",
-                status="ok",
-                detail={
-                    "run_id": run_context.run_id,
-                    "trace_id": run_context.trace_id,
-                    "planned_capability_id": planned_capability.get("capability_id"),
-                    "reason": planned_capability.get("reason"),
-                },
-            )
-        )
-        trace.append(
-            self._trace_event(
-                phase="policy_guard",
-                status="ok",
-                detail={
-                    "action": policy_decision.action.value,
-                    "policy_id": policy_decision.policy_id,
-                    "reason": policy_decision.reason,
-                },
-            )
-        )
-        trace.append(
-            self._trace_event(
-                phase="capability_router",
-                status="ok",
-                detail=route,
-            )
-        )
-        trace.append(
-            self._trace_event(
-                phase="capability_divergence",
-                status="warning" if divergence.get("diverged") else "ok",
-                detail=divergence,
-            )
-        )
-        if response.get("memory_candidates"):
-            trace.append(
-                self._trace_event(
-                    phase="memory_feedback_loop",
-                    status="ok",
-                    detail={
-                        "candidate_count": len(response.get("memory_candidates") or []),
-                        "pending_count": len(response.get("pending_proposals") or []),
-                    },
-                )
-            )
-        if proactive_loop:
-            trace.append(
-                self._trace_event(
-                    phase="proactive_loop",
-                    status="ok" if not proactive_loop.get("used_legacy") else "warning",
-                    detail={
-                        "enabled": bool(proactive_loop.get("enabled")),
-                        "iterations_ran": int(proactive_loop.get("iterations_ran") or 0),
-                        "max_iterations": int(proactive_loop.get("max_iterations") or 0),
-                        "selected_capability_id": proactive_loop.get("selected_capability_id"),
-                        "used_legacy": bool(proactive_loop.get("used_legacy")),
-                    },
-                )
-            )
-        response["trace"] = trace
         return response
 
     def _inject_reasoning_payload(
@@ -320,6 +228,205 @@ class LegacyResponseAssembler:
         meta["presentation"] = presentation
         data["meta"] = meta
         response["data"] = data
+
+    def _inject_business_response_summary(self, *, response: dict[str, Any]) -> None:
+        data = dict(response.get("data") or {})
+        existing_business_response = dict(data.get("business_response") or {})
+        table = dict(data.get("table") or {})
+        result_set = dict((dict(data.get("meta") or {}).get("result_set") or {}))
+        if not result_set:
+            result_set = {
+                "total_records": int(table.get("total_records") or table.get("rowcount") or 0),
+                "returned_records": int(table.get("returned_records") or table.get("rowcount") or 0),
+                "truncated": bool(table.get("truncated")),
+                "limit": int(table.get("limit") or 0),
+            }
+        if all(
+            str(existing_business_response.get(key) or "").strip()
+            for key in ("dato", "hallazgo", "riesgo", "recomendacion", "siguiente_accion")
+        ):
+            if bool(result_set.get("truncated")):
+                existing_business_response["hallazgo"] = self._append_truncation_notice(
+                    text=str(existing_business_response.get("hallazgo") or ""),
+                    result_set=result_set,
+                )
+                existing_business_response["siguiente_accion"] = (
+                    "Filtra por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+                )
+                data["business_response"] = existing_business_response
+            response["data"] = data
+            return
+        findings = [item for item in list(data.get("findings") or []) if isinstance(item, dict)]
+        insights = [str(item or "").strip() for item in list(data.get("insights") or []) if str(item or "").strip()]
+        actions = [item for item in list(response.get("actions") or []) if isinstance(item, dict)]
+        kpis = dict(data.get("kpis") or {})
+        reply = str(response.get("reply") or "").strip()
+
+        dato = ""
+        if kpis:
+            if {
+                "certificados_vencidos",
+                "certificados_proximos_vencer",
+            }.issubset(set(kpis.keys())):
+                vencidos = kpis.get("certificados_vencidos")
+                proximos = kpis.get("certificados_proximos_vencer")
+                dato = (
+                    f"{vencidos} certificados de alturas vencidos y "
+                    f"{proximos} proximos a vencer."
+                )
+            if "total_empleados" in kpis:
+                first_row = (list(table.get("rows") or []) or [{}])[0]
+                status_value = str((first_row or {}).get("estado") or "").strip().upper()
+                if status_value == "ACTIVO":
+                    dato = f"Actualmente hay {kpis.get('total_empleados')} empleados activos."
+                elif status_value == "INACTIVO":
+                    dato = f"Actualmente hay {kpis.get('total_empleados')} empleados inactivos."
+                else:
+                    combined_text = " ".join(
+                        part for part in [reply, *insights] if str(part or "").strip()
+                    ).lower()
+                    if "empleados activos" in combined_text:
+                        dato = f"Actualmente hay {kpis.get('total_empleados')} empleados activos."
+                    elif "empleados inactivos" in combined_text:
+                        dato = f"Actualmente hay {kpis.get('total_empleados')} empleados inactivos."
+            if not dato:
+                first_key = next(iter(kpis.keys()), "")
+                if first_key:
+                    dato = f"{first_key}: {kpis.get(first_key)}"
+        elif int(table.get("rowcount") or 0) > 0:
+            total_records = int(result_set.get("total_records") or table.get("rowcount") or 0)
+            returned_records = int(result_set.get("returned_records") or table.get("rowcount") or 0)
+            if bool(result_set.get("truncated")):
+                dato = f"{total_records} registros encontrados; se muestran {returned_records}."
+            else:
+                dato = f"{returned_records} filas disponibles."
+
+        hallazgo = ""
+        if {
+            "certificados_vencidos",
+            "certificados_proximos_vencer",
+        }.issubset(set(kpis.keys())):
+            hallazgo = "Hay personal operativo activo con riesgo documental si existen certificados vencidos o proximos a vencer."
+        if findings:
+            hallazgo = str(findings[0].get("detail") or findings[0].get("title") or "").strip()
+        if not hallazgo and insights:
+            hallazgo = insights[0]
+        if not hallazgo and dato:
+            hallazgo = "La consulta se resolvio como un indicador empresarial listo para seguimiento."
+        if bool(result_set.get("truncated")):
+            hallazgo = self._append_truncation_notice(text=hallazgo, result_set=result_set)
+
+        recomendacion = ""
+        if len(insights) > 1:
+            recomendacion = insights[1]
+        if not recomendacion and actions:
+            recomendacion = str(actions[0].get("label") or "").strip()
+        if (
+            not recomendacion
+            and {"certificados_vencidos", "certificados_proximos_vencer"}.issubset(set(kpis.keys()))
+        ):
+            recomendacion = "Priorizar renovacion de vencidos y programar renovacion de proximos a vencer."
+        if not recomendacion and hallazgo:
+            recomendacion = "Amplia la consulta con un desglose por dimension o solicita el detalle para accionar."
+        if bool(result_set.get("truncated")):
+            recomendacion = (
+                f"{recomendacion} Segmenta por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+            ).strip()
+
+        siguiente_accion = ""
+        if actions:
+            siguiente_accion = str(actions[0].get("label") or "").strip()
+        if (
+            not siguiente_accion
+            and {"certificados_vencidos", "certificados_proximos_vencer"}.issubset(set(kpis.keys()))
+        ):
+            siguiente_accion = "Muestrame el detalle por empleado, area, supervisor o movil."
+        if bool(result_set.get("truncated")):
+            siguiente_accion = "Filtra por sede, area, supervisor, movil o tipo_labor para reducir el volumen."
+        interpretacion = self._infer_business_interpretation(
+            dato=dato,
+            hallazgo=hallazgo,
+            reply=reply,
+            rowcount=int(table.get("rowcount") or 0),
+        )
+        riesgo = self._infer_business_risk(
+            dato=dato,
+            hallazgo=hallazgo,
+            reply=reply,
+            rowcount=int(table.get("rowcount") or 0),
+        )
+
+        data["business_response"] = {
+            "dato": dato,
+            "hallazgo": hallazgo,
+            "interpretacion": interpretacion,
+            "riesgo": riesgo,
+            "recomendacion": recomendacion,
+            "siguiente_accion": siguiente_accion,
+        }
+        response["data"] = data
+
+    @staticmethod
+    def _append_truncation_notice(*, text: str, result_set: dict[str, Any]) -> str:
+        total_records = int(result_set.get("total_records") or 0)
+        returned_records = int(result_set.get("returned_records") or 0)
+        limit = int(result_set.get("limit") or 0)
+        notice = (
+            f"El detalle esta truncado: se muestran {returned_records} de {total_records} registros"
+            + (f" por limite operativo de {limit}." if limit else ".")
+        )
+        base = str(text or "").strip()
+        if not base:
+            return notice
+        if "truncad" in base.lower() or "se muestran" in base.lower():
+            return base
+        return f"{base} {notice}"
+
+    @staticmethod
+    def _infer_business_interpretation(
+        *,
+        dato: str,
+        hallazgo: str,
+        reply: str,
+        rowcount: int,
+    ) -> str:
+        text = " ".join(part for part in (dato, hallazgo, reply) if part).lower()
+        if not text and rowcount <= 0:
+            return "No se generaron datos accionables para interpretar."
+        if "certificados de alturas vencidos" in text or "proximos a vencer" in text:
+            return "La vigencia del certificado de alturas impacta directamente la habilitacion operativa del personal expuesto a trabajos en altura."
+        if "actualmente hay 0" in text or "no encontre" in text or "no encontr" in text:
+            return "El resultado sugiere filtros restrictivos o una ausencia puntual de datos para la consulta."
+        if "empleados activos" in text:
+            return "El dato representa una fotografia actual de la dotacion activa disponible para operar."
+        if "empleados inactivos" in text or "egresos" in text or "rotacion" in text:
+            return "El resultado requiere seguimiento de estabilidad laboral y posibles impactos de continuidad."
+        if rowcount > 1:
+            return "La consulta arroja un conjunto de datos util para priorizar revision por segmentos."
+        return "El resultado es consistente con una consulta puntual de seguimiento empresarial."
+
+    @staticmethod
+    def _infer_business_risk(
+        *,
+        dato: str,
+        hallazgo: str,
+        reply: str,
+        rowcount: int,
+    ) -> str:
+        text = " ".join(part for part in (dato, hallazgo, reply) if part).lower()
+        if "certificados de alturas vencidos" in text or "proximos a vencer" in text:
+            return "Un tecnico con certificado vencido no deberia ser asignado a trabajos en alturas."
+        if "actualmente hay 0" in text or "no encontre" in text or "no encontr" in text:
+            return "Puede existir riesgo de interpretacion si los filtros no reflejan la operacion esperada."
+        if "rotacion" in text or "egresos" in text or "inactivos" in text:
+            return "Conviene revisar impacto operativo y continuidad de personal en el periodo analizado."
+        if "empleados activos" in text:
+            return "Riesgo bajo; el siguiente paso es validar distribucion por area, cargo o sede."
+        if rowcount > 20:
+            return "El volumen de resultados puede requerir priorizacion para una lectura ejecutiva."
+        if rowcount > 0:
+            return "Conviene validar el segmento con mayor concentracion antes de tomar decisiones operativas."
+        return "No se identifico un riesgo operativo concluyente con la informacion disponible."
 
     @staticmethod
     def _coerce_numeric_series(series_value: Any) -> list[float]:
@@ -764,3 +871,6 @@ class LegacyResponseAssembler:
             "detail": detail,
             "active_nodes": ["q", "gpt", "route"],
         }
+
+
+ResponseAssembler = LegacyResponseAssembler

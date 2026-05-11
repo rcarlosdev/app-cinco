@@ -63,6 +63,7 @@ class EmpleadosHandler:
             "insights": [],
             "table": {"columns": [], "rows": [], "rowcount": 0},
         }
+        response_actions: list[dict[str, Any]] = []
 
         def _push_trace(phase: str, status: str, detail: Any, active_nodes: list[str] | None = None) -> None:
             trace.append(
@@ -327,16 +328,18 @@ class EmpleadosHandler:
                         "rowcount": 1,
                     }
                     payload["insights"] = [
-                        f"Total de empleados {target_status.lower()} calculado con filtros: {filtros_aplicados or {'estado': target_status}}."
+                        f"La consulta fue interpretada como conteo del personal {target_status.lower()}.",
+                        "Puedes pedir el desglose por area, cargo o sede.",
                     ]
-                    if temporal_scope.get("column_hint") and temporal_scope.get("start_date") and temporal_scope.get("end_date"):
-                        reply = (
-                            f"Cantidad de empleados {target_status.lower()} con "
-                            f"{temporal_scope.get('column_hint')} entre {temporal_scope.get('start_date')} "
-                            f"y {temporal_scope.get('end_date')}: {int(total_activos)}."
-                        )
-                    else:
-                        reply = f"Cantidad de empleados {target_status.lower()}: {int(total_activos)}."
+                    reply = self._build_employee_count_reply(
+                        total_empleados=total_activos,
+                        target_status=target_status,
+                        temporal_scope=temporal_scope,
+                    )
+                    response_actions = self._build_employee_count_actions(
+                        target_status=target_status,
+                        group_dimensions=group_dimensions,
+                    )
                 _push_trace(
                     trace_phase,
                     "ok",
@@ -378,7 +381,7 @@ class EmpleadosHandler:
                     "used_tools": used_tools,
                 },
                 "data": payload,
-                "actions": [],
+                "actions": response_actions,
                 "data_sources": {
                     "empleados": {"ok": True, "source": "capability_handler"},
                     "ai_dictionary": {"ok": True, "source": "capability_handler"},
@@ -695,8 +698,14 @@ class EmpleadosHandler:
                 f"{key}={value}" for key, value in dict(filtros_aplicados or {}).items() if str(value or "").strip()
             )
             if filtro_texto:
-                return f"No encontre empleados activos con esos criterios ({filtro_texto})."
-            return "No encontre empleados activos con esos criterios."
+                return (
+                    "No identifique empleados activos con los criterios solicitados. "
+                    f"Revise filtros como {filtro_texto} o pida una busqueda por cedula, nombre, cargo o area."
+                )
+            return (
+                "No identifique empleados activos con los criterios solicitados. "
+                "Puedes pedir una busqueda por cedula, nombre, cargo o area para acotar la consulta."
+            )
         if movil:
             integrantes = len(empleados)
             return (
@@ -723,6 +732,41 @@ class EmpleadosHandler:
             )
         preview = ", ".join(str(item.get("nombre_completo") or item.get("cedula") or "N/D") for item in empleados[:3])
         return f"Encontre {len(empleados)} empleados que coinciden. Primeros resultados: {preview}."
+
+    @staticmethod
+    def _build_employee_count_reply(
+        *,
+        total_empleados: int,
+        target_status: str,
+        temporal_scope: dict[str, Any],
+    ) -> str:
+        status_label = "activos" if str(target_status or "ACTIVO").strip().upper() == "ACTIVO" else "inactivos"
+        if temporal_scope.get("column_hint") and temporal_scope.get("start_date") and temporal_scope.get("end_date"):
+            return (
+                f"Actualmente hay {int(total_empleados)} empleados {status_label}. "
+                f"El conteo usa {temporal_scope.get('column_hint')} entre "
+                f"{temporal_scope.get('start_date')} y {temporal_scope.get('end_date')}."
+            )
+        return (
+            f"Actualmente hay {int(total_empleados)} empleados {status_label}. "
+            "Si lo necesitas, puedo desglosarlo por area, cargo o sede."
+        )
+
+    @staticmethod
+    def _build_employee_count_actions(
+        *,
+        target_status: str,
+        group_dimensions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        if group_dimensions:
+            return []
+        status_label = "activos" if str(target_status or "ACTIVO").strip().upper() == "ACTIVO" else "inactivos"
+        return [
+            {
+                "label": f'Muestrame empleados {status_label} por area.',
+                "type": "suggestion",
+            }
+        ]
 
     @staticmethod
     def _month_label(value: str) -> str:

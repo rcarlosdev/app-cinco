@@ -1,0 +1,29 @@
+domain_code: inventario_logistica
+domain_name: Inventario Logistica
+domain_status: partial
+maturity_level: initial
+schema_confidence: 0.72
+business_goal: Resolver consultas de inventario y logistica con enfoque yaml_first, ai_dictionary como autoridad estructural y sql_assisted seguro.
+main_entity: movimiento_inventario
+flags:
+  delegation_enabled: true
+  sql_asistido_permitido: true
+contexto_agente:
+  descripcion: Dominio operativo de materiales, ferreteros y serializados para control logistico.
+  database_alias: logistica_cinco
+  business_domain_code: inventario_materiales
+reglas_negocio:
+  - El YAML ensena el negocio, pero no ejecuta SQL directo.
+  - ai_dictionary es la autoridad estructural productiva.
+  - No inventar saldos si la formula no fue validada con negocio.
+ejemplos_consulta:
+  - trazabilidad del serial ABC123
+  - materiales mas consumidos en mayo
+  - traslados por bodega destino
+vocabulario_negocio:
+  - inventario
+  - logistica
+  - serial
+  - bodega
+  - material
+  - ferretero

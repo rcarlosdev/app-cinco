@@ -12,7 +12,6 @@ from .task_planner import TaskPlanner
 
 __all__ = [
     "AggregatedResponse",
-    "DelegationCoordinator",
     "DelegationResult",
     "DelegationTask",
     "DomainContextLoader",
@@ -23,11 +22,3 @@ __all__ = [
     "TaskPlanner",
     "build_task_id",
 ]
-
-
-def __getattr__(name: str):
-    if name == "DelegationCoordinator":
-        from .delegation_coordinator import DelegationCoordinator
-
-        return DelegationCoordinator
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

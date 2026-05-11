@@ -604,8 +604,8 @@ const IADevWorkspace = () => {
     };
   }, [resizingTerminal, terminalDetached]);
 
-  const submitChat = async () => {
-    const value = chatInput.trim();
+  const submitChat = async (overridePrompt?: string) => {
+    const value = (overridePrompt ?? chatInput).trim();
     if (!value || isSubmitting) return;
 
     const userMessageId = createMessageId("user");
@@ -657,7 +657,10 @@ const IADevWorkspace = () => {
                 message.id === assistantMessageId
                   ? {
                       ...message,
-                      response: mergeStreamingResponse(message.response, progress),
+                      response: mergeStreamingResponse(
+                        message.response,
+                        progress,
+                      ),
                       status: "streaming",
                     }
                   : message,
@@ -816,6 +819,25 @@ const IADevWorkspace = () => {
       setChatStatus(
         "La visualizacion ya se muestra integrada en la respuesta.",
       );
+      return;
+    }
+    if (action.type !== "create_ticket") {
+      const payload = action.payload ?? {};
+      const query =
+        [
+          payload.query,
+          payload.message,
+          payload.suggestion,
+          payload.consulta,
+          payload.prompt,
+          action.label,
+        ]
+          .map((candidate) =>
+            typeof candidate === "string" ? candidate.trim() : "",
+          )
+          .find(Boolean) ?? "";
+      if (!query) return;
+      await submitChat(query);
       return;
     }
     if (action.type !== "create_ticket") return;

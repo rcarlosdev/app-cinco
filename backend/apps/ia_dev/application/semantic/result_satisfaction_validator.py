@@ -12,6 +12,11 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 
 
 class ResultSatisfactionValidator:
+    INVENTORY_BALANCE_FILTER_RE = re.compile(
+        r"\b(?:having|where)\s+saldo(?:\s*(?:<>|!=|>|>=)\s*0)\b",
+        re.IGNORECASE,
+    )
+
     def validate(
         self,
         *,
@@ -31,6 +36,18 @@ class ResultSatisfactionValidator:
         chart = dict(data.get("chart") or {})
         checks: dict[str, Any] = {}
         constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+
+        inventory_balance_filter_reason = self._detect_inventory_balance_filter_exclusion(
+            resolved_query=resolved_query,
+            execution_plan=execution_plan,
+        )
+        if inventory_balance_filter_reason:
+            checks["inventory_balance_filter_policy"] = inventory_balance_filter_reason
+            return SatisfactionValidation(
+                satisfied=False,
+                reason="inventory_balance_filter_excludes_zero_or_negative",
+                checks=checks,
+            )
 
         expected_filters = self._resolve_expected_filters(
             message=normalized_message,
@@ -76,12 +93,12 @@ class ResultSatisfactionValidator:
         )
         expected_template = str(((resolved_query.intent.template_id if resolved_query else "") or "")).strip().lower()
         if asks_count or expected_template.startswith("count_") or "count" in expected_metrics:
-            has_numeric_kpi = any(isinstance(value, (int, float)) for value in kpis.values())
+            has_numeric_kpi = any(self._is_numeric_like(value) for value in kpis.values())
             if not has_numeric_kpi and rows:
                 for row in rows:
                     if not isinstance(row, dict):
                         continue
-                    if any(isinstance(value, (int, float)) for value in row.values()):
+                    if any(self._is_numeric_like(value) for value in row.values()):
                         has_numeric_kpi = True
                         break
             checks["has_numeric_kpi"] = has_numeric_kpi
@@ -95,11 +112,7 @@ class ResultSatisfactionValidator:
         asks_grouped_count = asks_count and bool(expected_group_by)
         if asks_grouped_count and rows:
             detail_like = any("fecha_ausentismo" in row and "cedula" in row for row in rows if isinstance(row, dict))
-            has_group_metric = any(
-                any(metric in row for metric in ("total_injustificados", "total_ausentismos", "total_eventos", "cantidad"))
-                for row in rows
-                if isinstance(row, dict)
-            )
+            has_group_metric = self._has_group_metric(rows=rows, expected_group_by=expected_group_by)
             checks["grouped_count"] = {
                 "detail_like": detail_like,
                 "has_group_metric": has_group_metric,
@@ -219,9 +232,13 @@ class ResultSatisfactionValidator:
         execution_plan: QueryExecutionPlan | None,
         message: str,
     ) -> list[str]:
-        values = [str(item).strip().lower() for item in list((execution_plan.constraints if execution_plan else {}).get("group_by") or []) if str(item).strip()]
-        if values:
-            return values
+        plan_constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+        if "group_by" in plan_constraints:
+            return [
+                str(item).strip().lower()
+                for item in list(plan_constraints.get("group_by") or [])
+                if str(item).strip()
+            ]
         if resolved_query is not None:
             values = [str(item).strip().lower() for item in list(resolved_query.intent.group_by or []) if str(item).strip()]
             if values:
@@ -306,6 +323,7 @@ class ResultSatisfactionValidator:
             "supervisor": {"supervisor"},
             "area": {"area"},
             "cargo": {"cargo"},
+            "birth_month": {"birth_month", "mes", "month"},
             "carpeta": {"carpeta"},
             "justificacion": {"justificacion", "motivo", "causa"},
             "estado": {"estado", "estado_justificacion"},
@@ -319,6 +337,44 @@ class ResultSatisfactionValidator:
                 if option in keys:
                     return option
         return ""
+
+    @classmethod
+    def _has_group_metric(cls, *, rows: list[dict[str, Any]], expected_group_by: list[str]) -> bool:
+        group_aliases = set(expected_group_by)
+        aliases = {
+            "supervisor": {"supervisor"},
+            "area": {"area"},
+            "cargo": {"cargo"},
+            "birth_month": {"birth_month", "mes", "month"},
+            "carpeta": {"carpeta"},
+            "justificacion": {"justificacion", "motivo", "causa"},
+            "estado": {"estado", "estado_justificacion"},
+            "estado_justificacion": {"estado", "estado_justificacion"},
+            "periodo": {"periodo", "fecha", "mes"},
+        }
+        for item in list(expected_group_by or []):
+            group_aliases.update(aliases.get(str(item or "").strip().lower(), set()))
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for key, value in row.items():
+                normalized_key = str(key or "").strip().lower()
+                if normalized_key in group_aliases or isinstance(value, bool):
+                    continue
+                if cls._is_numeric_like(value):
+                    return True
+        return False
+
+    @staticmethod
+    def _is_numeric_like(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        text = str(value or "").strip()
+        if not text:
+            return False
+        return bool(re.fullmatch(r"-?\d+(?:\.\d+)?", text))
 
     @staticmethod
     def _resolve_expected_cedula(message: str, *, resolved_query: ResolvedQuerySpec | None) -> str:
@@ -360,3 +416,38 @@ class ResultSatisfactionValidator:
     @staticmethod
     def _normalize_text(value: str) -> str:
         return str(value or "").strip().lower()
+
+    @classmethod
+    def _detect_inventory_balance_filter_exclusion(
+        cls,
+        *,
+        resolved_query: ResolvedQuerySpec | None,
+        execution_plan: QueryExecutionPlan | None,
+    ) -> dict[str, Any] | None:
+        if execution_plan is None:
+            return None
+        template_id = str(((resolved_query.intent.template_id if resolved_query else "") or "")).strip().lower()
+        capability_id = str((execution_plan.capability_id or "")).strip().lower()
+        if capability_id not in {"inventory_stock_balance_by_mobile", "inventory_serial_by_operational_holder"} and template_id not in {
+            "inventory_material_stock_mobile",
+            "inventory_serial_by_operational_holder",
+        }:
+            return None
+        queries_to_check: list[tuple[str, str]] = []
+        sql_query = str(execution_plan.sql_query or "").strip()
+        if sql_query:
+            queries_to_check.append(("primary", sql_query))
+        for index, item in enumerate(list((execution_plan.metadata or {}).get("supplemental_queries") or [])):
+            if not isinstance(item, dict):
+                continue
+            supplemental_query = str(item.get("query") or "").strip()
+            if supplemental_query:
+                queries_to_check.append((str(item.get("name") or f"supplemental_{index}"), supplemental_query))
+        violations: list[str] = []
+        for scope, query in queries_to_check:
+            match = cls.INVENTORY_BALANCE_FILTER_RE.search(query)
+            if match:
+                violations.append(f"{scope}:{match.group(0)}")
+        if not violations:
+            return None
+        return {"violations": violations}

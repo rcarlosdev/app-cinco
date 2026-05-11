@@ -22,6 +22,7 @@ class AusentismoBusinessTool:
     """
     Capa tipada de negocio para ausentismo.
     Encapsula AusentismoToolService y evita acceso SQL desde orchestration/routing.
+    En phase_5 queda como wrapper temporal del fallback analytics legacy.
     """
 
     def __init__(self, *, service: AusentismoToolService | None = None):

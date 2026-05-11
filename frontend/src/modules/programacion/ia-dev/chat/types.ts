@@ -1,3 +1,4 @@
+//frontend/src/modules/programacion/ia-dev/chat/types.ts
 import type {
   IADevAction,
   IADevChartPayload,
@@ -19,7 +20,15 @@ export type NormalizedKPI = {
 export type NormalizedTable = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
+  exportRows: Array<Record<string, unknown>>;
   rowcount: number;
+  totalRecords: number;
+  returnedRecords: number;
+  exportRecords: number;
+  exportTruncated: boolean;
+  exportLimit: number;
+  truncated: boolean;
+  limit: number;
 };
 
 export type NormalizedHighlight = {
@@ -36,11 +45,19 @@ export type NormalizedAssistantPayload = {
   chart: IADevChartPayload | null;
   charts: IADevChartPayload[];
   table: NormalizedTable | null;
+  extraTables: NormalizedTable[];
   labels: string[];
   series: number[];
   meta: Record<string, unknown>;
   hasStructuredContent: boolean;
   highlight: NormalizedHighlight | null;
+  route: Record<string, unknown>;
+  fallbackUsed: Record<string, unknown>;
+  legacyUsed: boolean;
+  contractPolicyApplied: Record<string, unknown>;
+  needsClarification: boolean;
+  blockReason: string;
+  progressSource: string;
 };
 
 export type ChatMessageModel = {

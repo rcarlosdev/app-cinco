@@ -57,6 +57,11 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         role=MODEL_ROLE_FAST,
         legacy_env="IA_DEV_INTENT_MODEL",
     ),
+    "intent_arbitration": ModelRoute(
+        component="intent_arbitration",
+        role=MODEL_ROLE_BALANCED,
+        legacy_env="IA_DEV_INTENT_ARBITRATION_MODEL",
+    ),
     "query_intent": ModelRoute(
         component="query_intent",
         role=MODEL_ROLE_BALANCED,
@@ -67,10 +72,20 @@ MODEL_ROUTES: dict[str, ModelRoute] = {
         role=MODEL_ROLE_BALANCED,
         legacy_env="IA_DEV_SEMANTIC_NORMALIZATION_LLM_MODEL",
     ),
+    "semantic_orchestrator": ModelRoute(
+        component="semantic_orchestrator",
+        role=MODEL_ROLE_BALANCED,
+        legacy_env="IA_DEV_SEMANTIC_ORCHESTRATOR_MODEL",
+    ),
     "general_answer": ModelRoute(
         component="general_answer",
         role=MODEL_ROLE_BALANCED,
         legacy_env="IA_DEV_GENERAL_MODEL",
+    ),
+    "business_response_composer": ModelRoute(
+        component="business_response_composer",
+        role=MODEL_ROLE_BALANCED,
+        legacy_env="IA_DEV_BUSINESS_RESPONSE_COMPOSER_MODEL",
     ),
     "period_extraction": ModelRoute(
         component="period_extraction",

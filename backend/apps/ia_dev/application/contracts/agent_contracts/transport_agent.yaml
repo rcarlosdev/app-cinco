@@ -1,0 +1,74 @@
+agent_contract:
+  agent_id: transport_agent
+  domain: transporte
+  role: Transport operational summary agent.
+  responsibilities:
+    - Report transport departures summaries.
+    - Detect missing transport source configuration.
+  out_of_scope:
+    - HR analytics.
+    - Inventory reconciliation.
+  input_context:
+    session_memory: true
+    user_memory: true
+    business_memory: false
+  output_context:
+    updates_session_memory: true
+    emits_business_response: true
+  intents:
+    - id: transport_departures_summary
+      description: Summary of departures by day.
+      examples: ["cuantos vehiculos salieron hoy"]
+      capability: transport.departures.summary.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [fecha]
+      tables: [IA_DEV_TRANSPORT_TABLE]
+      validation_rules: ["configured_transport_source_required"]
+  capabilities:
+    - id: transport.departures.summary.v1
+      type: handler
+      owner: transport.departures_summary
+      planner_required: false
+      handler_required: true
+      allowed_tables: [IA_DEV_TRANSPORT_TABLE]
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: IA_DEV_CAP_TRANSPORT_ENABLED|IA_DEV_CAP_TRANSPORT_SUMMARY_ENABLED
+      policy_tags: [contains_operational_data]
+  routing_rules:
+    deterministic_patterns: ["vehiculos", "transporte", "salidas"]
+    semantic_assist_enabled: true
+    domain_priority_rules: ["transport_over_general_when_transport_vocabulary_is_strong"]
+    memory_isolation: strict_by_domain
+  semantic_assist_rules:
+    - Keep transport queries mapped to the configured source only.
+  execution_rules:
+    covered_by_modern_runtime: true
+    legacy_runtime_owner: transport_legacy_runtime
+  validation_rules:
+    - configured_transport_source_required
+  handoffs:
+    allowed_targets: [analista_agent]
+    payload_schema: agent_contract.v1.handoff
+    required_fields: [domain, intent]
+  fallback_policy:
+    legacy_allowed: true
+    user_visible_error_policy: controlled_limitation
+    technical_debug_visibility: hidden_from_end_user
+  response_policy:
+    user_mode: business
+    debug_mode: internal_only
+    required_sections: [reply, data]
+    forbidden_terms: [runtime_only_fallback, legacy, completar ai_dictionary]
+  memory_policy:
+    scope: session_and_user_only
+    cross_domain_sharing: blocked
+  observability:
+    required_trace_fields: [agent_id, domain, intent, capability, route, execute, fallback_used]
+  tests_required:
+    - contract_loads
+    - intents_have_capabilities
+    - capabilities_have_handler_or_planner
+    - frontend_simulator_parity
+

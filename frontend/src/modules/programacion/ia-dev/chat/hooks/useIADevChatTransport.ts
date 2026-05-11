@@ -86,6 +86,16 @@ const buildFallbackResponseFromEvent = (
 ): IADevChatResponse => ({
   session_id: payload.session_id || "ws-session",
   reply: payload.reply || "",
+  response_envelope: {
+    mode: "debug",
+    progress_source: "backend",
+    route: {},
+    fallback_used: { used: false, reason: "", flow: "" },
+    legacy_used: false,
+    contract_policy_applied: {},
+    needs_clarification: false,
+    block_reason: "",
+  },
   orchestrator: {},
   data: {},
   trace: [],
@@ -103,6 +113,16 @@ const buildProgressResponseFromEvent = (
 ): Partial<IADevChatResponse> => ({
   session_id: payload.session_id || "",
   reply: "",
+  response_envelope: {
+    mode: "debug",
+    progress_source: "backend",
+    route: {},
+    fallback_used: { used: false, reason: "", flow: "" },
+    legacy_used: false,
+    contract_policy_applied: {},
+    needs_clarification: false,
+    block_reason: "",
+  },
   orchestrator: {},
   data: {},
   trace: [],
@@ -143,6 +163,16 @@ const buildPendingProgressFrames = (): Partial<IADevChatResponse>[] => {
   const now = () => new Date().toISOString();
   return [
     {
+      response_envelope: {
+        mode: "user",
+        progress_source: "synthetic",
+        route: {},
+        fallback_used: { used: false, reason: "", flow: "" },
+        legacy_used: false,
+        contract_policy_applied: {},
+        needs_clarification: false,
+        block_reason: "",
+      },
       working_updates: [
         {
           stage: "intake",
@@ -160,6 +190,16 @@ const buildPendingProgressFrames = (): Partial<IADevChatResponse>[] => {
       },
     },
     {
+      response_envelope: {
+        mode: "user",
+        progress_source: "synthetic",
+        route: {},
+        fallback_used: { used: false, reason: "", flow: "" },
+        legacy_used: false,
+        contract_policy_applied: {},
+        needs_clarification: false,
+        block_reason: "",
+      },
       working_updates: [
         {
           stage: "bootstrap",
@@ -177,6 +217,16 @@ const buildPendingProgressFrames = (): Partial<IADevChatResponse>[] => {
       },
     },
     {
+      response_envelope: {
+        mode: "user",
+        progress_source: "synthetic",
+        route: {},
+        fallback_used: { used: false, reason: "", flow: "" },
+        legacy_used: false,
+        contract_policy_applied: {},
+        needs_clarification: false,
+        block_reason: "",
+      },
       working_updates: [
         {
           stage: "planning",
@@ -238,9 +288,14 @@ const playbackResolvedProgress = async (
   const accumulated: IADevChatResponse["working_updates"] = [];
   for (const update of updates.slice(-4)) {
     accumulated.push(update);
-    onProgress({
-      working_updates: [...accumulated],
-      reasoning: {
+      onProgress({
+        response_envelope: {
+          ...(response.response_envelope || {}),
+          progress_source:
+            response.response_envelope?.progress_source || "backend",
+        },
+        working_updates: [...accumulated],
+        reasoning: {
         enabled: response.reasoning?.enabled ?? true,
         ...(response.reasoning || {}),
         current_next_step:

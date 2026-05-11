@@ -61,6 +61,7 @@ build/
 # Pipenv and virtualenv
 Pipfile.lock
 .pipenv/
+.venv/
 
 # Coverage reports
 htmlcov/
@@ -105,6 +106,9 @@ yarn.lock
 docker-compose.override.yml
 
 tmp/
+tmp_*.json
+backend/tmp_*.json
+frontend/tmp_*.json
 shared/
 # Permitir carpeta shared del dominio IA DEV (arquitectura DDD incremental)
 !backend/apps/ia_dev/domains/shared/

@@ -5,6 +5,122 @@ from typing import Any
 
 
 @dataclass(slots=True)
+class BusinessQuerySemanticEntity:
+    type: str = ""
+    identifier: str = ""
+    field: str = ""
+    physical_field: str = ""
+    resolution_source: str = "deterministic"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "type": str(self.type or ""),
+            "identifier": str(self.identifier or ""),
+            "field": str(self.field or ""),
+            "physical_field": str(self.physical_field or ""),
+            "resolution_source": str(self.resolution_source or "deterministic"),
+        }
+
+
+@dataclass(slots=True)
+class BusinessQuerySemanticScope:
+    families: list[str] = field(default_factory=list)
+    include_serialized: bool = False
+    stock_scope: str = ""
+    group_dimensions: list[str] = field(default_factory=list)
+    coverage: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "families": [str(item or "") for item in list(self.families or []) if str(item or "").strip()],
+            "include_serialized": bool(self.include_serialized),
+            "stock_scope": str(self.stock_scope or ""),
+            "group_dimensions": [str(item or "") for item in list(self.group_dimensions or []) if str(item or "").strip()],
+            "coverage": str(self.coverage or ""),
+        }
+
+
+@dataclass(slots=True)
+class BusinessQuerySemanticOutput:
+    expected_output: str = ""
+    grain: str = ""
+    columns: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "expected_output": str(self.expected_output or ""),
+            "grain": str(self.grain or ""),
+            "columns": [str(item or "") for item in list(self.columns or []) if str(item or "").strip()],
+        }
+
+
+@dataclass(slots=True)
+class BusinessQuerySemanticExecution:
+    capability: str = ""
+    requires_sql_planner: bool = True
+    planner_authority: str = "QueryExecutionPlanner"
+    execute_authority: str = "planner_only"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "capability": str(self.capability or ""),
+            "requires_sql_planner": bool(self.requires_sql_planner),
+            "planner_authority": str(self.planner_authority or "QueryExecutionPlanner"),
+            "execute_authority": str(self.execute_authority or "planner_only"),
+        }
+
+
+@dataclass(slots=True)
+class BusinessQuerySemanticPlan:
+    query: str
+    domain: str
+    intent: str
+    main_entity: BusinessQuerySemanticEntity = field(default_factory=BusinessQuerySemanticEntity)
+    governed_physical_field: str = ""
+    grouping_dimension: list[str] = field(default_factory=list)
+    inventory_family: str = ""
+    scope: BusinessQuerySemanticScope = field(default_factory=BusinessQuerySemanticScope)
+    output: BusinessQuerySemanticOutput = field(default_factory=BusinessQuerySemanticOutput)
+    candidate_capability: str = ""
+    normalized_filters: dict[str, Any] = field(default_factory=dict)
+    requires_enrichment: bool = False
+    applicable_business_rules: list[str] = field(default_factory=list)
+    possible_alerts: list[str] = field(default_factory=list)
+    known_limitations: list[str] = field(default_factory=list)
+    execution: BusinessQuerySemanticExecution = field(default_factory=BusinessQuerySemanticExecution)
+    ambiguity_notes: list[str] = field(default_factory=list)
+    consulted_sources: list[str] = field(default_factory=list)
+    memory_keys_used: list[str] = field(default_factory=list)
+    llm_policy: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "query": str(self.query or ""),
+            "domain": str(self.domain or ""),
+            "intent": str(self.intent or ""),
+            "entity": self.main_entity.as_dict(),
+            "governed_physical_field": str(self.governed_physical_field or ""),
+            "grouping_dimension": [str(item or "") for item in list(self.grouping_dimension or []) if str(item or "").strip()],
+            "inventory_family": str(self.inventory_family or ""),
+            "scope": self.scope.as_dict(),
+            "output": self.output.as_dict(),
+            "candidate_capability": str(self.candidate_capability or ""),
+            "normalized_filters": dict(self.normalized_filters or {}),
+            "requires_enrichment": bool(self.requires_enrichment),
+            "applicable_business_rules": [
+                str(item or "") for item in list(self.applicable_business_rules or []) if str(item or "").strip()
+            ],
+            "possible_alerts": [str(item or "") for item in list(self.possible_alerts or []) if str(item or "").strip()],
+            "known_limitations": [str(item or "") for item in list(self.known_limitations or []) if str(item or "").strip()],
+            "execution": self.execution.as_dict(),
+            "ambiguity_notes": [str(item or "") for item in list(self.ambiguity_notes or []) if str(item or "").strip()],
+            "consulted_sources": [str(item or "") for item in list(self.consulted_sources or []) if str(item or "").strip()],
+            "memory_keys_used": [str(item or "") for item in list(self.memory_keys_used or []) if str(item or "").strip()],
+            "llm_policy": dict(self.llm_policy or {}),
+        }
+
+
+@dataclass(slots=True)
 class StructuredQueryIntent:
     raw_query: str
     domain_code: str

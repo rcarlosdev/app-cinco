@@ -10,6 +10,16 @@ from apps.ia_dev.services.sql_store import IADevSqlStore
 
 
 class DomainContextLoader:
+    STRUCTURAL_YAML_KEYS = {
+        "tables": ("tablas_asociadas", "tables"),
+        "columns": ("columnas_clave", "columns"),
+        "relationships": ("joins_conocidos", "relationships"),
+        "capabilities": ("capacidades", "capabilities"),
+        "supported_filters": ("filtros_soportados",),
+        "supported_group_by": ("group_by_soportados",),
+        "supported_metrics": ("metricas_soportadas",),
+    }
+
     def __init__(
         self,
         *,
@@ -137,6 +147,10 @@ class DomainContextLoader:
     @staticmethod
     def _normalize_file_context(*, raw: dict[str, Any], source_path: Path) -> dict[str, Any]:
         code = str(raw.get("dominio") or raw.get("domain_code") or source_path.stem.split(".", 1)[0]).strip().lower()
+        yaml_structural_inventory = DomainContextLoader._extract_yaml_structural_inventory(raw=raw)
+        yaml_fields_ignored = sorted(
+            key for key, value in yaml_structural_inventory.items() if DomainContextLoader._has_structural_payload(value)
+        )
         return {
             "domain_code": code,
             "domain_name": str(raw.get("nombre_dominio") or raw.get("domain_name") or code),
@@ -148,14 +162,7 @@ class DomainContextLoader:
             "flags": dict(raw.get("flags") or {}),
             "source_of_truth": "file",
             "source_ref": str(source_path),
-            "tables": list(raw.get("tablas_asociadas") or raw.get("tables") or []),
-            "columns": list(raw.get("columnas_clave") or raw.get("columns") or []),
-            "relationships": list(raw.get("joins_conocidos") or raw.get("relationships") or []),
-            "capabilities": list(raw.get("capacidades") or raw.get("capabilities") or []),
             "skills": list(raw.get("skills_metadata") or raw.get("skills") or []),
-            "filtros_soportados": list(raw.get("filtros_soportados") or []),
-            "group_by_soportados": list(raw.get("group_by_soportados") or []),
-            "metricas_soportadas": list(raw.get("metricas_soportadas") or []),
             "sensitividades": list(raw.get("sensitividades") or []),
             "contexto_agente": dict(raw.get("contexto_agente") or {}),
             "reglas_negocio": list(raw.get("reglas_negocio") or []),
@@ -163,7 +170,41 @@ class DomainContextLoader:
             "vocabulario_negocio": list(raw.get("vocabulario_negocio") or []),
             "tablas_prioritarias": list(raw.get("tablas_prioritarias") or []),
             "columnas_prioritarias": list(raw.get("columnas_prioritarias") or []),
+            "legacy_capabilities": list(raw.get("capacidades") or raw.get("capabilities") or []),
+            "yaml_role": "narrative_only",
+            "yaml_structural_inventory": yaml_structural_inventory,
+            "yaml_fields_ignored": yaml_fields_ignored,
+            "yaml_fields_removed": list(yaml_fields_ignored),
+            "yaml_structural_ignored": bool(yaml_fields_ignored),
         }
+
+    @classmethod
+    def _extract_yaml_structural_inventory(cls, *, raw: dict[str, Any]) -> dict[str, Any]:
+        inventory: dict[str, Any] = {}
+        for canonical_key, aliases in cls.STRUCTURAL_YAML_KEYS.items():
+            value: Any = []
+            for alias in aliases:
+                candidate = raw.get(alias)
+                if candidate not in (None, "", [], {}):
+                    value = candidate
+                    break
+            if isinstance(value, list):
+                inventory[canonical_key] = list(value)
+            elif isinstance(value, dict):
+                inventory[canonical_key] = dict(value)
+            elif value in (None, ""):
+                inventory[canonical_key] = []
+            else:
+                inventory[canonical_key] = [value]
+        return inventory
+
+    @staticmethod
+    def _has_structural_payload(value: Any) -> bool:
+        if isinstance(value, dict):
+            return bool(value)
+        if isinstance(value, list):
+            return any(item not in (None, "", [], {}) for item in value)
+        return value not in (None, "", [], {})
 
     def _load_archivos_complementarios(self, *, domain_code: str) -> dict[str, Any]:
         complementos: dict[str, Any] = {}

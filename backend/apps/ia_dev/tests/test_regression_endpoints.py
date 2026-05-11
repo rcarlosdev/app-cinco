@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
 from rest_framework import status
@@ -11,13 +11,17 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.chat_contracts import build_chat_response_snapshot
+from apps.ia_dev.application.orchestration.chat_application_service import ChatApplicationService
 from apps.ia_dev.application.orchestration.response_assembler import LegacyResponseAssembler
+from apps.ia_dev.application.runtime.service_runtime_bootstrap import apply_service_runtime_bootstrap
 from apps.ia_dev.application.policies.policy_guard import PolicyAction, PolicyDecision
-from apps.ia_dev.services.orchestrator_service import IADevOrchestratorService
+from apps.ia_dev.services.runtime_fallback_service import RuntimeFallbackService
 from apps.ia_dev.views import chat_view as chat_view_module
 from apps.ia_dev.views.chat_view import (
+    IADevAttendancePeriodResolveView,
     IADevChatView,
     IADevKnowledgeApproveView,
+    IADevMemoryResetView,
     IADevObservabilitySummaryView,
 )
 
@@ -32,30 +36,279 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
             is_staff=False,
             is_superuser=False,
         )
+        chat_view_module.chat_application_service = None
+        chat_view_module.runtime_fallback_service = None
+        chat_view_module.session_memory_runtime_service = MagicMock()
+        chat_view_module.attendance_period_resolver_service = MagicMock()
 
     def test_chat_endpoint_keeps_contract_shape(self):
         snapshot = build_chat_response_snapshot()
         snapshot["session_id"] = "sess-123"
         snapshot["reply"] = "ok"
+        chat_service = MagicMock()
+        chat_service.run.return_value = snapshot
+        chat_view_module.chat_application_service = chat_service
 
-        with patch.object(chat_view_module.orchestrator_service, "run", return_value=snapshot):
+        with patch.object(chat_view_module, "_get_runtime_fallback_service", side_effect=AssertionError("runtime fallback no debe inicializarse")):
+            with patch.object(chat_view_module.observability_service, "record_event"):
+                request = self.factory.post(
+                    "/ia-dev/chat/",
+                    {"message": "hola", "session_id": "sess-123"},
+                    format="json",
+                )
+                force_authenticate(request, user=self.user)
+                response = IADevChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(set(response.data.keys()), set(snapshot.keys()))
+        self.assertEqual(response.data["session_id"], "sess-123")
+        self.assertIn("observability", response.data)
+        self.assertEqual(
+            response.data.get("data_sources", {}).get("runtime", {}).get("entrypoint"),
+            "chat_view_direct",
+        )
+        self.assertEqual(
+            response.data.get("data_sources", {}).get("runtime", {}).get("runtime_owner"),
+            "ChatApplicationService",
+        )
+        self.assertTrue(bool(response.data.get("data_sources", {}).get("runtime", {}).get("legacy_adapter_removed")))
+        self.assertFalse(bool(response.data.get("data_sources", {}).get("runtime", {}).get("legacy_runtime_fallback_used")))
+        chat_service.run.assert_called_once()
+
+    def test_chat_endpoint_calls_chat_application_service_directly(self):
+        snapshot = build_chat_response_snapshot()
+        snapshot["session_id"] = "sess-direct"
+        snapshot["reply"] = "direct"
+        chat_service = MagicMock()
+        chat_service.run.return_value = snapshot
+        chat_view_module.chat_application_service = chat_service
+
+        with patch.object(chat_view_module.observability_service, "record_event") as mock_record_event:
             request = self.factory.post(
                 "/ia-dev/chat/",
-                {"message": "hola", "session_id": "sess-123"},
+                {"message": "consulta sana", "session_id": "sess-direct"},
                 format="json",
             )
             force_authenticate(request, user=self.user)
             response = IADevChatView.as_view()(request)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(set(response.data.keys()), set(snapshot.keys()))
-        self.assertEqual(response.data["session_id"], "sess-123")
-        self.assertIn("observability", response.data)
+        call_kwargs = chat_service.run.call_args.kwargs
+        self.assertEqual(call_kwargs["message"], "consulta sana")
+        self.assertEqual(call_kwargs["session_id"], "sess-direct")
+        self.assertEqual(call_kwargs["actor_user_key"], "user:77")
+        self.assertIs(call_kwargs["observability"], chat_view_module.observability_service)
+        self.assertTrue(callable(call_kwargs["legacy_runner"]))
+        meta = mock_record_event.call_args.kwargs["meta"]
+        self.assertEqual(meta["entrypoint"], "chat_view_direct")
+        self.assertEqual(meta["runtime_owner"], "ChatApplicationService")
+        self.assertTrue(bool(meta["legacy_adapter_removed"]))
+        self.assertFalse(bool(meta["legacy_runtime_fallback_used"]))
 
-    def test_orchestrator_bootstraps_http_runtime_defaults_when_flags_are_missing(self):
+    def test_chat_endpoint_fallbacks_to_runtime_fallback_service_when_chat_application_service_fails(self):
+        chat_service = MagicMock()
+        chat_service.run.side_effect = RuntimeError("boom")
+        legacy_service = MagicMock()
+        legacy_snapshot = build_chat_response_snapshot()
+        legacy_snapshot["session_id"] = "sess-fallback"
+        legacy_snapshot["reply"] = "legacy ok"
+        legacy_service.run.return_value = legacy_snapshot
+        chat_view_module.chat_application_service = chat_service
+        chat_view_module.runtime_fallback_service = legacy_service
+
+        with patch.object(chat_view_module.observability_service, "record_event") as mock_record_event:
+            request = self.factory.post(
+                "/ia-dev/chat/",
+                {"message": "consulta fallback", "session_id": "sess-fallback"},
+                format="json",
+            )
+            force_authenticate(request, user=self.user)
+            response = IADevChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        legacy_service.run.assert_called_once_with(
+            message="consulta fallback",
+            session_id="sess-fallback",
+            reset_memory=False,
+            actor_user_key="user:77",
+            fallback_reason="chat_application_service_exception:RuntimeError",
+        )
+        runtime_meta = response.data.get("data_sources", {}).get("runtime", {})
+        self.assertTrue(bool(runtime_meta.get("legacy_adapter_removed")))
+        self.assertTrue(bool(runtime_meta.get("legacy_runtime_fallback_used")))
+        self.assertEqual(runtime_meta.get("runtime_owner"), "ChatApplicationService")
+        self.assertIn(
+            "chat_application_service_exception:RuntimeError",
+            str(runtime_meta.get("legacy_runtime_fallback_reason") or ""),
+        )
+        meta = mock_record_event.call_args.kwargs["meta"]
+        self.assertTrue(bool(meta["legacy_adapter_removed"]))
+        self.assertTrue(bool(meta["legacy_runtime_fallback_used"]))
+        self.assertIn(
+            "chat_application_service_exception:RuntimeError",
+            str(meta["legacy_runtime_fallback_reason"] or ""),
+        )
+
+    def test_chat_endpoint_blocks_legacy_when_contract_disallows_it(self):
+        chat_service = MagicMock()
+        chat_service.run.side_effect = RuntimeError("boom")
+        chat_service._bootstrap_classification.return_value = {
+            "intent": "stock_balance",
+            "domain": "inventario_logistica",
+            "selected_agent": "inventario_logistica_agent",
+            "classifier_source": "test",
+            "needs_database": True,
+            "output_mode": "summary",
+        }
+        real_service = ChatApplicationService()
+        chat_service._resolve_agent_contract.side_effect = real_service._resolve_agent_contract
+        chat_service._legacy_allowed_for_contract.side_effect = real_service._legacy_allowed_for_contract
+        chat_service.build_controlled_runtime_limitation_response.side_effect = (
+            real_service.build_controlled_runtime_limitation_response
+        )
+        legacy_service = MagicMock()
+        chat_view_module.chat_application_service = chat_service
+        chat_view_module.runtime_fallback_service = legacy_service
+
+        request = self.factory.post(
+            "/ia-dev/chat/",
+            {"message": "saldo bodega operacion_hfc", "session_id": "sess-no-legacy"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        response = IADevChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        legacy_service.run.assert_not_called()
+        runtime_meta = response.data.get("data_sources", {}).get("runtime", {})
+        self.assertFalse(bool(runtime_meta.get("legacy_runtime_fallback_used")))
+        self.assertEqual(str(runtime_meta.get("flow") or ""), "controlled_runtime_limitation")
+        self.assertIn("ruta auditada", str(response.data.get("reply") or "").lower())
+        self.assertNotIn("traceback", str(response.data.get("reply") or "").lower())
+        self.assertEqual(
+            str(response.data.get("response_envelope", {}).get("block_reason") or ""),
+            str(runtime_meta.get("block_reason") or ""),
+        )
+
+    def test_chat_endpoint_preserves_internal_legacy_runtime_fallback_metadata(self):
+        snapshot = build_chat_response_snapshot()
+        snapshot["session_id"] = "sess-inner-fallback"
+        snapshot["reply"] = "legacy interno"
+        snapshot["data_sources"] = {
+            "runtime": {
+                "legacy_runtime_fallback_used": True,
+                "legacy_runtime_fallback_reason": "legacy_runtime_fallback",
+            }
+        }
+        chat_service = MagicMock()
+        chat_service.run.return_value = snapshot
+        chat_view_module.chat_application_service = chat_service
+
+        with patch.object(chat_view_module.observability_service, "record_event") as mock_record_event:
+            request = self.factory.post(
+                "/ia-dev/chat/",
+                {"message": "consulta con fallback interno", "session_id": "sess-inner-fallback"},
+                format="json",
+            )
+            force_authenticate(request, user=self.user)
+            response = IADevChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        runtime_meta = response.data.get("data_sources", {}).get("runtime", {})
+        self.assertTrue(bool(runtime_meta.get("legacy_runtime_fallback_used")))
+        self.assertEqual(
+            str(runtime_meta.get("legacy_runtime_fallback_reason") or ""),
+            "legacy_runtime_fallback",
+        )
+        meta = mock_record_event.call_args.kwargs["meta"]
+        self.assertTrue(bool(meta["legacy_runtime_fallback_used"]))
+        self.assertEqual(
+            str(meta["legacy_runtime_fallback_reason"] or ""),
+            "legacy_runtime_fallback",
+        )
+
+    def test_controlled_runtime_limitation_hides_internal_terms_for_user_mode(self):
+        service = ChatApplicationService()
+        response = service.build_controlled_runtime_limitation_response(
+            message="saldo bodega operacion_hfc",
+            session_id="sess-user",
+            classification={
+                "intent": "stock_balance",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventario_logistica_agent",
+                "needs_database": True,
+            },
+            block_reason="chat_application_service_exception:RuntimeError",
+            response_debug_mode=False,
+        )
+
+        self.assertNotIn("traceback", str(response.get("reply") or "").lower())
+        self.assertNotIn("chatapplicationservice", str(response.get("reply") or "").lower())
+        self.assertFalse(bool(response.get("trace")))
+
+    def test_controlled_runtime_limitation_keeps_debug_trace_in_debug_mode(self):
+        service = ChatApplicationService()
+        response = service.build_controlled_runtime_limitation_response(
+            message="saldo bodega operacion_hfc",
+            session_id="sess-debug",
+            classification={
+                "intent": "stock_balance",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventario_logistica_agent",
+                "needs_database": True,
+            },
+            block_reason="missing_columns:movimientos:bodega_destino",
+            response_debug_mode=True,
+        )
+
+        self.assertEqual(str(response.get("response_envelope", {}).get("mode") or ""), "debug")
+        self.assertTrue(bool(response.get("trace")))
+        self.assertIn("block_reason_code", json.dumps(response.get("trace"), ensure_ascii=False))
+
+    def test_memory_reset_endpoint_uses_session_memory_runtime_service(self):
+        chat_view_module.session_memory_runtime_service.reset_memory.return_value = {
+            "session_id": "sess-reset",
+            "memory": {"used_messages": 0},
+        }
+
+        request = self.factory.post(
+            "/ia-dev/memory/reset/",
+            {"session_id": "sess-reset"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        response = IADevMemoryResetView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        chat_view_module.session_memory_runtime_service.reset_memory.assert_called_once_with("sess-reset")
+
+    def test_attendance_period_endpoint_uses_period_resolver_service(self):
+        chat_view_module.attendance_period_resolver_service.resolve_attendance_period.return_value = {
+            "session_id": "sess-period",
+            "resolved_period": {"label": "hoy", "start_date": "2026-05-03", "end_date": "2026-05-03"},
+            "rules_fallback_period": {"label": "hoy", "start_date": "2026-05-03", "end_date": "2026-05-03"},
+        }
+
+        request = self.factory.post(
+            "/ia-dev/attendance/period/resolve/",
+            {"message": "hoy", "session_id": "sess-period"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        response = IADevAttendancePeriodResolveView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        chat_view_module.attendance_period_resolver_service.resolve_attendance_period.assert_called_once_with(
+            message="hoy",
+            session_id="sess-period",
+        )
+
+    def test_runtime_fallback_bootstraps_http_runtime_defaults_when_explicitly_enabled(self):
         with patch.dict(
             os.environ,
             {
+                "IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_ENABLED": "1",
+                "IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_FORCE": "0",
                 "IA_DEV_CAP_ATTENDANCE_ENABLED": "",
                 "IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED": "",
                 "IA_DEV_CAP_ATTENDANCE_TABLE_ENABLED": "",
@@ -67,17 +320,59 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
             },
             clear=False,
         ):
-            service = IADevOrchestratorService()
+            service = RuntimeFallbackService()
 
-        self.assertEqual(os.getenv("IA_DEV_CAP_ATTENDANCE_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_CAP_ATTENDANCE_TABLE_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_POLICY_CAPABILITY_EXECUTION_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_POLICY_MEMORY_HINTS_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_POLICY_ATTENDANCE_PERSONAL_JOIN_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_QUERY_PATTERN_MEMORY_ENABLED"), "1")
-        self.assertEqual(os.getenv("IA_DEV_QUERY_PATTERN_FASTPATH_ENABLED"), "1")
+        applied = dict(service.runtime_bootstrap.get("applied") or {})
+        self.assertEqual(applied.get("IA_DEV_CAP_ATTENDANCE_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_CAP_ATTENDANCE_TABLE_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_POLICY_CAPABILITY_EXECUTION_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_POLICY_MEMORY_HINTS_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_POLICY_ATTENDANCE_PERSONAL_JOIN_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_QUERY_PATTERN_MEMORY_ENABLED"), "1")
+        self.assertEqual(applied.get("IA_DEV_QUERY_PATTERN_FASTPATH_ENABLED"), "1")
         self.assertTrue(service.runtime_bootstrap.get("enabled"))
+
+    def test_runtime_bootstrap_helper_does_not_override_runtime_env_when_bootstrap_disabled(self):
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_ENABLED": "0",
+                "IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_FORCE": "0",
+                "IA_DEV_ROUTING_MODE": "intent",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "0",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "0",
+            },
+            clear=False,
+        ):
+            bootstrap = apply_service_runtime_bootstrap()
+            self.assertFalse(bool(bootstrap.get("enabled")))
+            self.assertEqual(os.getenv("IA_DEV_ROUTING_MODE"), "intent")
+            self.assertEqual(os.getenv("IA_DEV_QUERY_SQL_ASSISTED_ENABLED"), "0")
+            self.assertEqual(os.getenv("IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED"), "0")
+
+    def test_runtime_fallback_does_not_force_runtime_env_when_force_flag_is_disabled(self):
+        with patch.dict(
+            os.environ,
+            {
+                "IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_ENABLED": "1",
+                "IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_FORCE": "0",
+                "IA_DEV_ROUTING_MODE": "intent",
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "0",
+                "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "0",
+            },
+            clear=False,
+        ):
+            service = RuntimeFallbackService()
+
+        applied = dict(service.runtime_bootstrap.get("applied") or {})
+        skipped = dict(service.runtime_bootstrap.get("skipped") or {})
+        self.assertNotIn("IA_DEV_ROUTING_MODE", applied)
+        self.assertNotIn("IA_DEV_QUERY_SQL_ASSISTED_ENABLED", applied)
+        self.assertNotIn("IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED", applied)
+        self.assertEqual(skipped.get("IA_DEV_ROUTING_MODE"), "intent")
+        self.assertEqual(skipped.get("IA_DEV_QUERY_SQL_ASSISTED_ENABLED"), "0")
+        self.assertEqual(skipped.get("IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED"), "0")
 
     def test_response_assembler_infers_frontend_chart_and_presentation_meta(self):
         assembler = LegacyResponseAssembler()
@@ -131,11 +426,16 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
         chart = dict(data.get("chart") or {})
         meta = dict(data.get("meta") or {})
         presentation = dict(meta.get("presentation") or {})
+        business_response = dict(data.get("business_response") or {})
 
         self.assertEqual(chart.get("chart_library"), "amcharts5")
         self.assertEqual(chart.get("type"), "bar")
         self.assertEqual(presentation.get("primary"), "chart")
         self.assertTrue(presentation.get("has_kpis"))
+        self.assertEqual(str(business_response.get("dato") or ""), "Actualmente hay 866 empleados activos.")
+        self.assertTrue(bool(str(business_response.get("hallazgo") or "").strip()))
+        self.assertTrue(bool(str(business_response.get("interpretacion") or "").strip()))
+        self.assertTrue(bool(str(business_response.get("recomendacion") or "").strip()))
 
     def test_observability_summary_endpoint_accepts_filters(self):
         payload = {"enabled": True, "window_seconds": 3600, "sample_size": 0}
@@ -195,7 +495,7 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
             idempotency_key="idem-knowledge-01",
         )
 
-    def test_response_assembler_avoids_circular_reference_in_capability_shadow(self):
+    def test_response_assembler_does_not_emit_capability_shadow_metadata(self):
         assembler = LegacyResponseAssembler()
         legacy_response = build_chat_response_snapshot()
         legacy_response["session_id"] = "sess-shadow"
@@ -216,7 +516,7 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
             session_id="sess-shadow",
             message="consulta de prueba",
             reset_memory=False,
-            routing_mode="capability_shadow",
+            routing_mode="intent",
             started_at_ms=0,
             started_at_iso="2026-04-16T00:00:00+00:00",
             metadata={
@@ -243,15 +543,8 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
         )
 
         serialized = json.dumps(response, ensure_ascii=False)
-        self.assertIn("capability_shadow", serialized)
-        shadow_orchestrator = (
-            response.get("orchestrator", {})
-            .get("capability_shadow", {})
-            .get("query_intelligence", {})
-            .get("precomputed_response", {})
-            .get("orchestrator")
-        )
-        self.assertIsNot(shadow_orchestrator, response.get("orchestrator"))
+        self.assertNotIn("capability_shadow", serialized)
+        self.assertNotIn("proactive_loop", serialized)
 
     def test_response_assembler_injects_semantic_diagnostics_for_training(self):
         assembler = LegacyResponseAssembler()

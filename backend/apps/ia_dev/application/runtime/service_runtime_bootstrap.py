@@ -12,6 +12,8 @@ SERVICE_RUNTIME_DEFAULTS: dict[str, str] = {
     "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
     "IA_DEV_QUERY_INTELLIGENCE_MODE": "active",
     "IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "1",
+    "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+    "IA_DEV_ATTENDANCE_EMPLOYEES_PILOT_ENABLED": "1",
     "IA_DEV_QUERY_PATTERN_MEMORY_ENABLED": "1",
     "IA_DEV_QUERY_PATTERN_FASTPATH_ENABLED": "1",
     "IA_DEV_QUERY_PATTERN_MEMORY_BUSINESS_ENABLED": "1",
@@ -31,12 +33,12 @@ SERVICE_RUNTIME_DEFAULTS: dict[str, str] = {
 
 
 def runtime_bootstrap_enabled() -> bool:
-    raw = os.getenv("IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_ENABLED", "1")
+    raw = os.getenv("IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_ENABLED", "0")
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def runtime_bootstrap_force() -> bool:
-    raw = os.getenv("IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_FORCE", "1")
+    raw = os.getenv("IA_DEV_SERVICE_RUNTIME_BOOTSTRAP_FORCE", "0")
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -44,14 +46,17 @@ def apply_service_runtime_bootstrap(*, force: bool | None = None) -> dict[str, d
     """
     Keep HTTP/runtime execution aligned with the terminal simulator.
 
-    By default it only fills missing flags so explicit deployment values
-    continue to win. `force=True` is reserved for the simulator command,
-    where we want a deterministic runtime regardless of the current shell.
+    By default the bootstrap stays off so the deployed `.env` remains the
+    authority. When explicitly enabled it only fills missing flags; it does
+    not rewrite values that are already present unless `force=True` is passed
+    by simulator-style tooling that intentionally wants a deterministic shell.
     """
 
-    resolved_force = runtime_bootstrap_force() if force is None else bool(force)
+    explicit_force = force is True
+    bootstrap_enabled = runtime_bootstrap_enabled() or explicit_force
+    resolved_force = explicit_force or runtime_bootstrap_force()
 
-    if not runtime_bootstrap_enabled():
+    if not bootstrap_enabled:
         return {
             "enabled": False,
             "force": resolved_force,

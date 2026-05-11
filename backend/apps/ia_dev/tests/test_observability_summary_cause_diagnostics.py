@@ -50,7 +50,7 @@ class ObservabilitySummaryCauseDiagnosticsTests(SimpleTestCase):
             ),
             (
                 "orchestrator_run",
-                "IADevOrchestratorService",
+                "LegacyOrchestratorRuntime",
                 42,
                 120,
                 80,

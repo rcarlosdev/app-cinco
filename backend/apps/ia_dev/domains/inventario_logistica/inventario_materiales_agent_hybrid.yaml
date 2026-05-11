@@ -1,0 +1,3188 @@
+# inventario_materiales_agent.yaml
+# Enfoque híbrido recomendado:
+#   YAML = contexto semántico, entrenamiento, reglas de negocio, ejemplos y blueprint.
+#   ai_dictionary = autoridad estructural productiva.
+#   DB = realidad física.
+#   QueryExecutionPlanner = ejecución SQL segura.
+#   GPT/OpenAI = arbitraje semántico.
+#
+# Este YAML está diseñado para poder mapearse así:
+#   YAML.tables           -> dd_tablas / dd_campos
+#   YAML.relationships    -> dd_relaciones
+#   YAML.synonyms         -> dd_sinonimos
+#   YAML.groupable        -> operaciones group_by
+#   YAML.business_rules   -> metadata semántica
+#   YAML.examples         -> tests / query_patterns
+
+agent:
+  code: inventario_materiales_agent
+  name: Agente de Inventario de Materiales
+  version: 0.3.0
+  status: experimental_yaml_first_hybrid
+  runtime_mode: yaml_first_to_ai_dictionary
+  domain_code: inventario_materiales
+  database:
+    connection_alias: logistica_cinco
+    schema: null
+    main_tables:
+      serializados:
+        - base_codigo_seriales
+        - logistica_base_seriales
+        - logistica_seriales_asociados
+      materiales_y_ferreteros:
+        - base_codigos
+        - logistica_movimientos_entrada
+        - logistica_movimientos_entrega
+        - logistica_movimientos_devolucion
+        - logistica_movimientos_consumo
+        - logistica_movimientos_cobro
+        - logistica_movimientos_traslado
+  description: >
+    Agente especializado en control y análisis de inventario de materiales,
+    ferreteros y equipos serializados. Debe interpretar consultas de negocio
+    sobre stock, entradas, entregas, devoluciones, consumos, cobros, traslados,
+    trazabilidad, seriales asociados y riesgos operativos.
+
+architecture_contract:
+  yaml_role: contexto_semantico_y_blueprint_de_entrenamiento
+  ai_dictionary_role: autoridad_estructural_productiva
+  db_role: realidad_fisica_de_tablas_y_columnas
+  planner_role: ejecucion_sql_segura
+  gpt_role: arbitraje_semantico
+  execution_policy:
+    sql_execution_allowed_from_yaml_directly: false
+    must_sync_to_ai_dictionary_before_sql_assisted: true
+    must_validate_against_db_before_production: true
+  principles:
+    - El YAML enseña el negocio.
+    - La DB confirma la realidad física.
+    - ai_dictionary gobierna tablas, campos, relaciones y operaciones.
+    - GPT interpreta intención y conceptos.
+    - El planner ejecuta únicamente planes seguros.
+  never_do:
+    - No hardcodear frases.
+    - No generar SQL libre desde YAML.
+    - No crear handler si sql_assisted puede resolver.
+    - No usar fallback como implementación.
+    - No usar legacy como autoridad.
+    - No inventar columnas.
+    - No inventar saldos reales sin consulta a DB.
+
+# -------------------------------------------------------------------
+# 1. MAPEO DIRECTO A ai_dictionary
+# -------------------------------------------------------------------
+
+ai_dictionary_mapping:
+  dd_dominios:
+    source: business_domain
+    key_fields:
+      - code
+      - name
+      - description
+  dd_tablas:
+    source: tables
+    key_fields:
+      - table_name
+      - domain_code
+      - business_name
+      - description
+      - primary_role
+      - material_family
+  dd_campos:
+    source: tables.*.columns
+    key_fields:
+      - table_name
+      - column_name
+      - data_type
+      - semantic_role
+      - business_concepts
+      - allowed_operations
+      - is_groupable
+      - is_filterable
+      - is_selectable
+  dd_relaciones:
+    source: relationships
+    key_fields:
+      - from_table
+      - from_column
+      - to_table
+      - to_column
+      - relationship_type
+      - allowed
+      - join_purpose
+  dd_sinonimos:
+    source:
+      - synonyms
+      - tables.*.columns.*.synonyms
+      - business_concepts.*.synonyms
+      - groupable_dimensions.*.synonyms
+    key_fields:
+      - synonym
+      - canonical_value
+      - target_type
+      - target_table
+      - target_column
+      - domain_code
+  semantic_metadata:
+    source:
+      - business_concepts
+      - business_rules
+      - query_patterns
+      - groupable_dimensions
+
+business_domain:
+  code: inventario_materiales
+  name: Inventario de materiales
+  description: >
+    Dominio logístico para control, trazabilidad, análisis y gestión de inventarios
+    de materiales comunes, materiales ferreteros y equipos serializados.
+  business_scope:
+    - stock de materiales
+    - entradas
+    - entregas
+    - devoluciones
+    - consumos
+    - cobros
+    - traslados
+    - trazabilidad de seriales
+    - equipos asociados
+    - salidas de bodega
+    - consumo móvil sin validar
+    - riesgos de inventario
+  out_of_scope:
+    - contabilidad financiera completa
+    - compras detalladas si no existen tablas declaradas
+    - nómina
+    - ausentismo
+    - mantenimiento técnico no registrado en logística
+
+# -------------------------------------------------------------------
+# 2. FAMILIAS DE MATERIAL
+# -------------------------------------------------------------------
+
+material_families:
+  materiales:
+    code: materiales
+    name: Materiales comunes
+    ownership: contratante
+    serial_control: false
+    description: >
+      Materiales entregados por el contratante. Se controlan por código, cantidad,
+      bodega y movimientos logísticos.
+    catalog_table: base_codigos
+    movement_tables:
+      - logistica_movimientos_entrada
+      - logistica_movimientos_entrega
+      - logistica_movimientos_devolucion
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+      - logistica_movimientos_traslado
+
+  ferreteros:
+    code: ferreteros
+    name: Materiales ferreteros
+    ownership: compania
+    serial_control: false
+    description: >
+      Materiales comprados por la compañía. Se controlan por código y cantidad.
+      Pueden requerir análisis separado por propiedad, costo, uso o cobro.
+    catalog_table: base_codigos
+    movement_tables:
+      - logistica_movimientos_entrada
+      - logistica_movimientos_entrega
+      - logistica_movimientos_devolucion
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+      - logistica_movimientos_traslado
+
+  serializados:
+    code: serializados
+    name: Equipos serializados
+    ownership: mixto_o_por_definir
+    serial_control: true
+    description: >
+      Equipos controlados individualmente por serial. Requieren trazabilidad por
+      serial, estado, ubicación, responsable, movimiento, asociación y salida de bodega.
+    catalog_table: base_codigo_seriales
+    serial_table: logistica_base_seriales
+    association_table: logistica_seriales_asociados
+
+# -------------------------------------------------------------------
+# 3. SINÓNIMOS GLOBALES -> dd_sinonimos
+# -------------------------------------------------------------------
+
+synonyms:
+  domain:
+    inventario_materiales:
+      canonical: inventario_materiales
+      target_type: domain
+      values:
+        - inventario
+        - materiales
+        - material
+        - logística
+        - logistica
+        - bodega
+        - almacén
+        - almacen
+        - stock
+        - existencias
+        - disponibilidad
+
+  material_family:
+    materiales:
+      canonical: materiales
+      target_type: material_family
+      values:
+        - material común
+        - material comun
+        - materiales comunes
+        - material contratante
+        - materiales del contratante
+        - entregado por contratante
+        - suministrado por contratante
+
+    ferreteros:
+      canonical: ferreteros
+      target_type: material_family
+      values:
+        - ferretero
+        - ferreteros
+        - ferretería
+        - ferreteria
+        - comprado por la compañía
+        - comprado por la compania
+        - compra compañía
+        - compra compania
+
+    serializados:
+      canonical: serializados
+      target_type: material_family
+      values:
+        - serial
+        - seriales
+        - equipo
+        - equipos
+        - equipos serializados
+        - equipo serializado
+        - código serial
+        - codigo serial
+        - placa
+        - imei
+        - mac
+
+  operations:
+    stock:
+      canonical: stock_query
+      target_type: intent
+      values:
+        - stock
+        - saldo
+        - saldos
+        - existencia
+        - existencias
+        - disponible
+        - disponibles
+        - inventario actual
+        - en bodega
+
+    entrada:
+      canonical: movement_entry
+      target_type: movement_type
+      values:
+        - entrada
+        - entradas
+        - ingreso
+        - ingresos
+        - recibido
+        - recibidos
+        - recepción
+        - recepcion
+
+    entrega:
+      canonical: movement_delivery
+      target_type: movement_type
+      values:
+        - entrega
+        - entregas
+        - salida
+        - salidas
+        - despacho
+        - despachado
+        - asignado
+        - asignación
+        - asignacion
+
+    devolucion:
+      canonical: movement_return
+      target_type: movement_type
+      values:
+        - devolución
+        - devolucion
+        - devoluciones
+        - retorno
+        - retornos
+        - reintegro
+
+    consumo:
+      canonical: movement_consumption
+      target_type: movement_type
+      values:
+        - consumo
+        - consumos
+        - consumido
+        - gastado
+        - utilizado
+        - uso
+
+    cobro:
+      canonical: movement_charge
+      target_type: movement_type
+      values:
+        - cobro
+        - cobros
+        - cobrado
+        - facturado
+        - pendiente de cobro
+
+    traslado:
+      canonical: movement_transfer
+      target_type: movement_type
+      values:
+        - traslado
+        - traslados
+        - transferido
+        - transferencia
+        - movimiento entre bodegas
+
+    trazabilidad:
+      canonical: traceability_query
+      target_type: intent
+      values:
+        - trazabilidad
+        - historial
+        - historia
+        - seguimiento
+        - rastreo
+        - dónde está
+        - donde esta
+        - ubicación
+        - ubicacion
+
+    grouping:
+      canonical: group_by
+      target_type: operator
+      values:
+        - por
+        - agrupado por
+        - discriminado por
+        - separado por
+        - distribuido por
+        - consolidado por
+
+# -------------------------------------------------------------------
+# 4. TABLAS Y CAMPOS -> dd_tablas / dd_campos
+# Nota: completar nombres reales de columnas si difieren.
+# -------------------------------------------------------------------
+
+tables:
+  base_codigos:
+    domain_code: inventario_materiales
+    business_name: Catálogo de materiales y ferreteros
+    material_family: materiales_y_ferreteros
+    primary_role: catalog
+    description: Catálogo base de códigos de materiales comunes y ferreteros.
+    sync_to_dd_tablas: true
+    columns:
+      codigo:
+        data_type: string
+        required: true
+        semantic_role: material_code
+        business_concepts: [material_identity]
+        synonyms: [codigo, código, cod, referencia, código material, codigo material]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+        sync_to_dd_campos: true
+
+      descripcion:
+        data_type: string
+        required: false
+        semantic_role: material_description
+        business_concepts: [material_identity, material_search]
+        synonyms: [descripcion, descripción, material, nombre material, descripción material]
+        allowed_operations: [select, filter, search, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+        sync_to_dd_campos: true
+
+      tipo:
+        data_type: string
+        required: false
+        semantic_role: material_family
+        business_concepts: [material_classification, contractor_vs_company_material]
+        synonyms: [tipo, familia, clase, material, ferretero, tipo material]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+        missing_metadata_allowed: true
+        note: Confirmar si esta columna existe físicamente o si el tipo se deduce por otra columna.
+
+      medida:
+        data_type: string
+        required: false
+        semantic_role: unit_of_measure
+        business_concepts: [measurement]
+        synonyms: [unidad, medida, unidad de medida]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+        missing_metadata_allowed: true
+
+  logistica_movimientos_entrada:
+    domain_code: inventario_materiales
+    business_name: Movimientos de entrada
+    material_family: materiales_y_ferreteros
+    primary_role: movement
+    movement_type: entrada
+    description: Entradas o ingresos de materiales a bodega.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: movement_id
+        business_concepts: [movement_identity]
+        synonyms: [id, identificador, movimiento]
+        allowed_operations: [select, filter]
+        is_selectable: true
+
+      codigo:
+        data_type: string
+        semantic_role: material_code
+        business_concepts: [material_identity]
+        synonyms: [codigo, código, material, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      cantidad:
+        data_type: number
+        semantic_role: quantity
+        business_concepts: [quantity, stock_calculation]
+        synonyms: [cantidad, unidades, qty]
+        allowed_operations: [select, sum, avg, filter]
+        is_metric: true
+        is_selectable: true
+
+      f_consumo:
+        data_type: date
+        semantic_role: movement_date
+        business_concepts: [movement_timing]
+        synonyms: [fecha, fecha entrada, fecha ingreso, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_selectable: true
+        is_time_dimension: true
+
+      movimiento:
+        data_type: string
+        semantic_role: movement_type
+        business_concepts: [movement_classification, stock_calculation]
+        synonyms: [movimiento, tipo movimiento, ingreso, entrada]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [ENTRADA]
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_stock]
+        synonyms: [bodega, almacen, sede, ubicacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      estado:
+        data_type: string
+        semantic_role: movement_status
+        business_concepts: [movement_classification, transfer]
+        synonyms: [estado, traslado bodega, estado movimiento]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: ["", traslado_bodega]
+
+      comentario:
+        data_type: text
+        semantic_role: movement_comment
+        business_concepts: [transfer_traceability]
+        synonyms: [comentario, observacion, observacion traslado]
+        allowed_operations: [select, search]
+        is_selectable: true
+
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_location]
+        synonyms: [bodega, almacén, almacen, sede, ubicación, ubicacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      cedula:
+        data_type: string
+        semantic_role: responsible_person
+        business_concepts: [movement_responsibility]
+        synonyms: [responsable, usuario, quien recibió, quien recibio, recibido por]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, mÃ³vil, cuadrilla, brigada, asignacion, asignaciÃ³n]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      proveedor:
+        data_type: string
+        semantic_role: supplier
+        synonyms: [proveedor, tercero proveedor]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      compra:
+        data_type: string
+        semantic_role: purchase_reference
+        synonyms: [compra, orden compra, oc]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      documento:
+        data_type: string
+        semantic_role: supporting_document
+        synonyms: [documento, soporte, acta, spa]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      origen:
+        data_type: string
+        semantic_role: source_reference
+        synonyms: [origen, fuente, compra origen]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  logistica_movimientos_entrega:
+    domain_code: inventario_materiales
+    business_name: Movimientos de entrega
+    material_family: materiales_y_ferreteros
+    primary_role: movement
+    movement_type: entrega
+    description: Entregas o salidas de materiales desde bodega.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: movement_id
+        allowed_operations: [select, filter]
+
+      codigo:
+        data_type: string
+        semantic_role: material_code
+        business_concepts: [material_identity]
+        synonyms: [codigo, código, material, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      cantidad:
+        data_type: number
+        semantic_role: quantity
+        business_concepts: [quantity, stock_calculation]
+        synonyms: [cantidad, unidades, qty]
+        allowed_operations: [select, sum, avg, filter]
+        is_metric: true
+
+      f_consumo:
+        data_type: date
+        semantic_role: movement_date
+        business_concepts: [movement_timing]
+        synonyms: [fecha, fecha entrega, fecha salida, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_location]
+        synonyms: [bodega, almacén, almacen, sede, ubicación, ubicacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      entregado_a:
+        data_type: string
+        semantic_role: recipient
+        business_concepts: [movement_responsibility]
+        synonyms: [entregado a, recibido por, técnico, tecnico, cuadrilla, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      area:
+        data_type: string
+        semantic_role: organizational_dimension
+        business_concepts: [organizational_distribution]
+        synonyms: [area, área, departamento, dependencia, unidad]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      proyecto:
+        data_type: string
+        semantic_role: project_dimension
+        synonyms: [proyecto, eri]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      destino:
+        data_type: string
+        semantic_role: destination_reference
+        synonyms: [destino, hacia, area destino]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  logistica_movimientos_devolucion:
+    domain_code: inventario_materiales
+    business_name: Movimientos de devolución
+    material_family: materiales_y_ferreteros
+    primary_role: movement
+    movement_type: devolucion
+    description: Devoluciones de materiales hacia bodega.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: movement_id
+        allowed_operations: [select, filter]
+
+      codigo:
+        data_type: string
+        semantic_role: material_code
+        synonyms: [codigo, código, material, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      cantidad:
+        data_type: number
+        semantic_role: quantity
+        business_concepts: [quantity, stock_calculation]
+        synonyms: [cantidad, unidades]
+        allowed_operations: [select, sum, avg, filter]
+        is_metric: true
+
+      f_consumo:
+        data_type: date
+        semantic_role: movement_date
+        synonyms: [fecha, fecha devolución, fecha devolucion, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        synonyms: [bodega, almacén, almacen, sede]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      cedula:
+        data_type: string
+        semantic_role: responsible_person
+        synonyms: [cedula, devuelto por, responsable, tecnico, usuario]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      devuelto_por:
+        data_type: string
+        semantic_role: responsible_person
+        synonyms: [devuelto por, responsable, técnico, tecnico, usuario]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  logistica_movimientos_consumo:
+    domain_code: inventario_materiales
+    business_name: Movimientos de consumo
+    material_family: materiales_y_ferreteros
+    primary_role: movement
+    movement_type: consumo
+    description: Consumos registrados de materiales.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: movement_id
+        allowed_operations: [select, filter]
+
+      codigo:
+        data_type: string
+        semantic_role: material_code
+        synonyms: [codigo, código, material, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      cantidad:
+        data_type: number
+        semantic_role: quantity
+        business_concepts: [quantity, stock_calculation, consumption]
+        synonyms: [cantidad, unidades, consumo]
+        allowed_operations: [select, sum, avg, filter]
+        is_metric: true
+
+      f_consumo:
+        data_type: date
+        semantic_role: movement_date
+        synonyms: [fecha, fecha consumo, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+
+      movimiento:
+        data_type: string
+        semantic_role: movement_type
+        business_concepts: [movement_classification, consumption]
+        synonyms: [movimiento, consumo]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [CONSUMO]
+
+      estado:
+        data_type: string
+        semantic_role: movement_status
+        business_concepts: [movement_classification, consumption]
+        synonyms: [estado, cerrado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [CERRADO]
+
+      orden_trabajo:
+        data_type: string
+        semantic_role: work_order
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [orden trabajo, ot, orden_trabajo]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      tipo:
+        data_type: string
+        semantic_role: billing_activity_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [tipo, codigo facturacion, actividad]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_location]
+        synonyms: [bodega, operacion_hfc]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      responsable:
+        data_type: string
+        semantic_role: responsible_person
+        synonyms: [responsable, técnico, tecnico, usuario, cuadrilla]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [móvil, movil, unidad móvil, unidad movil]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      tecnico:
+        data_type: string
+        semantic_role: technician
+        synonyms: [tecnico, tecnico instalador, responsable tecnico]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      proyecto:
+        data_type: string
+        semantic_role: project_dimension
+        synonyms: [proyecto, eri]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      area:
+        data_type: string
+        semantic_role: organizational_dimension
+        synonyms: [area, departamento, dependencia]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  logistica_movimientos_cobro:
+    domain_code: inventario_materiales
+    business_name: Movimientos de cobro
+    material_family: materiales_y_ferreteros
+    primary_role: movement
+    movement_type: cobro
+    description: Cobros asociados a materiales.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: movement_id
+        allowed_operations: [select, filter]
+
+      codigo:
+        data_type: string
+        semantic_role: material_code
+        synonyms: [codigo, código, material, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      cantidad:
+        data_type: number
+        semantic_role: quantity
+        business_concepts: [quantity, charge]
+        synonyms: [cantidad, unidades, cobro]
+        allowed_operations: [select, sum, avg, filter]
+        is_metric: true
+
+      f_consumo:
+        data_type: date
+        semantic_role: movement_date
+        synonyms: [fecha, fecha cobro, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+
+      bodega:
+        data_type: string
+        semantic_role: warehouse
+        business_concepts: [warehouse_stock, charge_discount]
+        synonyms: [bodega, almacen, operacion_hfc]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      estado:
+        data_type: string
+        semantic_role: charge_status
+        synonyms: [estado, estado cobro, cobrado, pendiente, pendiente de cobro]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      tercero:
+        data_type: string
+        semantic_role: third_party
+        synonyms: [tercero, contratista, proveedor, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      estado_cobro:
+        data_type: string
+        semantic_role: charge_status
+        synonyms: [estado, estado cobro, cobrado, pendiente, pendiente de cobro]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      factura:
+        data_type: string
+        semantic_role: invoice_reference
+        synonyms: [factura, facturacion, documento factura]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      proyecto:
+        data_type: string
+        semantic_role: project_dimension
+        synonyms: [proyecto, eri]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      documento:
+        data_type: string
+        semantic_role: supporting_document
+        synonyms: [documento, soporte, factura soporte]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  logistica_movimientos_traslado:
+    domain_code: inventario_materiales
+    business_name: Movimientos de traslado
+    material_family: materiales_y_ferreteros
+    primary_role: movement
+    movement_type: traslado
+    description: Traslados de materiales entre bodegas, sedes o responsables.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: movement_id
+        allowed_operations: [select, filter]
+
+      codigo:
+        data_type: string
+        semantic_role: material_code
+        synonyms: [codigo, código, material, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      cantidad:
+        data_type: number
+        semantic_role: quantity
+        business_concepts: [quantity, stock_calculation, transfer]
+        synonyms: [cantidad, unidades, traslado]
+        allowed_operations: [select, sum, avg, filter]
+        is_metric: true
+
+      f_consumo:
+        data_type: date
+        semantic_role: movement_date
+        synonyms: [fecha, fecha traslado, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+
+      movimiento:
+        data_type: string
+        semantic_role: movement_type
+        business_concepts: [movement_classification, transfer, stock_calculation]
+        synonyms: [movimiento, traslado bodega, traslado aliado, traslado otro aliado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: [TRASLADO_BODEGA, TRASLADOS_OTRO_ALIADO]
+
+      estado:
+        data_type: string
+        semantic_role: movement_status
+        business_concepts: [movement_classification, transfer]
+        synonyms: [estado, traslado bodega]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values: ["", traslado_bodega]
+
+      comentario:
+        data_type: text
+        semantic_role: movement_comment
+        business_concepts: [transfer_traceability]
+        synonyms: [comentario, observacion, observacion traslado]
+        allowed_operations: [select, search]
+        is_selectable: true
+
+      cedula:
+        data_type: string
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, cuadrilla, brigada, asignacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      bodega:
+        data_type: string
+        semantic_role: source_warehouse
+        synonyms: [bodega origen, origen, sale de, bodega salida]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      bodega_destino:
+        data_type: string
+        semantic_role: destination_warehouse
+        synonyms: [bodega destino, destino, entra a, bodega llegada]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+        sync_to_dd_campos: false
+        caveat: No existe columna fisica bodega_destino; el destino de traslado bodega se infiere solo desde el doble registro entrada/traslado.
+
+      documento:
+        data_type: string
+        semantic_role: supporting_document
+        synonyms: [documento, acta, spa, soporte traslado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      tipo_movimiento:
+        data_type: string
+        semantic_role: movement_classification
+        synonyms: [tipo movimiento, traslado interno, traslado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  base_codigo_seriales:
+    domain_code: inventario_materiales
+    business_name: Catálogo de equipos serializados
+    material_family: serializados
+    primary_role: serial_catalog
+    description: Catálogo de códigos para equipos controlados por serial.
+    sync_to_dd_tablas: true
+    columns:
+      codigo:
+        data_type: string
+        required: true
+        semantic_role: equipment_code
+        business_concepts: [equipment_identity]
+        synonyms: [codigo, código, referencia, codigo equipo, código equipo]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      descripcion:
+        data_type: string
+        semantic_role: equipment_description
+        business_concepts: [equipment_identity, equipment_search]
+        synonyms: [equipo, descripcion, descripción, tipo equipo, nombre equipo]
+        allowed_operations: [select, filter, search, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      familia:
+        data_type: string
+        semantic_role: equipment_family
+        business_concepts: [equipment_classification]
+        synonyms: [familia, categoria, categoría, tipo]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+  cinco_base_de_personal:
+    domain_code: inventario_materiales
+    schema_name: bd_c3nc4s1s
+    business_name: Base oficial de personal
+    material_family: contexto_operativo
+    primary_role: employee_context
+    description: Tabla oficial para enriquecer consultas logisticas por cedula o movil.
+    sync_to_dd_tablas: true
+    columns:
+      cedula:
+        data_type: string
+        required: true
+        semantic_role: identification_document
+        synonyms: [cedula, identificacion, documento, empleado, tecnico, responsable]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+      nombre:
+        data_type: string
+        semantic_role: employee_name
+        synonyms: [nombre, nombres]
+        allowed_operations: [select, filter, group_by]
+        is_filterable: true
+      apellido:
+        data_type: string
+        semantic_role: employee_last_name
+        synonyms: [apellido, apellidos]
+        allowed_operations: [select, filter, group_by]
+        is_filterable: true
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, mÃ³vil, cuadrilla, brigada, asignacion, asignaciÃ³n]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+      area:
+        data_type: string
+        semantic_role: organizational_dimension
+        synonyms: [area, Ã¡rea]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      carpeta:
+        data_type: string
+        semantic_role: folder_dimension
+        synonyms: [carpeta]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      cargo:
+        data_type: string
+        semantic_role: job_title
+        synonyms: [cargo]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      tipo_labor:
+        data_type: string
+        semantic_role: labor_type
+        synonyms: [tipo labor, tipo_labor]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      estado:
+        data_type: string
+        semantic_role: employee_status
+        synonyms: [estado, estado empleado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+      codigo_sap:
+        data_type: string
+        semantic_role: sap_employee_code
+        synonyms: [codigo sap, cÃ³digo sap]
+        allowed_operations: [select, filter, group_by]
+        is_filterable: true
+
+  logistica_base_seriales:
+    domain_code: inventario_materiales
+    business_name: Base de seriales y movimientos internos
+    material_family: serializados
+    primary_role: serial_movement
+    description: >
+      Tabla principal para control de equipos serializados, movimientos internos,
+      ingreso, móvil, consumo móvil y estado operativo del serial.
+    sync_to_dd_tablas: true
+    columns:
+      numero_serial:
+        data_type: string
+        required: true
+        semantic_role: serial_number
+        business_concepts: [serial_identity, traceability]
+        synonyms: [serial, serial equipo, número serial, numero serial]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+        is_selectable: true
+
+      codigo:
+        data_type: string
+        semantic_role: equipment_code
+        business_concepts: [equipment_identity]
+        synonyms: [codigo, código, referencia, equipo]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      estado:
+        data_type: string
+        semantic_role: equipment_status
+        business_concepts: [serial_status, risk_detection]
+        synonyms: [estado, situación, situacion, condición, condicion, estado equipo]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        confirmed_business_values:
+          - BODEGA INGRESO
+          - MOVIL
+          - ASOCIADO MOVIL
+          - BODEGA DEVOLUCION
+          - GARANTIA CINCO
+          - SERIAL-PERDIDO-COBRO
+          - MOVIL - RECHAZADO
+          - MOVIL-MAL-ASOCIADO
+          - MOVIL - PENDIENTE
+
+      movimiento_sap:
+        data_type: string
+        semantic_role: serial_movement_type
+        business_concepts: [serial_movement, mobile_consumption]
+        synonyms: [movimiento, ingreso, movil, móvil, consumo movil, consumo móvil, traslado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      fecha:
+        data_type: date
+        semantic_role: movement_date
+        business_concepts: [movement_timing]
+        synonyms: [fecha, fecha movimiento, mes, año, periodo]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+
+      historial:
+        data_type: json_text
+        semantic_role: serial_history
+        business_concepts: [traceability, serial_history]
+        synonyms: [historial, kardex serial, trazabilidad serial]
+        allowed_operations: [select]
+        is_selectable: true
+        caveat: Fuente de trazabilidad cronologica; no reemplaza estado actual, que se toma de estado.
+
+      ubicacion_bodega:
+        data_type: string
+        semantic_role: location
+        business_concepts: [warehouse_location, current_location]
+        synonyms: [ubicación, ubicacion, donde esta, dónde está, bodega, sitio]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        business_concepts: [mobile_assignment]
+        synonyms: [móvil, movil, unidad móvil, unidad movil]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      cedula:
+        data_type: string
+        semantic_role: responsible_person
+        business_concepts: [custody, movement_responsibility]
+        synonyms: [responsable, técnico, tecnico, usuario, custodio]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      validado:
+        data_type: boolean
+        semantic_role: validation_status
+        business_concepts: [validation, mobile_consumption_pending_validation]
+        synonyms: [validado, sin validar, pendiente validar, pendiente de validación, pendiente de validacion]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+        sync_to_dd_campos: false
+        caveat: No existe columna fisica validado en logistica_base_seriales; no habilitar consumo movil sin validar hasta tener mapping real.
+
+  logistica_seriales_asociados:
+    domain_code: inventario_materiales
+    business_name: Seriales asociados o trasladados
+    material_family: serializados
+    primary_role: serial_association
+    description: Equipos asociados o trasladados que salen de bodega.
+    sync_to_dd_tablas: true
+    columns:
+      id:
+        data_type: integer
+        semantic_role: association_id
+        allowed_operations: [select, filter]
+
+      numero_serial:
+        data_type: string
+        semantic_role: serial_number
+        business_concepts: [serial_identity, traceability]
+        synonyms: [serial, serial equipo]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      codigo:
+        data_type: string
+        semantic_role: equipment_code
+        synonyms: [codigo, código, equipo, referencia]
+        allowed_operations: [select, filter, group_by, join, search]
+        is_groupable: true
+        is_filterable: true
+
+      fecha:
+        data_type: date
+        semantic_role: association_date
+        business_concepts: [association_timing]
+        synonyms: [fecha asociación, fecha asociacion, fecha traslado, fecha salida, mes, año]
+        allowed_operations: [select, filter, group_by_month, group_by_year, date_part_month, date_part_year]
+        is_filterable: true
+        is_time_dimension: true
+        missing_metadata_allowed: true
+
+      cedula:
+        data_type: string
+        semantic_role: association_target
+        business_concepts: [assignment, custody]
+        synonyms: [asociado a, asignado a, trasladado a, responsable, móvil, movil]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      bodega:
+        data_type: string
+        semantic_role: source_warehouse
+        business_concepts: [warehouse_location, warehouse_exit]
+        synonyms: [bodega salida, bodega origen, sale de bodega]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+      estado:
+        data_type: string
+        semantic_role: association_status
+        business_concepts: [association_status]
+        synonyms: [estado, asociado, trasladado, retirado]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
+  a_promedios_consumo:
+    domain_code: inventario_materiales
+    business_name: Promedios de consumo por actividad
+    material_family: materiales_y_ferreteros
+    primary_role: reference
+    description: Promedios validados para comparar consumo tecnico contra facturacion; no descuenta saldo.
+    sync_to_dd_tablas: true
+    columns:
+      codigo:
+        data_type: integer
+        semantic_role: material_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [codigo, codigo material]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      familia_mat:
+        data_type: string
+        semantic_role: material_family
+        synonyms: [familia, familia material]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+
+      codigo_facturacion:
+        data_type: string
+        semantic_role: billing_activity_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [codigo facturacion, actividad, codigo actividad]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      promedio:
+        data_type: number
+        semantic_role: average_quantity
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [promedio, cantidad promedio]
+        allowed_operations: [select, sum, avg]
+        is_metric: true
+
+  facturacion_facturado_wfm:
+    domain_code: inventario_materiales
+    schema_name: bd_c3nc4s1s
+    business_name: Facturacion WFM
+    material_family: materiales_y_ferreteros
+    primary_role: billing_reference
+    description: Fuente de facturacion para comparacion con consumo en operacion_hfc. Prohibido usar como descuento de inventario.
+    sync_to_dd_tablas: true
+    columns:
+      idorden_de_trabajo:
+        data_type: integer
+        semantic_role: work_order
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [orden_trabajo, orden trabajo, ot]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      codigo:
+        data_type: string
+        semantic_role: billing_activity_code
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [codigo facturacion, codigo actividad, actividad]
+        allowed_operations: [select, filter, group_by, join]
+        is_groupable: true
+        is_filterable: true
+
+      cantidad_actividad:
+        data_type: number
+        semantic_role: billed_activity_quantity
+        business_concepts: [consumption_billing_reconciliation]
+        synonyms: [cantidad actividad, cantidad facturada]
+        allowed_operations: [select, sum, avg]
+        is_metric: true
+
+# -------------------------------------------------------------------
+# 5. RELACIONES -> dd_relaciones
+# -------------------------------------------------------------------
+
+relationships:
+  materiales_entrada_codigo_to_catalog:
+    from_table: logistica_movimientos_entrada
+    from_column: codigo
+    to_table: base_codigos
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer movimientos de entrada con descripción/tipo/unidad del material
+    sync_to_dd_relaciones: true
+
+  materiales_entrega_codigo_to_catalog:
+    from_table: logistica_movimientos_entrega
+    from_column: codigo
+    to_table: base_codigos
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer entregas con descripción/tipo/unidad del material
+    sync_to_dd_relaciones: true
+
+  materiales_devolucion_codigo_to_catalog:
+    from_table: logistica_movimientos_devolucion
+    from_column: codigo
+    to_table: base_codigos
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer devoluciones con descripción/tipo/unidad del material
+    sync_to_dd_relaciones: true
+
+  materiales_consumo_codigo_to_catalog:
+    from_table: logistica_movimientos_consumo
+    from_column: codigo
+    to_table: base_codigos
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer consumos con descripción/tipo/unidad del material
+    sync_to_dd_relaciones: true
+
+  materiales_cobro_codigo_to_catalog:
+    from_table: logistica_movimientos_cobro
+    from_column: codigo
+    to_table: base_codigos
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer cobros con descripción/tipo/unidad del material
+    sync_to_dd_relaciones: true
+
+  materiales_traslado_codigo_to_catalog:
+    from_table: logistica_movimientos_traslado
+    from_column: codigo
+    to_table: base_codigos
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer traslados con descripción/tipo/unidad del material
+    sync_to_dd_relaciones: true
+
+  consumo_codigo_to_promedios:
+    from_table: logistica_movimientos_consumo
+    from_column: codigo
+    to_table: a_promedios_consumo
+    to_column: codigo
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: comparar consumo real contra promedio por codigo, usando COLLATE cuando la DB lo requiera
+    sync_to_dd_relaciones: true
+
+  facturacion_codigo_to_promedios:
+    from_table: facturacion_facturado_wfm
+    from_column: codigo
+    to_table: a_promedios_consumo
+    to_column: codigo_facturacion
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: mapear actividad facturada contra promedio de consumo; no descuenta saldo
+    sync_to_dd_relaciones: true
+
+  facturacion_orden_to_consumo:
+    from_table: facturacion_facturado_wfm
+    from_column: idorden_de_trabajo
+    to_table: logistica_movimientos_consumo
+    to_column: orden_trabajo
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: comparar facturacion y consumo por orden_trabajo en operacion_hfc; no descuenta saldo
+    sync_to_dd_relaciones: true
+
+  serial_codigo_to_catalog:
+    from_table: logistica_base_seriales
+    from_column: codigo
+    to_table: base_codigo_seriales
+    to_column: codigo
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer seriales con descripción/categoría del equipo
+    sync_to_dd_relaciones: true
+
+  serial_asociado_to_serial_base:
+    from_table: logistica_seriales_asociados
+    from_column: numero_serial
+    to_table: logistica_base_seriales
+    to_column: numero_serial
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: conectar asociaciones/salidas con estado e historial del serial
+    sync_to_dd_relaciones: true
+
+  entrega_cedula_to_personal:
+    from_table: logistica_movimientos_entrega
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer entregas con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  entrega_movil_to_personal:
+    from_table: logistica_movimientos_entrega
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer entregas con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  consumo_cedula_to_personal:
+    from_table: logistica_movimientos_consumo
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer consumos con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  consumo_movil_to_personal:
+    from_table: logistica_movimientos_consumo
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer consumos con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  cobro_cedula_to_personal:
+    from_table: logistica_movimientos_cobro
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer cobros con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  cobro_movil_to_personal:
+    from_table: logistica_movimientos_cobro
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer cobros con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  devolucion_cedula_to_personal:
+    from_table: logistica_movimientos_devolucion
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer devoluciones con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  devolucion_movil_to_personal:
+    from_table: logistica_movimientos_devolucion
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer devoluciones con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+  serial_cedula_to_personal:
+    from_table: logistica_base_seriales
+    from_column: cedula
+    to_table: cinco_base_de_personal
+    to_column: cedula
+    relationship_type: many_to_one
+    allowed: true
+    join_purpose: enriquecer seriales con datos oficiales del empleado por cedula
+    sync_to_dd_relaciones: true
+
+  serial_movil_to_personal:
+    from_table: logistica_base_seriales
+    from_column: movil
+    to_table: cinco_base_de_personal
+    to_column: movil
+    relationship_type: many_to_many
+    allowed: true
+    join_purpose: enriquecer seriales con integrantes oficiales de la movil
+    sync_to_dd_relaciones: true
+
+# -------------------------------------------------------------------
+# 6. CONCEPTOS DE NEGOCIO -> metadata semántica
+# -------------------------------------------------------------------
+
+business_concepts:
+  stock_actual:
+    description: Existencia disponible actual calculada a partir de movimientos.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: stock_query
+    semantic_formula:
+      description: >
+        El stock se debe calcular con movimientos reales. Negocio confirma que
+        el cobro descuenta inventario en el momento del cobro aunque la factura
+        se genere despues. Facturacion no descuenta inventario. Traslado bodega
+        se representa por doble registro: salida en logistica_movimientos_traslado
+        y entrada en logistica_movimientos_entrada. Traslado a otro aliado sale
+        del inventario propio.
+      confirmed_formula: entradas - entregas + devoluciones - cobros - traslados_otro_aliado
+      stock_bodega_formula: entradas - entregas + devoluciones - cobros - traslados_otro_aliado +/- traslados_bodega
+      stock_movil_formula: entregas - consumo - cobros - devoluciones
+      bajas_materiales: 0
+      garantias_materiales: 0
+      requires_business_validation: false
+      requires_db_validation: false
+      db_validation_status: passed_2026_05_08
+    required_tables:
+      - logistica_movimientos_entrada
+      - logistica_movimientos_entrega
+      - logistica_movimientos_devolucion
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+      - logistica_movimientos_traslado
+    metrics:
+      - saldo
+      - entradas
+      - entregas
+      - devoluciones
+      - consumos
+      - cobros
+      - traslados
+
+  trazabilidad_serial:
+    description: Historia completa de un equipo controlado por serial.
+    applies_to: [serializados]
+    preferred_intent: traceability_query
+    primary_identifier:
+      table: logistica_base_seriales
+      field: serial
+    required_tables:
+      - logistica_base_seriales
+      - logistica_seriales_asociados
+      - base_codigo_seriales
+    expected_output:
+      - serial
+      - codigo
+      - descripcion
+      - estado_actual
+      - ubicacion_actual
+      - fecha_estado_actual
+      - historial
+
+  consumo_movil_sin_validar:
+    description: Equipos o materiales registrados como consumo móvil pendientes de validación.
+    applies_to: [serializados]
+    preferred_intent: risk_detection
+    maps_to:
+      table: logistica_base_seriales
+      movement_field: movimiento
+      validation_field: validado
+    filters:
+      movimiento: consumo_movil
+      validado: false
+    risk_level: medium
+    expected_output:
+      - serial
+      - codigo
+      - movimiento
+      - fecha
+      - responsable
+      - riesgo
+      - accion_sugerida
+
+  materiales_mas_consumidos:
+    description: Ranking de materiales por cantidad consumida.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: consumption_query
+    metric:
+      table: logistica_movimientos_consumo
+      field: cantidad
+      aggregation: sum
+    default_group_by: material
+    expected_output:
+      - codigo
+      - descripcion
+      - cantidad_consumida
+
+  salidas_de_bodega_serializados:
+    description: Seriales asociados o trasladados que salen de bodega.
+    applies_to: [serializados]
+    preferred_intent: association_query
+    primary_table: logistica_seriales_asociados
+    expected_output:
+      - serial
+      - codigo
+      - fecha_asociacion
+      - asociado_a
+      - bodega_salida
+      - estado_asociacion
+
+  historial_movimientos_completo:
+    description: Historial completo de ingresos y movimientos para codigo o serial sin revisar kardex manualmente.
+    applies_to: [materiales, ferreteros, serializados]
+    preferred_intent: movement_history
+    required_tables:
+      - logistica_movimientos_entrada
+      - logistica_movimientos_entrega
+      - logistica_movimientos_devolucion
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+      - logistica_movimientos_traslado
+      - logistica_base_seriales
+      - logistica_seriales_asociados
+    expected_output:
+      - identificador_consultado
+      - tipo_identificador
+      - linea_tiempo
+      - ultimo_movimiento
+      - tablas_fuente
+
+  kardex_consolidado:
+    description: Vista conceptual unificada del kardex por codigo o material.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: movement_history
+    required_tables:
+      - logistica_movimientos_entrada
+      - logistica_movimientos_entrega
+      - logistica_movimientos_devolucion
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+      - logistica_movimientos_traslado
+    expected_output:
+      - codigo
+      - fecha
+      - tipo_movimiento
+      - cantidad
+      - origen
+      - destino
+
+  log_consolidado:
+    description: Historial unificado de eventos logisticos desde distintas tablas de movimiento y asociaciones de seriales.
+    applies_to: [materiales, ferreteros, serializados]
+    preferred_intent: movement_history
+    required_tables:
+      - logistica_movimientos_entrada
+      - logistica_movimientos_entrega
+      - logistica_movimientos_devolucion
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+      - logistica_movimientos_traslado
+      - logistica_seriales_asociados
+    expected_output:
+      - evento
+      - fecha
+      - tipo_movimiento
+      - origen
+      - destino
+      - referencia_documental
+
+  consumo_tecnico:
+    description: Consumo tecnico operativo asociado a tecnico, movil o proyecto, sujeto a validacion estructural.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: consumption_query
+    primary_table: logistica_movimientos_consumo
+    expected_output:
+      - codigo
+      - cantidad
+      - tecnico
+      - movil
+      - proyecto
+    data_readiness:
+      implementation_status: pending_db_validation
+
+  facturacion_materiales:
+    description: Facturacion asociada a materiales consumidos o cobrados, pendiente de validar contra DB o fuente externa.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: charge_query
+    expected_output:
+      - factura
+      - codigo
+      - cantidad
+      - fecha_facturacion
+      - proyecto
+    data_readiness:
+      requires_external_source: true
+      implementation_status: pending_integration_or_db_validation
+
+  consumo_vs_facturacion:
+    description: Conciliacion entre consumo tecnico, consumo final y facturacion para identificar pendientes o diferencias.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: reconciliation_query
+    required_tables:
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+    expected_output:
+      - codigo
+      - consumo_tecnico
+      - consumo_facturado
+      - pendiente_facturar
+      - diferencia
+    data_readiness:
+      requires_external_source: true
+      implementation_status: pending_integration_or_db_validation
+
+  conciliacion_logistica:
+    description: Consulta comparativa entre ingresos, stock bodega, stock movil y facturacion marcada por negocio como no aplicable.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: reconciliation_query
+    semantic_formula:
+      description: Negocio confirmo que el comparativo ingresos - stock_bodega - stock_movil - facturacion no aplica como formula oficial.
+      status: not_applicable
+      rejected_formula: ingresos - stock_bodega - stock_movil - facturacion
+      requires_business_validation: false
+    expected_output:
+      - limitacion_semantica
+      - datos_que_si_pueden_consultarse
+      - siguiente_accion_recomendada
+    data_readiness:
+      implementation_status: semantic_limitation_only
+
+  conciliacion_sap_kardex:
+    description: Cruce de saldo SAP contra kardex de consumo o movimientos logisticos.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: external_reconciliation_query
+    expected_output:
+      - codigo
+      - saldo_sap
+      - saldo_kardex
+      - diferencia
+      - fecha_corte
+    data_readiness:
+      requires_external_source: true
+      implementation_status: external_source_pending
+
+  acta_logistica:
+    description: Documento operativo derivado de ingreso, traslado, entrega, conciliacion o devolucion.
+    applies_to: [materiales, ferreteros, serializados]
+    preferred_intent: document_generation
+    expected_output:
+      - tipo_acta
+      - movimiento_origen
+      - datos_base
+      - estado_generacion
+    data_readiness:
+      document_generation_status: pending
+
+  documento_spa:
+    description: Documento tipo SPA para soporte de ingreso o traslado.
+    applies_to: [materiales, ferreteros, serializados]
+    preferred_intent: document_generation
+    expected_output:
+      - tipo_documento
+      - movimiento_origen
+      - soporte
+      - estado_generacion
+    data_readiness:
+      document_generation_status: pending
+
+  promedios_cpe_eri:
+    description: Informe de promedios por proyecto ERI y CPEs con CPE pendiente de definicion estructural.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: report_generation
+    expected_output:
+      - proyecto
+      - promedio_consumo
+      - cpe
+      - observacion_metadata
+    data_readiness:
+      missing_metadata:
+        - cpe
+      implementation_status: pending_db_validation
+
+  ingreso_compras_logistica:
+    description: Flujo compra a ingreso, llegada a logistica y notificacion de llegada.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: notification_query
+    expected_output:
+      - compra
+      - codigo
+      - cantidad
+      - estado_recepcion
+      - notificacion
+    data_readiness:
+      requires_external_source: true
+      implementation_status: pending_integration
+
+  entrega_consumo_facturacion:
+    description: Pipeline logistico entre entrega, consumo tecnico y facturacion final para detectar diferencias.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: reconciliation_query
+    required_tables:
+      - logistica_movimientos_entrega
+      - logistica_movimientos_consumo
+      - logistica_movimientos_cobro
+    expected_output:
+      - codigo
+      - entregado
+      - consumido
+      - facturado
+      - diferencia
+    data_readiness:
+      requires_external_source: true
+      implementation_status: pending_integration_or_db_validation
+
+  distribucion_asignacion:
+    description: Distribucion y asignacion de material o equipos a tecnico, movil o proyecto.
+    applies_to: [materiales, ferreteros, serializados]
+    preferred_intent: assignment_distribution_query
+    expected_output:
+      - asignado_a
+      - tipo_asignacion
+      - proyecto
+      - estado
+    data_readiness:
+      implementation_status: pending_db_validation
+
+  reporte_saldos_area:
+    description: Reporte empresarial de saldos por area responsable o area de consumo.
+    applies_to: [materiales, ferreteros]
+    preferred_intent: report_generation
+    expected_output:
+      - area
+      - codigo
+      - saldo
+      - responsable
+    data_readiness:
+      missing_metadata:
+        - area_responsable
+      implementation_status: pending_db_validation
+
+  alerta_ferretero_compras:
+    description: Alerta operativa para ferreteros con stock bajo o compra requerida.
+    applies_to: [ferreteros]
+    preferred_intent: alert_query
+    expected_output:
+      - codigo
+      - stock_actual
+      - punto_reposicion
+      - destinatarios_alerta
+      - accion_recomendada
+    data_readiness:
+      threshold_metadata_pending: true
+
+# -------------------------------------------------------------------
+# 7. DIMENSIONES AGRUPABLES -> group_by en dd_campos/metadata
+# -------------------------------------------------------------------
+
+groupable_dimensions:
+  material:
+    description: Agrupación por material/código/descripción.
+    synonyms: [material, producto, referencia, código, codigo]
+    canonical_fields:
+      - base_codigos.codigo
+      - base_codigos.descripcion
+      - base_codigo_seriales.codigo
+      - base_codigo_seriales.descripcion
+    allowed_operations: [group_by, filter, select]
+
+  familia_material:
+    description: "Agrupación por familia de material: materiales, ferreteros o serializados."
+    synonyms: [familia, tipo, tipo material, clase]
+    canonical_fields:
+      - base_codigos.tipo
+      - base_codigo_seriales.familia
+    allowed_operations: [group_by, filter, select]
+
+  bodega:
+    description: Agrupación por bodega, almacén, sede o ubicación logística.
+    synonyms: [bodega, almacén, almacen, sede, ubicación, ubicacion]
+    canonical_fields:
+      - logistica_movimientos_entrada.bodega
+      - logistica_movimientos_entrega.bodega
+      - logistica_movimientos_devolucion.bodega
+      - logistica_movimientos_cobro.bodega
+      - logistica_movimientos_traslado.bodega
+      - logistica_movimientos_entrada.bodega
+      - logistica_base_seriales.ubicacion_bodega
+      - logistica_seriales_asociados.bodega
+    allowed_operations: [group_by, filter, select]
+
+
+  movil:
+    description: Agrupación por móvil o unidad móvil.
+    synonyms: [móvil, movil, unidad móvil, unidad movil]
+    canonical_fields:
+      - logistica_movimientos_consumo.movil
+      - logistica_base_seriales.movil
+    allowed_operations: [group_by, filter, select]
+
+  estado:
+    description: Agrupación por estado de equipo, cobro o asociación.
+    synonyms: [estado, situación, situacion, condición, condicion]
+    canonical_fields:
+      - logistica_base_seriales.estado
+      - logistica_movimientos_cobro.estado
+      - logistica_seriales_asociados.estado
+    allowed_operations: [group_by, filter, select]
+
+  mes:
+    description: Agrupación por mes usando campos de fecha declarados.
+    synonyms: [mes, mensual, por mes]
+    canonical_fields:
+      - logistica_movimientos_entrada.f_consumo
+      - logistica_movimientos_entrega.f_consumo
+      - logistica_movimientos_devolucion.f_consumo
+      - logistica_movimientos_consumo.f_consumo
+      - logistica_movimientos_cobro.f_consumo
+      - logistica_movimientos_traslado.f_consumo
+      - logistica_base_seriales.fecha
+      - logistica_seriales_asociados.fecha
+    allowed_operations: [group_by_month, date_part_month]
+
+  proyecto:
+    description: Agrupacion por proyecto operativo o de consumo.
+    synonyms: [proyecto, eri, proyecto eri]
+    canonical_fields:
+      - logistica_movimientos_entrega.proyecto
+      - logistica_movimientos_consumo.proyecto
+      - logistica_movimientos_cobro.proyecto
+    allowed_operations: [group_by, filter, select]
+
+  area:
+    description: Agrupacion por area responsable o area de destino.
+    synonyms: [area, areas, departamento, dependencia]
+    canonical_fields:
+      - logistica_movimientos_entrega.area
+      - logistica_movimientos_consumo.area
+    allowed_operations: [group_by, filter, select]
+
+  tecnico:
+    description: Agrupacion por tecnico o responsable operativo.
+    synonyms: [tecnico, tecnico instalador, cuadrilla]
+    canonical_fields:
+      - logistica_movimientos_consumo.tecnico
+      - logistica_movimientos_entrega.entregado_a
+      - logistica_base_seriales.cedula
+    allowed_operations: [group_by, filter, select]
+
+  cedula:
+    description: Agrupacion o filtro por cedula de empleado o tecnico operativo.
+    synonyms: [cedula, documento identidad, identificacion, empleado, tecnico, responsable]
+    canonical_fields:
+      - logistica_movimientos_entrada.cedula
+      - logistica_movimientos_entrega.cedula
+      - logistica_movimientos_devolucion.cedula
+      - logistica_movimientos_consumo.cedula
+      - logistica_movimientos_cobro.cedula
+      - logistica_base_seriales.cedula
+      - cinco_base_de_personal.cedula
+    allowed_operations: [group_by, filter, select]
+
+  proveedor:
+    description: Agrupacion por proveedor asociado a compras o ingresos.
+    synonyms: [proveedor, tercero proveedor]
+    canonical_fields:
+      - logistica_movimientos_entrada.proveedor
+      - logistica_movimientos_cobro.tercero
+    allowed_operations: [group_by, filter, select]
+
+  compra:
+    description: Agrupacion por compra, orden de compra o ingreso de compra.
+    synonyms: [compra, orden compra, oc]
+    canonical_fields:
+      - logistica_movimientos_entrada.compra
+    allowed_operations: [group_by, filter, select]
+
+  factura:
+    description: Agrupacion por factura o documento de facturacion.
+    synonyms: [factura, facturacion, documento factura]
+    canonical_fields:
+      - logistica_movimientos_cobro.factura
+    allowed_operations: [group_by, filter, select]
+
+  documento:
+    description: Agrupacion por documento soporte, acta o SPA.
+    synonyms: [documento, acta, spa, soporte]
+    canonical_fields:
+      - logistica_movimientos_entrada.documento
+      - logistica_movimientos_traslado.documento
+      - logistica_movimientos_cobro.documento
+    allowed_operations: [group_by, filter, select]
+
+  tipo_movimiento:
+    description: Agrupacion por tipo de movimiento logistico consolidado.
+    synonyms: [tipo movimiento, movimiento, evento]
+    canonical_fields:
+      - logistica_base_seriales.movimiento_sap
+      - logistica_movimientos_traslado.tipo_movimiento
+    allowed_operations: [group_by, filter, select]
+
+  origen:
+    description: Agrupacion por origen logistico de un movimiento.
+    synonyms: [origen, desde, fuente]
+    canonical_fields:
+      - logistica_movimientos_traslado.bodega
+      - logistica_movimientos_entrada.origen
+    allowed_operations: [group_by, filter, select]
+
+  destino:
+    description: Agrupacion por destino logistico de un movimiento.
+    synonyms: [destino, hacia, llegada]
+    canonical_fields:
+      - logistica_movimientos_traslado.bodega_destino
+      - logistica_movimientos_entrega.destino
+    allowed_operations: [group_by, filter, select]
+
+# -------------------------------------------------------------------
+# 8. TAXONOMÍA DE INTENCIONES
+# -------------------------------------------------------------------
+
+intent_taxonomy:
+  stock_query:
+    description: Consulta sobre existencias, saldos o disponibilidad.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - stock de materiales por bodega
+      - existencias de ferreteros
+      - materiales disponibles
+
+  movement_query:
+    description: Consulta sobre movimientos logísticos.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - entradas de materiales en mayo
+      - entregas por técnico
+      - traslados por bodega
+
+  traceability_query:
+    description: Consulta de historial o ubicación de un serial/material.
+    default_strategy: sql_assisted_or_traceability_plan
+    examples:
+      - trazabilidad del serial ABC123
+      - dónde está el equipo X
+      - historial de movimientos del serial
+
+  consumption_query:
+    description: Consulta sobre consumo de materiales o equipos.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - materiales más consumidos
+      - consumos por móvil
+      - consumo por responsable
+
+  charge_query:
+    description: Consulta sobre cobros.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - materiales cobrados
+      - cobros pendientes
+      - cobros por contratista
+
+  return_query:
+    description: Consulta sobre devoluciones.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - devoluciones por técnico
+      - material devuelto en mayo
+
+  transfer_query:
+    description: Consulta sobre traslados.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - traslados por bodega destino
+      - materiales trasladados este mes
+
+  association_query:
+    description: Consulta sobre seriales asociados, asignados o salidos de bodega.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - seriales asociados que salieron de bodega
+      - equipos asociados a un móvil
+
+  risk_detection:
+    description: Consulta de riesgos, pendientes o inconsistencias.
+    default_strategy: sql_assisted_plus_business_response
+    examples:
+      - consumo móvil sin validar
+      - seriales sin ubicación
+      - materiales con movimientos inconsistentes
+
+  movement_history:
+    description: Consulta de historial completo, kardex consolidado, log consolidado o linea de tiempo logistica.
+    default_strategy: sql_assisted_after_dictionary_validation
+    examples:
+      - historial completo del codigo ABC
+      - kardex consolidado del material ABC
+      - consolidado de kardex y log
+
+  report_generation:
+    description: Solicitud de informe empresarial con dato, tabla, hallazgo, riesgo, recomendacion y siguiente accion.
+    default_strategy: semantic_report
+    examples:
+      - informe de inventario
+      - informe de conciliacion
+      - reporte de saldos por area
+
+  reconciliation_query:
+    description: Consulta comparativa o conciliacion entre movimientos, stock, consumo, facturacion o fuentes externas.
+    default_strategy: semantic_report_or_sql_assisted_after_validation
+    examples:
+      - comparativo ingreso stock bodega movil facturacion
+      - consumo tecnico vs facturacion por proyecto
+      - entrega consumo tecnico facturacion
+
+  document_generation:
+    description: Solicitud de generacion de actas, SPA o documento soporte derivado de movimientos logisticos.
+    default_strategy: document_generation_pending
+    examples:
+      - generar acta de ingreso
+      - generar SPA de traslado
+      - documento soporte del traslado
+
+  alert_query:
+    description: Consulta para identificar alertas operativas o materiales con compra requerida.
+    default_strategy: semantic_report
+    examples:
+      - alerta ferretero para compras
+      - materiales que requieren compra
+      - alertar a directores por faltantes
+
+  notification_query:
+    description: Consulta sobre llegada a logistica, notificaciones operativas o pendientes por recibir.
+    default_strategy: external_source_pending
+    examples:
+      - ingresos de compras pendientes por logistica
+      - notificar llegada de materiales a logistica
+
+  assignment_distribution_query:
+    description: Consulta sobre distribucion, asignacion o responsable logistica de materiales y equipos.
+    default_strategy: semantic_report
+    examples:
+      - distribucion por tecnico
+      - asignacion de equipos
+
+  external_reconciliation_query:
+    description: Conciliacion contra fuentes externas como SAP o sistemas de compras o facturacion.
+    default_strategy: external_source_pending
+    examples:
+      - cruce de saldos SAP contra kardex
+      - diferencias entre SAP y consumo
+
+# -------------------------------------------------------------------
+# 9. REGLAS DE NEGOCIO
+# -------------------------------------------------------------------
+
+business_rules:
+  stock_calculation:
+    description: >
+      El cálculo de stock debe usar movimientos reales y debe declarar claramente
+      qué movimientos suman y cuáles restan.
+    confirmed_components:
+      add:
+        - entradas
+        - devoluciones
+        - traslados_entrantes
+      subtract:
+        - entregas
+        - consumos
+        - cobros
+        - traslados_salientes
+    confirmed_business_rules:
+      - Cobro descuenta inventario en el momento del cobro, aunque la factura se genere despues.
+      - Traslado bodega sale de una bodega e ingresa a otra.
+      - Traslado otro aliado sale del inventario propio.
+      - Facturacion no reemplaza el movimiento logistico para calcular saldo.
+    pending_db_validation:
+      - Confirmar columnas de cantidad, fecha, codigo, bodega, origen, destino y tipo_movimiento en tablas de movimiento.
+      - Confirmar valores fisicos que identifican traslado_bodega y traslado_otro_aliado.
+      - Confirmar si existe saldo materializado o si siempre debe calcularse por movimientos.
+    metadata_tags:
+      - stock
+      - inventory_balance
+      - movement_based_metric
+
+  serialized_control:
+    description: >
+      Los serializados se controlan individualmente por serial. No deben resumirse
+      solo por cantidad si la pregunta pide trazabilidad, ubicación, responsable o estado.
+    rule: serial_is_primary_identifier
+    metadata_tags:
+      - traceability
+      - serial_control
+
+  mobile_consumption_pending_validation:
+    description: >
+      El consumo móvil sin validar representa posible riesgo operativo.
+    detection:
+      movement_field: logistica_base_seriales.movimiento_sap
+      expected_movement_value: consumo_movil
+      validation_field: logistica_base_seriales.validado
+      pending_value: false
+    metadata_tags:
+      - risk_detection
+      - pending_validation
+
+  contractor_vs_company_materials:
+    description: >
+      Materiales comunes y ferreteros deben diferenciarse cuando la consulta hable
+      de propiedad, costo, cobro o responsabilidad.
+    metadata_tags:
+      - ownership
+      - material_family
+
+  no_data_fabrication:
+    description: >
+      Si no hay conexión a DB o metadata validada, el agente puede explicar el criterio,
+      pero no debe inventar cantidades, saldos, seriales ni movimientos.
+    metadata_tags:
+      - safety
+      - no_hallucination
+
+  consolidated_kardex_rule:
+    description: >
+      El kardex consolidado debe unificar ingresos, entregas, devoluciones, consumos,
+      cobros, traslados y asociaciones de seriales sin inventar saldos materializados.
+    requires_validation:
+      - Confirmar orden cronologico y columnas de homologacion entre tablas.
+    metadata_tags:
+      - kardex
+      - consolidation
+      - traceability
+
+  stock_balance_rule:
+    description: >
+      Todo saldo o stock solicitado debe responderse desde movimientos validados.
+      La formula de negocio para materiales queda confirmada y habilitada solo
+      con columnas fisicas auditadas en logistica_cinco. Las cantidades varchar
+      se castean solo cuando pasan validacion numerica; registros invalidos se
+      reportan y no se suman.
+    requires_business_validation: false
+    requires_db_validation: false
+    validation_status: passed_2026_05_08
+    confirmed_columns:
+      - logistica_movimientos_entrada.codigo/cantidad/f_consumo/bodega/movimiento/estado/comentario
+      - logistica_movimientos_entrega.codigo/cantidad/f_consumo/bodega
+      - logistica_movimientos_devolucion.codigo/cantidad/f_consumo/bodega
+      - logistica_movimientos_consumo.codigo/cantidad/f_consumo/bodega/orden_trabajo/tipo/estado
+      - logistica_movimientos_cobro.codigo/cantidad/f_consumo/bodega
+      - logistica_movimientos_traslado.codigo/cantidad/f_consumo/bodega/movimiento/estado/comentario
+    blocked_columns:
+      - logistica_movimientos_traslado.bodega_destino
+      - bajas
+      - garantias_materiales
+    confirmed_formulas:
+      saldo_general_materiales: entradas - entregas + devoluciones - cobros - traslados_otro_aliado
+      saldo_bodega_materiales: entradas - entregas + devoluciones - cobros - traslados_otro_aliado +/- traslados_bodega
+      saldo_movil: entregas - consumo - cobros - devoluciones
+      bajas: 0
+      garantias_materiales: 0
+    metadata_tags:
+      - stock
+      - db_validation_required
+
+  ingreso_stock_movil_facturacion_rule:
+    description: >
+      La conciliacion ingreso - stock bodega - movil - facturacion fue marcada
+      por negocio como no aplicable y no debe activarse como calculo productivo.
+    status: not_applicable
+    requires_business_validation: false
+    metadata_tags:
+      - reconciliation
+      - semantic_limitation
+
+  consumo_tecnico_facturacion_rule:
+    description: >
+      El cruce entre consumo tecnico y facturacion requiere homologar codigo, cantidad,
+      proyecto, documento y fecha entre consumo y facturacion.
+    requires_validation:
+      - Confirmar si facturacion existe en DB o llega por fuente externa.
+    metadata_tags:
+      - consumption
+      - billing
+      - reconciliation
+
+  sap_kardex_reconciliation_rule:
+    description: >
+      La conciliacion SAP vs kardex solo puede ejecutarse cuando SAP este registrado
+      como fuente o tabla en ai_dictionary con campos homologados.
+    external_source_required: SAP
+    metadata_tags:
+      - sap
+      - external_source
+      - reconciliation
+
+  document_generation_rule:
+    description: >
+      Las actas y SPA se entienden semantcamente como documentos derivados de movimientos,
+      pero no deben generarse en productivo sin motor documental o modulo documental.
+    metadata_tags:
+      - documents
+      - pending_generation
+
+  purchasing_arrival_notification_rule:
+    description: >
+      El flujo compra -> ingreso -> llegada logistica -> notificacion depende de integrar
+      compras y eventos de llegada o notificacion.
+    metadata_tags:
+      - purchases
+      - notification
+      - integration_pending
+
+  ferretero_purchase_alert_rule:
+    description: >
+      La alerta ferretero requiere umbrales de stock minimo, punto de reposicion o reglas
+      equivalentes antes de disparar compra requerida o aviso a directores.
+    threshold_metadata_pending: true
+    metadata_tags:
+      - alert
+      - ferreteros
+      - replenishment
+
+  area_balance_report_rule:
+    description: >
+      Los reportes de saldo por area requieren metadata valida de area responsable y criterio
+      aprobado para asignar saldo a cada area.
+    requires_validation:
+      - Confirmar columna de area y responsable por cada movimiento relevante.
+    metadata_tags:
+      - reporting
+      - organizational_distribution
+
+external_sources:
+  SAP:
+    status: pending_integration
+    purpose: conciliacion de saldos contra kardex
+    required_fields:
+      - codigo
+      - saldo_sap
+      - fecha_corte
+      - centro
+      - almacen
+
+  Compras:
+    status: pending_integration
+    purpose: ingresos por compras y notificacion a logistica
+
+  Facturacion:
+    status: pending_integration_or_db_validation
+    purpose: cruce consumo tecnico vs facturacion
+
+  Documentos:
+    status: pending_integration
+    purpose: generacion de actas y SPA
+
+# -------------------------------------------------------------------
+# 10. PATRONES DE CONSULTA -> query_patterns / tests
+# -------------------------------------------------------------------
+
+query_patterns:
+  grouping_operator_por:
+    description: >
+      En lenguaje de negocio, "por X" normalmente indica agrupación si X existe
+      como dimensión agrupable declarada.
+    operator: group_by
+    examples:
+      - stock por bodega
+      - consumos por responsable
+      - entradas por mes
+      - equipos por estado
+    validation_rule: X debe existir en groupable_dimensions o como campo con is_groupable=true.
+
+  temporal_filtering:
+    description: >
+      Expresiones como hoy, este mes, mayo, 2026 deben mapearse a filtros temporales
+      sobre campos tipo date declarados.
+    examples:
+      - entradas de mayo
+      - consumos este mes
+      - traslados de 2026
+    validation_rule: La tabla objetivo debe tener campo fecha con allowed_operations de filtro temporal.
+
+  serial_traceability:
+    description: >
+      Si la consulta menciona un serial específico, priorizar trazabilidad serial.
+    examples:
+      - trazabilidad del serial ABC123
+      - dónde está el serial ABC123
+    validation_rule: serial debe mapear a logistica_base_seriales.serial.
+
+  stock_query_resolution:
+    description: >
+      Las consultas de stock requieren cálculo por movimientos y no deben responderse
+      desde una sola tabla si el saldo no está materializado.
+    examples:
+      - stock de materiales
+      - existencias por bodega
+    validation_rule: usar business_rules.stock_calculation.
+
+# -------------------------------------------------------------------
+# 11. EJEMPLOS -> tests / query_patterns
+# -------------------------------------------------------------------
+
+examples:
+  - id: inv_001
+    query: stock de materiales por bodega
+    expected:
+      domain: inventario_materiales
+      material_family: materiales
+      intent: stock_query
+      operation: aggregate
+      metric: stock_actual
+      group_by: bodega
+      required_validation:
+        - stock_calculation
+        - groupable_dimension:bodega
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_002
+    query: existencias de ferreteros
+    expected:
+      domain: inventario_materiales
+      material_family: ferreteros
+      intent: stock_query
+      operation: aggregate
+      metric: stock_actual
+      filters:
+        material_family: ferreteros
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_003
+    query: equipos serializados en consumo móvil sin validar
+    expected:
+      domain: inventario_materiales
+      material_family: serializados
+      intent: risk_detection
+      operation: list
+      business_concept: consumo_movil_sin_validar
+      filters:
+        movimiento: consumo_movil
+        validado: false
+      tables:
+        - logistica_base_seriales
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_004
+    query: trazabilidad del serial ABC123
+    expected:
+      domain: inventario_materiales
+      material_family: serializados
+      intent: traceability_query
+      operation: trace
+      filters:
+        serial: ABC123
+      tables:
+        - logistica_base_seriales
+        - logistica_seriales_asociados
+      expected_runtime_flow: sql_assisted_or_traceability_plan
+      fallback_reason: ""
+
+  - id: inv_005
+    query: materiales más consumidos en mayo
+    expected:
+      domain: inventario_materiales
+      intent: consumption_query
+      operation: top
+      metric:
+        field: cantidad
+        aggregation: sum
+      filter:
+        month: 5
+      group_by: material
+      tables:
+        - logistica_movimientos_consumo
+        - base_codigos
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_006
+    query: traslados por bodega destino
+    expected:
+      domain: inventario_materiales
+      intent: transfer_query
+      operation: aggregate
+      group_by: bodega_destino
+      tables:
+        - logistica_movimientos_traslado
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_007
+    query: seriales asociados que salieron de bodega
+    expected:
+      domain: inventario_materiales
+      material_family: serializados
+      intent: association_query
+      operation: list
+      business_concept: salidas_de_bodega_serializados
+      tables:
+        - logistica_seriales_asociados
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_008
+    query: entradas de materiales por mes
+    expected:
+      domain: inventario_materiales
+      intent: movement_query
+      movement_type: entrada
+      operation: aggregate
+      group_by: mes
+      metric:
+        field: cantidad
+        aggregation: sum
+      tables:
+        - logistica_movimientos_entrada
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_009
+    query: equipos por estado
+    expected:
+      domain: inventario_materiales
+      material_family: serializados
+      intent: stock_query
+      operation: aggregate
+      group_by: estado
+      tables:
+        - logistica_base_seriales
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_010
+    query: devoluciones por técnico
+    expected:
+      domain: inventario_materiales
+      intent: return_query
+      operation: aggregate
+      group_by: responsable
+      tables:
+        - logistica_movimientos_devolucion
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+# -------------------------------------------------------------------
+# Casos ampliados de inventario/logistica
+# -------------------------------------------------------------------
+
+  - id: inv_011
+    query: historial completo del codigo ABC
+    expected:
+      domain: inventario_logistica
+      intent: movement_history
+      business_concept: historial_movimientos_completo
+      operation: trace
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_012
+    query: historial del serial ABC123
+    expected:
+      domain: inventario_logistica
+      intent: traceability_query
+      business_concept: historial_movimientos_completo
+      operation: trace
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_013
+    query: kardex consolidado del material ABC
+    expected:
+      domain: inventario_logistica
+      intent: movement_history
+      business_concept: kardex_consolidado
+      operation: trace
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_014
+    query: historial de consumos tecnicos y facturacion
+    expected:
+      domain: inventario_logistica
+      intent: reconciliation_query
+      business_concept: consumo_vs_facturacion
+      operation: reconcile
+      requires_business_validation: false
+      requires_external_source: true
+      expected_runtime_flow: external_source_pending
+      fallback_reason: facturacion_pending_integration_or_db_validation
+
+  - id: inv_015
+    query: comparativo ingreso stock bodega movil facturacion
+    expected:
+      domain: inventario_logistica
+      intent: reconciliation_query
+      business_concept: conciliacion_logistica
+      operation: reconcile
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: semantic_report
+      implementation_status: semantic_limitation_only
+      fallback_reason: formula_no_aplica_por_regla_de_negocio
+
+  - id: inv_016
+    query: cruce saldos SAP contra kardex consumo
+    expected:
+      domain: inventario_logistica
+      intent: external_reconciliation_query
+      business_concept: conciliacion_sap_kardex
+      operation: reconcile
+      requires_business_validation: false
+      requires_external_source: true
+      expected_runtime_flow: external_source_pending
+      fallback_reason: sap_not_registered_in_ai_dictionary
+
+  - id: inv_017
+    query: generar acta de traslado interno
+    expected:
+      domain: inventario_logistica
+      intent: document_generation
+      business_concept: acta_logistica
+      operation: generate_document
+      requires_business_validation: false
+      requires_external_source: true
+      expected_runtime_flow: document_generation_pending
+      fallback_reason: modulo_documental_no_disponible
+
+  - id: inv_018
+    query: promedios y CPEs proyecto ERI
+    expected:
+      domain: inventario_logistica
+      intent: report_generation
+      business_concept: promedios_cpe_eri
+      operation: semantic_report
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: semantic_report
+      fallback_reason: cpe_missing_metadata
+
+  - id: inv_019
+    query: consolidado de kardex y log
+    expected:
+      domain: inventario_logistica
+      intent: movement_history
+      business_concept: log_consolidado
+      operation: trace
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: sql_assisted
+      fallback_reason: ""
+
+  - id: inv_020
+    query: ingresos de compras con notificacion a logistica
+    expected:
+      domain: inventario_logistica
+      intent: notification_query
+      business_concept: ingreso_compras_logistica
+      operation: trace
+      requires_business_validation: false
+      requires_external_source: true
+      expected_runtime_flow: external_source_pending
+      fallback_reason: compras_or_notifications_pending_integration
+
+  - id: inv_021
+    query: entrega consumo tecnico facturacion
+    expected:
+      domain: inventario_logistica
+      intent: reconciliation_query
+      business_concept: entrega_consumo_facturacion
+      operation: reconcile
+      requires_business_validation: false
+      requires_external_source: true
+      expected_runtime_flow: external_source_pending
+      fallback_reason: facturacion_pending_integration_or_db_validation
+
+  - id: inv_022
+    query: distribucion y asignacion por tecnico
+    expected:
+      domain: inventario_logistica
+      intent: assignment_distribution_query
+      business_concept: distribucion_asignacion
+      operation: semantic_report
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: semantic_report
+      implementation_status: pending_db_validation
+      fallback_reason: assignment_tables_pending_db_validation
+
+  - id: inv_023
+    query: generar SPA de ingreso
+    expected:
+      domain: inventario_logistica
+      intent: document_generation
+      business_concept: documento_spa
+      operation: generate_document
+      requires_business_validation: false
+      requires_external_source: true
+      expected_runtime_flow: document_generation_pending
+      fallback_reason: document_generation_pending
+
+  - id: inv_024
+    query: reporte de saldos a las areas
+    expected:
+      domain: inventario_logistica
+      intent: report_generation
+      business_concept: reporte_saldos_area
+      operation: semantic_report
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: semantic_report
+      group_by: area
+      fallback_reason: area_metadata_pending_if_not_defined
+
+  - id: inv_025
+    query: alerta ferretero para compras y directores
+    expected:
+      domain: inventario_logistica
+      intent: alert_query
+      business_concept: alerta_ferretero_compras
+      operation: semantic_report
+      requires_business_validation: false
+      requires_external_source: false
+      expected_runtime_flow: semantic_report
+      requires_threshold_metadata: true
+      fallback_reason: threshold_metadata_pending
+
+# -------------------------------------------------------------------
+# 12. CONTRATO DE RESPUESTA
+# -------------------------------------------------------------------
+
+response_contract:
+  supported_response_modes:
+    - informe
+    - conciliacion
+    - alerta
+    - documento_pendiente
+    - integracion_pendiente
+    - reporte_a_areas
+  default_sections:
+    que_entendio: ""
+    datos_usados: ""
+    diferencia_encontrada: ""
+    falta_validar: ""
+    dato: ""
+    tabla: []
+    hallazgo: ""
+    riesgo_o_interpretacion: ""
+    recomendacion: ""
+    siguiente_accion: ""
+  table_when:
+    - list
+    - trace
+    - top
+    - aggregate
+    - movement_detail
+    - risk_detection
+  metadata_to_return:
+    - domain
+    - material_family
+    - intent
+    - business_concept
+    - operation
+    - tables_used
+    - fields_used
+    - relationships_used
+    - filters
+    - group_by
+    - metrics
+    - runtime_flow
+    - confidence
+    - limitations
+    - requires_business_validation
+    - requires_external_source
+    - missing_metadata
+    - implementation_status
+    - alert_status
+  response_style:
+    business_first: true
+    include_operational_risk: true
+    include_next_action: true
+    avoid_technical_sql_by_default: true
+  business_response_must_explain:
+    - que_entendio
+    - que_datos_uso
+    - que_diferencia_encontro
+    - que_falta_validar
+    - riesgo
+    - recomendacion
+    - siguiente_accion
+
+# -------------------------------------------------------------------
+# 13. LOADER / SINCRONIZACIÓN SUGERIDA
+# -------------------------------------------------------------------
+
+python_integration:
+  package_name: apps.ia_dev.domains.inventario_materiales
+  suggested_files:
+    yaml_agent_loader.py:
+      purpose: Cargar YAML y exponer conceptos, tablas, relaciones y ejemplos.
+      functions:
+        - load_inventory_agent_yaml
+        - get_tables_for_dictionary
+        - get_fields_for_dictionary
+        - get_relationships_for_dictionary
+        - get_synonyms_for_dictionary
+        - get_groupable_dimensions
+        - get_business_concepts
+        - get_examples_as_query_patterns
+
+    sync_yaml_agent_to_dictionary.py:
+      purpose: Comando management para sembrar ai_dictionary desde YAML.
+      command: python manage.py sync_yaml_agent_to_dictionary --agent inventario_materiales --dry-run
+      modes:
+        - dry_run
+        - apply
+        - audit_only
+
+    audit_yaml_agent_against_db.py:
+      purpose: Validar que tablas y columnas del YAML existen físicamente en DB.
+      command: python manage.py audit_yaml_agent_against_db --agent inventario_materiales
+
+    tests:
+      purpose: Tests generados desde examples y quality_gates.
+
+  loader_skeleton: |
+    from pathlib import Path
+    import yaml
+
+    DEFAULT_AGENT_PATH = Path(__file__).with_name("inventario_materiales_agent.yaml")
+
+    def load_inventory_agent_yaml(path: str | None = None) -> dict:
+        yaml_path = Path(path) if path else DEFAULT_AGENT_PATH
+        with yaml_path.open("r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+
+    def get_tables_for_dictionary(config: dict) -> list[dict]:
+        rows = []
+        for table_name, table in config.get("tables", {}).items():
+            rows.append({
+                "domain_code": table.get("domain_code"),
+                "table_name": table_name,
+                "business_name": table.get("business_name"),
+                "description": table.get("description"),
+                "primary_role": table.get("primary_role"),
+                "material_family": table.get("material_family"),
+            })
+        return rows
+
+    def get_fields_for_dictionary(config: dict) -> list[dict]:
+        rows = []
+        for table_name, table in config.get("tables", {}).items():
+            for column_name, column in table.get("columns", {}).items():
+                rows.append({
+                    "table_name": table_name,
+                    "column_name": column_name,
+                    "data_type": column.get("data_type"),
+                    "semantic_role": column.get("semantic_role"),
+                    "business_concepts": column.get("business_concepts", []),
+                    "allowed_operations": column.get("allowed_operations", []),
+                    "synonyms": column.get("synonyms", []),
+                    "is_groupable": column.get("is_groupable", False),
+                    "is_filterable": column.get("is_filterable", False),
+                    "is_selectable": column.get("is_selectable", False),
+                })
+        return rows
+
+    def get_relationships_for_dictionary(config: dict) -> list[dict]:
+        return [
+            {"code": code, **relationship}
+            for code, relationship in config.get("relationships", {}).items()
+        ]
+
+    def get_examples_as_query_patterns(config: dict) -> list[dict]:
+        return config.get("examples", [])
+
+# -------------------------------------------------------------------
+# 14. QUALITY GATES
+# -------------------------------------------------------------------
+
+quality_gates:
+  yaml_integrity:
+    - El YAML debe cargar sin errores.
+    - agent.code debe ser inventario_materiales_agent.
+    - business_domain.code debe ser inventario_materiales.
+    - Todas las tablas en relationships deben existir en tables.
+    - Todas las columnas en relationships deben existir en su tabla.
+    - Toda dimensión en groupable_dimensions debe apuntar a campos existentes o marcar missing_metadata_allowed.
+    - Todo example debe tener expected.domain.
+    - Todo example debe tener expected.intent.
+
+  db_audit:
+    - Toda tabla marcada sync_to_dd_tablas debe existir en logistica_cinco.
+    - Toda columna marcada sync_to_dd_campos debe existir físicamente o quedar en metadata_faltante.
+    - Todo join permitido debe ser físicamente posible.
+    - Todo campo tipo date debe validarse contra tipo real de DB.
+    - Todo campo group_by debe ser agrupable en SQL.
+
+  runtime_readiness:
+    - sync_yaml_agent_to_dictionary --dry-run no debe fallar.
+    - audit_yaml_agent_against_db debe reportar missing_metadata explícito.
+    - ia_dictionary_audit --domain inventario_materiales debe pasar antes de producción.
+    - Las consultas de examples deben generar query_patterns.
+    - Ningún example debe depender de fallback legacy.
+
+# -------------------------------------------------------------------
+# 15. PENDIENTES PARA COMPLETAR CON DATOS REALES
+# -------------------------------------------------------------------
+
+fill_with_real_db_metadata:
+  required:
+    - Confirmar nombres exactos de columnas en cada tabla.
+    - Confirmar tipos reales de datos.
+    - Confirmar primary keys.
+    - Confirmar foreign keys reales o equivalentes.
+    - Confirmar valores reales de movimiento en serializados.
+    - Confirmar cómo se identifica consumo_movil.
+    - Confirmar cómo se marca validado/sin validar.
+    - Confirmar cómo distinguir materiales comunes vs ferreteros.
+    - Validar en ai_dictionary/DB que cobros tienen columnas suficientes para descontar inventario por codigo, cantidad y fecha.
+    - Validar en ai_dictionary/DB que traslados tienen origen, destino y tipo de traslado para separar bodega vs otro aliado.
+    - Confirmar si existe saldo materializado o debe calcularse siempre por movimientos.
+
+  recommended_commands:
+    - python manage.py inspectdb --database logistica_cinco
+    - python manage.py audit_yaml_agent_against_db --agent inventario_materiales
+    - python manage.py sync_yaml_agent_to_dictionary --agent inventario_materiales --dry-run
+    - python manage.py ia_dictionary_audit --domain inventario_materiales --as-json
+    - python manage.py simulate_ia_dev_chat --message "stock de materiales por bodega" --session-id demo-inv --raw

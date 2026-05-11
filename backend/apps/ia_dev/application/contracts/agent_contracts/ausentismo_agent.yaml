@@ -1,0 +1,230 @@
+agent_contract:
+  agent_id: ausentismo_agent
+  domain: ausentismo
+  role: Attendance and absence analytics agent.
+  responsibilities:
+    - Summarize, detail and trend attendance absence data.
+    - Resolve recurrence and grouped attendance views.
+  out_of_scope:
+    - Knowledge governance.
+    - Inventory or transport execution.
+  input_context:
+    session_memory: true
+    user_memory: true
+    business_memory: true
+  output_context:
+    updates_session_memory: true
+    emits_business_response: true
+  intents:
+    - id: attendance_period_probe
+      description: Resolve a safe attendance period before execution.
+      examples: ["que rango toma esta semana", "periodo de asistencia del ultimo mes"]
+      capability: attendance.period.resolve.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: []
+      tables: []
+      validation_rules: ["period_must_be_resolved"]
+    - id: attendance_summary
+      description: Summary count of attendance records.
+      examples: ["ausentismos del mes", "cantidad de ausentismos"]
+      capability: attendance.unjustified.summary.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [fecha_inicio, fecha_fin, justificacion, supervisor, area, cargo]
+      tables: [gestionh_ausentismo, cinco_base_de_personal]
+      validation_rules: ["expected_period_must_be_covered"]
+    - id: attendance_detail
+      description: Detail table of people or attendance events.
+      examples: ["personal incapacitado hoy", "detalle de ausentismos"]
+      capability: attendance.unjustified.table_with_personal.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [fecha_inicio, fecha_fin, justificacion, cedula, supervisor, area, cargo]
+      tables: [gestionh_ausentismo, cinco_base_de_personal]
+      validation_rules: ["entity_filter_if_present_must_be_applied"]
+    - id: attendance_recurrence
+      description: Attendance recurrence analysis.
+      examples: ["empleados reincidentes", "reincidencia de ausentismos"]
+      capability: attendance.recurrence.grouped.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [fecha_inicio, fecha_fin, supervisor, area, cargo]
+      tables: [gestionh_ausentismo, cinco_base_de_personal]
+      validation_rules: ["expected_group_dimension_must_exist_when_requested"]
+    - id: attendance_aggregate
+      description: Grouped attendance analytics.
+      examples: ["ausentismos por area", "ausentismos por cargo"]
+      capability: attendance.summary.by_attribute.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [fecha_inicio, fecha_fin, justificacion, supervisor, area, cargo]
+      tables: [gestionh_ausentismo, cinco_base_de_personal]
+      validation_rules: ["expected_group_dimension_must_exist_when_requested"]
+    - id: attendance_trend
+      description: Trend analytics by period.
+      examples: ["tendencia de ausentismos", "historico de ausentismos"]
+      capability: attendance.trend.daily.v1
+      strategy: handler
+      required_filters: []
+      optional_filters: [fecha_inicio, fecha_fin]
+      tables: [gestionh_ausentismo]
+      validation_rules: ["trend_shape_must_exist"]
+  capabilities:
+    - id: attendance.period.resolve.v1
+      type: handler
+      owner: attendance.period_resolver
+      planner_required: false
+      handler_required: true
+      allowed_tables: []
+      blocked_tables: []
+      response_shape: summary
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED
+      policy_tags: [contains_personal_data]
+    - id: attendance.unjustified.summary.v1
+      type: handler
+      owner: attendance.unjustified_summary
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: kpi
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_SUMMARY_ENABLED
+      policy_tags: [contains_personal_data]
+    - id: attendance.unjustified.table.v1
+      type: handler
+      owner: attendance.unjustified_table
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_TABLE_ENABLED
+      policy_tags: [contains_personal_data]
+    - id: attendance.unjustified.table_with_personal.v1
+      type: handler
+      owner: attendance.unjustified_table_with_personal
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_TABLE_ENABLED
+      policy_tags: [contains_personal_data]
+    - id: attendance.recurrence.grouped.v1
+      type: handler
+      owner: attendance.recurrence_grouped
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_RECURRENCE_ENABLED
+      policy_tags: [contains_personal_data]
+    - id: attendance.recurrence.itemized.v1
+      type: handler
+      owner: attendance.recurrence_itemized
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_RECURRENCE_ENABLED
+      policy_tags: [contains_personal_data]
+    - id: attendance.summary.by_supervisor.v1
+      type: handler
+      owner: attendance.summary_by_supervisor
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED
+      policy_tags: [contains_personal_data, contains_operational_data]
+    - id: attendance.summary.by_area.v1
+      type: handler
+      owner: attendance.summary_by_area
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED
+      policy_tags: [contains_personal_data, contains_operational_data]
+    - id: attendance.summary.by_cargo.v1
+      type: handler
+      owner: attendance.summary_by_cargo
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED
+      policy_tags: [contains_personal_data, contains_operational_data]
+    - id: attendance.summary.by_attribute.v1
+      type: handler
+      owner: attendance.summary_by_attribute
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo, cinco_base_de_personal]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED
+      policy_tags: [contains_personal_data, contains_operational_data]
+    - id: attendance.trend.daily.v1
+      type: handler
+      owner: attendance.trend_daily
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo]
+      blocked_tables: []
+      response_shape: chart_or_table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: attendance.trend.monthly.v1
+      type: handler
+      owner: attendance.trend_monthly
+      planner_required: true
+      handler_required: true
+      allowed_tables: [gestionh_ausentismo]
+      blocked_tables: []
+      response_shape: chart_or_table
+      rollout_flag: IA_DEV_CAP_ATTENDANCE_ENABLED|IA_DEV_CAP_ATTENDANCE_ANALYTICS_ENABLED
+      policy_tags: [contains_operational_data]
+  routing_rules:
+    deterministic_patterns: ["ausentismo", "incapacidad", "vacaciones", "reincidencia"]
+    semantic_assist_enabled: true
+    domain_priority_rules: ["ausentismo_over_general_when_attendance_vocabulary_is_strong"]
+    memory_isolation: strict_by_domain_and_capability
+  semantic_assist_rules:
+    - Attendance people detail requests should prefer person-aware capabilities.
+  execution_rules:
+    covered_by_modern_runtime: true
+    legacy_runtime_owner: attendance_legacy_runtime
+  validation_rules:
+    - expected_period_must_be_covered
+    - trend_shape_must_exist
+  handoffs:
+    allowed_targets: [empleados_agent]
+    payload_schema: agent_contract.v1.handoff
+    required_fields: [domain, intent, filters]
+  fallback_policy:
+    legacy_allowed: true
+    user_visible_error_policy: controlled_limitation
+    technical_debug_visibility: hidden_from_end_user
+  response_policy:
+    user_mode: business
+    debug_mode: internal_only
+    required_sections: [reply, data]
+    forbidden_terms: [runtime_only_fallback, legacy, completar ai_dictionary]
+  memory_policy:
+    scope: session_user_and_business
+    cross_domain_sharing: blocked_except_handoff
+  observability:
+    required_trace_fields: [agent_id, domain, intent, capability, route, execute, fallback_used, planner_called]
+  tests_required:
+    - contract_loads
+    - intents_have_capabilities
+    - capabilities_have_handler_or_planner
+    - frontend_simulator_parity
+

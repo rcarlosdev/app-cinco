@@ -3271,6 +3271,96 @@ class IADevSqlStore:
             ],
         )
 
+    def list_observability_events(
+        self,
+        *,
+        window_seconds: int = 3600,
+        limit: int = 5000,
+        event_types: list[str] | None = None,
+        created_after: int | None = None,
+    ) -> list[dict[str, Any]]:
+        self.ensure_tables()
+        safe_window = max(60, min(int(window_seconds), 2592000))
+        safe_limit = max(10, min(int(limit), 20000))
+        since = self._now() - safe_window
+        if created_after is not None:
+            since = max(int(created_after), since)
+        rows = self._fetchall(
+            """
+            SELECT id, event_type, source, duration_ms, tokens_in, tokens_out, cost_usd, created_at, meta_json
+            FROM ia_dev_observability_events
+            WHERE created_at >= %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            [since, safe_limit],
+        )
+        wanted = {
+            str(item or "").strip().lower()
+            for item in list(event_types or [])
+            if str(item or "").strip()
+        }
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            event_type = str(row[1] or "")
+            if wanted and event_type.strip().lower() not in wanted:
+                continue
+            events.append(
+                {
+                    "id": int(row[0] or 0),
+                    "event_type": event_type,
+                    "source": str(row[2] or ""),
+                    "duration_ms": int(row[3]) if row[3] is not None else None,
+                    "tokens_in": int(row[4] or 0),
+                    "tokens_out": int(row[5] or 0),
+                    "cost_usd": float(row[6] or 0.0),
+                    "created_at": int(row[7] or 0),
+                    "meta": self._from_json(row[8], {}) if len(row) > 8 else {},
+                }
+            )
+        return events
+
+    def get_latest_domain_fix_timestamp(self, *, domain_code: str) -> int:
+        self.ensure_tables()
+        normalized_domain = str(domain_code or "").strip().lower()
+        if not normalized_domain:
+            return 0
+        domain = self.get_dominio(codigo_dominio=normalized_domain)
+        domain_id = int((domain or {}).get("id") or 0)
+        if domain_id <= 0:
+            return 0
+
+        candidates: list[int] = []
+        rows = self._fetchall(
+            """
+            SELECT created_at
+            FROM ia_dev_estado_dominio
+            WHERE dominio_id = %s
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            [domain_id],
+        )
+        for row in rows:
+            if row and int(row[0] or 0) > 0:
+                candidates.append(int(row[0] or 0))
+
+        rows = self._fetchall(
+            """
+            SELECT created_at
+            FROM ia_dev_auditoria_semantica
+            WHERE entity_type = 'dominio'
+              AND entity_id = %s
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            [str(domain_id)],
+        )
+        for row in rows:
+            if row and int(row[0] or 0) > 0:
+                candidates.append(int(row[0] or 0))
+        return max(candidates) if candidates else 0
+
     def get_observability_summary(
         self,
         *,
@@ -3287,7 +3377,7 @@ class IADevSqlStore:
         normalized_domain = str(domain_code or "").strip().lower()
         normalized_generator = str(generator or "").strip().lower()
         normalized_fallback_reason = str(fallback_reason or "").strip().lower()
-        has_cause_filters = bool(normalized_domain or normalized_generator or normalized_fallback_reason)
+        has_cause_filters = bool(normalized_generator or normalized_fallback_reason)
         rows = self._fetchall(
             """
             SELECT event_type, source, duration_ms, tokens_in, tokens_out, cost_usd, created_at, meta_json
@@ -3322,6 +3412,17 @@ class IADevSqlStore:
         cause_by_policy_reason: dict[str, int] = defaultdict(int)
         cause_confidences: list[float] = []
         cause_confidence_by_domain: dict[str, list[float]] = defaultdict(list)
+        runtime_events = 0
+        runtime_response_counter: dict[str, int] = defaultdict(int)
+        runtime_reason_counter: dict[str, int] = defaultdict(int)
+        runtime_sql_reason_counter: dict[str, int] = defaultdict(int)
+        runtime_questions_failed: dict[str, int] = defaultdict(int)
+        runtime_columns_used: dict[str, int] = defaultdict(int)
+        runtime_relations_used: dict[str, int] = defaultdict(int)
+        runtime_blocked_legacy_fallback_count = 0
+        runtime_legacy_count = 0
+        runtime_satisfaction_review_failed_count = 0
+        runtime_insight_poor_count = 0
 
         for row in rows:
             event_type = str(row[0] or "event")
@@ -3344,6 +3445,10 @@ class IADevSqlStore:
                 if normalized_generator and meta_generator != normalized_generator:
                     continue
                 if normalized_fallback_reason and meta_fallback_reason != normalized_fallback_reason:
+                    continue
+            elif is_cause_event and normalized_domain:
+                meta_domain = str((meta or {}).get("domain_code") or "").strip().lower()
+                if meta_domain and meta_domain != normalized_domain:
                     continue
 
             total_events += 1
@@ -3382,6 +3487,50 @@ class IADevSqlStore:
                 if confidence is not None:
                     cause_confidences.append(confidence)
                     cause_confidence_by_domain[domain_bucket].append(confidence)
+            if event_type == "runtime_response_resolved":
+                meta_domain = str((meta or {}).get("domain_resolved") or "").strip().lower()
+                if normalized_domain and meta_domain != normalized_domain:
+                    continue
+                runtime_events += 1
+                response_flow = (
+                    str((meta or {}).get("response_flow") or "").strip().lower()
+                    or "unknown"
+                )
+                runtime_response_counter[response_flow] += 1
+                fallback_reason = str((meta or {}).get("fallback_reason") or "").strip().lower()
+                runtime_only_reason = str(
+                    (meta or {}).get("runtime_only_fallback_reason") or ""
+                ).strip().lower()
+                sql_reason = str((meta or {}).get("sql_reason") or "").strip().lower()
+                blocked_legacy_fallback = bool((meta or {}).get("blocked_legacy_fallback"))
+                satisfaction_review = dict((meta or {}).get("satisfaction_review") or {})
+                if blocked_legacy_fallback:
+                    runtime_blocked_legacy_fallback_count += 1
+                if response_flow == "legacy_fallback":
+                    runtime_legacy_count += 1
+                if not bool(satisfaction_review.get("satisfied", True)):
+                    runtime_satisfaction_review_failed_count += 1
+                if str((meta or {}).get("insight_quality") or "").strip().lower() == "poor":
+                    runtime_insight_poor_count += 1
+                for key in (fallback_reason, runtime_only_reason):
+                    if key:
+                        runtime_reason_counter[key] += 1
+                if sql_reason:
+                    runtime_sql_reason_counter[sql_reason] += 1
+                if response_flow in {"runtime_only_fallback", "legacy_fallback"} or not bool(
+                    satisfaction_review.get("satisfied", True)
+                ):
+                    question = str((meta or {}).get("original_question") or "").strip()
+                    if question:
+                        runtime_questions_failed[question] += 1
+                for column in list((meta or {}).get("columns_used") or (meta or {}).get("columns_detected") or []):
+                    token = str(column or "").strip().lower()
+                    if token:
+                        runtime_columns_used[token] += 1
+                for relation in list((meta or {}).get("relations_used") or []):
+                    token = " ".join(str(relation or "").strip().lower().split())
+                    if token:
+                        runtime_relations_used[token] += 1
 
         def _duration_stats(values: list[int]) -> dict:
             if not values:
@@ -3417,6 +3566,40 @@ class IADevSqlStore:
                 "latency": _duration_stats(durations),
             }
 
+        def _top_items(counter: dict[str, int], *, label: str) -> list[dict[str, Any]]:
+            ordered = sorted(counter.items(), key=lambda item: (-int(item[1]), item[0]))
+            return [{label: key, "count": int(value)} for key, value in ordered[:10]]
+
+        improvement_recommendations: list[str] = []
+        if int(runtime_reason_counter.get("missing_dictionary_relation") or 0) > 0:
+            improvement_recommendations.append(
+                "Registrar joins faltantes en ai_dictionary.dd_relaciones para evitar fallbacks runtime-only."
+            )
+        if int(runtime_sql_reason_counter.get("no_metric_column_declared") or 0) > 0:
+            improvement_recommendations.append(
+                "Marcar metricas analiticas en ai_dictionary.dd_campos y sus capacidades en ia_dev_capacidades_columna."
+            )
+        if int(runtime_sql_reason_counter.get("no_allowed_dimension") or 0) > 0:
+            improvement_recommendations.append(
+                "Habilitar dimensiones seguras en dd_campos y completar sinonimos clave en dd_sinonimos."
+            )
+        if int(runtime_reason_counter.get("missing_dictionary_column") or 0) > 0:
+            improvement_recommendations.append(
+                "Declarar columnas faltantes en dd_campos antes de ampliar cobertura analitica."
+            )
+        if runtime_satisfaction_review_failed_count > 0:
+            improvement_recommendations.append(
+                "Revisar respuestas tecnicamente validas pero poco accionables y reforzar reglas/insights del dominio."
+            )
+        if runtime_insight_poor_count > 0:
+            improvement_recommendations.append(
+                "Enriquecer reglas narrativas y columnas accionables para reducir respuestas con insight pobre."
+            )
+        if not improvement_recommendations:
+            improvement_recommendations.append(
+                "Cobertura estable: priorizar ampliar sinonimos y metadatos de columnas mas usadas."
+            )
+
         return {
             "window_seconds": safe_window,
             "sample_size": total_events,
@@ -3439,6 +3622,39 @@ class IADevSqlStore:
                     str(domain or ""): _float_stats(values)
                     for domain, values in cause_confidence_by_domain.items()
                 },
+            },
+            "runtime_analytics": {
+                "total_analytics_queries": int(runtime_events),
+                "sql_assisted_count": int(runtime_response_counter.get("sql_assisted") or 0),
+                "handler_count": int(runtime_response_counter.get("handler") or 0),
+                "legacy_count": int(runtime_legacy_count),
+                "runtime_only_fallback_count": int(
+                    runtime_response_counter.get("runtime_only_fallback") or 0
+                ),
+                "blocked_legacy_fallback_count": int(runtime_blocked_legacy_fallback_count),
+                "unsafe_sql_plan_count": int(runtime_reason_counter.get("unsafe_sql_plan") or 0)
+                + int(runtime_sql_reason_counter.get("sql_rejected:sql_uses_unregistered_column") or 0)
+                + int(runtime_sql_reason_counter.get("sql_rejected:sql_uses_unregistered_relation") or 0),
+                "no_metric_column_declared_count": int(
+                    runtime_sql_reason_counter.get("no_metric_column_declared") or 0
+                ),
+                "no_allowed_dimension_count": int(
+                    runtime_sql_reason_counter.get("no_allowed_dimension") or 0
+                ),
+                "missing_dictionary_relation_count": int(
+                    runtime_reason_counter.get("missing_dictionary_relation") or 0
+                ),
+                "missing_dictionary_column_count": int(
+                    runtime_reason_counter.get("missing_dictionary_column") or 0
+                ),
+                "satisfaction_review_failed_count": int(
+                    runtime_satisfaction_review_failed_count
+                ),
+                "insight_poor_count": int(runtime_insight_poor_count),
+                "top_failed_questions": _top_items(runtime_questions_failed, label="question"),
+                "top_columns_used": _top_items(runtime_columns_used, label="column"),
+                "top_relations_used": _top_items(runtime_relations_used, label="relation"),
+                "improvement_recommendations": improvement_recommendations[:5],
             },
             "sources": sources,
         }

@@ -1,0 +1,113 @@
+"use client";
+
+import type { ComponentType } from "react";
+import {
+  AreaChart,
+  BarChart3,
+  LayoutDashboard,
+  Table2,
+  WandSparkles,
+} from "lucide-react";
+import ChartRenderer from "@/modules/agente-ia/components/ChartRenderer";
+import DataTable from "@/modules/agente-ia/components/DataTable";
+import InsightCards from "@/modules/agente-ia/components/InsightCards";
+import KPIGrid from "@/modules/agente-ia/components/KPIGrid";
+import type { DashboardSnapshot, DashboardWidget } from "@/modules/agente-ia/types";
+
+type RendererProps = {
+  widget: DashboardWidget;
+};
+
+const KPIWidget = ({ widget }: RendererProps) =>
+  widget.type === "kpi" ? <KPIGrid items={widget.data.items} /> : null;
+
+const ChartWidget = ({ widget }: RendererProps) =>
+  widget.type === "chart" ? <ChartRenderer charts={widget.data.charts} /> : null;
+
+const TableWidget = ({ widget }: RendererProps) =>
+  widget.type === "table" ? <DataTable tabs={widget.data.tabs} /> : null;
+
+const InsightWidget = ({ widget }: RendererProps) =>
+  widget.type === "insights" ? <InsightCards items={widget.data.items} /> : null;
+
+const widgetRegistry: Record<
+  DashboardWidget["type"],
+  ComponentType<RendererProps>
+> = {
+  kpi: KPIWidget,
+  chart: ChartWidget,
+  table: TableWidget,
+  insights: InsightWidget,
+};
+
+type DashboardRendererProps = {
+  snapshot: DashboardSnapshot;
+  onLoadDemo: () => void;
+};
+
+const DashboardRenderer = ({
+  snapshot,
+  onLoadDemo,
+}: DashboardRendererProps) => {
+  if (!snapshot.hasStructuredContent) {
+    return (
+      <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-[32px] border border-dashed border-gray-300 bg-white px-6 py-10 text-center dark:border-gray-700 dark:bg-gray-950">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-200">
+          {snapshot.isLoading ? (
+            <WandSparkles size={24} />
+          ) : (
+            <LayoutDashboard size={24} />
+          )}
+        </div>
+        <h3 className="mt-5 text-lg font-semibold text-gray-950 dark:text-white">
+          {snapshot.isLoading
+            ? "Preparando dashboard"
+            : "El dashboard aparecera aqui"}
+        </h3>
+        <p className="mt-2 max-w-xl text-sm leading-6 text-gray-500 dark:text-gray-400">
+          {snapshot.isLoading
+            ? "La respuesta esta en curso. Cuando lleguen KPIs, tablas o charts, esta vista los materializara automaticamente."
+            : "Conversa a la izquierda y deja que la IA convierta resultados analiticos en tablas, KPIs, graficas e insights sin repetir el texto del chat."}
+        </p>
+        {!snapshot.isLoading && (
+          <button
+            type="button"
+            onClick={onLoadDemo}
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#111827] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#1f2937]"
+          >
+            <WandSparkles size={16} />
+            Cargar demo analitica
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {snapshot.widgets.map((widget) => {
+        const Renderer = widgetRegistry[widget.type];
+        const Icon =
+          widget.type === "kpi"
+            ? LayoutDashboard
+            : widget.type === "chart"
+              ? AreaChart
+              : widget.type === "table"
+                ? Table2
+                : BarChart3;
+
+        return (
+          <section key={widget.id} className="space-y-3">
+            <div className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.18em] text-gray-500 uppercase dark:text-gray-400">
+              <Icon size={13} />
+              {widget.title}
+            </div>
+            <Renderer widget={widget} />
+          </section>
+        );
+      })}
+    </div>
+  );
+};
+
+export default DashboardRenderer;

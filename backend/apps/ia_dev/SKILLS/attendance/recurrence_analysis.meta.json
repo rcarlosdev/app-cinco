@@ -3,6 +3,6 @@
   "domain": "attendance",
   "version": "1.0.0",
   "tags": ["attendance", "recurrence", "grouped", "itemized"],
-  "consumers": ["capability_planner", "attendance_handlers"],
+  "consumers": ["attendance_handlers"],
   "status": "active"
 }

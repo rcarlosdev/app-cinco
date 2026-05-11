@@ -22,11 +22,17 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     Write-Step "No existe .venv, creando entorno virtual..."
     Push-Location $backendRoot
     try {
-        if (Get-Command python -ErrorAction SilentlyContinue) {
-            & python -m venv .venv
+        if (Get-Command py -ErrorAction SilentlyContinue) {
+            try {
+                & py -3.11 -m venv .venv
+            }
+            catch {
+                Write-Step "No fue posible crear .venv con Python 3.11; probando con el launcher por defecto..."
+                & py -3 -m venv .venv
+            }
         }
-        elseif (Get-Command py -ErrorAction SilentlyContinue) {
-            & py -3 -m venv .venv
+        elseif (Get-Command python -ErrorAction SilentlyContinue) {
+            & python -m venv .venv
         }
         else {
             throw "No se encontro 'python' ni 'py' en PATH."
