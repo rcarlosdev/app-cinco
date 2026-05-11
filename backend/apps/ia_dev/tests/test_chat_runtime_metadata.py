@@ -218,6 +218,139 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             "empleados.count.active.v1",
         )
 
+    def test_resolve_query_intelligence_routes_certificados_altura_proximos_a_vencer_without_fallback(self):
+        service = ChatApplicationService()
+        message = "certificados de altura proximos a vencer del personal activo operativo"
+        run_context = RunContext.create(message=message, session_id="sess-heights", reset_memory=False)
+        intent = StructuredQueryIntent(
+            raw_query=message,
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.91,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=StructuredQueryIntent(
+                raw_query=message,
+                domain_code="empleados",
+                operation="count",
+                template_id="count_entities_by_status",
+                filters={"estado_empleado": "ACTIVO", "tipo_labor": "OPERATIVO"},
+                period={},
+                group_by=[],
+                metrics=["count"],
+                confidence=0.94,
+                source="rules_arbitrated",
+            ),
+            semantic_context={
+                "tables": [{"table_name": "cinco_base_de_personal"}],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["datos", "calturas", "estado", "tipo_labor"],
+                "column_profiles": [
+                    {"table_name": "cinco_base_de_personal", "logical_name": "estado_empleado", "column_name": "estado"},
+                    {"table_name": "cinco_base_de_personal", "logical_name": "tipo_labor", "column_name": "tipo_labor"},
+                    {
+                        "table_name": "cinco_base_de_personal",
+                        "logical_name": "certificado_alturas_fecha_emision",
+                        "column_name": "datos",
+                        "supports_filter": True,
+                        "is_date": True,
+                        "definicion_negocio": "Fuente oficial. [json_path=$.certificados_alturas[*]][json_filter_tipo=alturas][json_date_key=fecha][fallback_column=calturas]",
+                    },
+                ],
+                "resolved_semantic": {
+                    "field_match": {
+                        "logical_name": "certificado_alturas_fecha_emision",
+                        "semantic_role": "heights_certificate_validity",
+                    }
+                },
+                "source_of_truth": {"pilot_sql_assisted_enabled": True},
+            },
+            normalized_filters={"estado_empleado": "ACTIVO", "tipo_labor": "OPERATIVO"},
+            normalized_period={},
+            mapped_columns={"estado_empleado": "estado", "tipo_labor": "tipo_labor"},
+        )
+        execution_plan = QueryExecutionPlan(
+            strategy="sql_assisted",
+            reason="employee_heights_certificate_summary_json",
+            domain_code="empleados",
+            sql_query="SELECT 1 AS certificados_proximos_vencer LIMIT 1",
+            constraints={"filters": {"estado_empleado": "ACTIVO", "tipo_labor": "OPERATIVO"}, "group_by": [], "result_shape": "kpi"},
+            policy={"allowed": True, "reason": "sql_validated"},
+            metadata={"compiler": "employee_semantic_sql", "metric_used": "certificado_alturas_vigencia"},
+        )
+
+        with patch.object(service.semantic_business_resolver, "build_semantic_context", return_value={}), patch.object(
+            service.capability_runtime,
+            "build_candidate_hints",
+            return_value=[{"capability_id": "empleados.count.active.v1", "reason": "bootstrap"}],
+        ), patch.object(service.query_intent_resolver, "match_query_pattern", return_value=None), patch.object(
+            service.query_intent_resolver,
+            "resolve",
+            return_value=intent,
+        ), patch.object(
+            service.intent_arbitration_service,
+            "arbitrate",
+            return_value={
+                "final_intent": "analytics_query",
+                "final_domain": "empleados",
+                "should_execute_query": True,
+                "should_use_handler": False,
+                "should_use_sql_assisted": True,
+                "should_fallback": False,
+                "confidence": 0.96,
+                "reasoning_summary": "Consulta de vigencia de certificados de alturas en empleados.",
+            },
+        ), patch.object(
+            service.semantic_business_resolver,
+            "resolve_query",
+            return_value=resolved_query,
+        ), patch.object(
+            service.query_execution_planner,
+            "plan",
+            return_value=execution_plan,
+        ):
+            payload = service._resolve_query_intelligence(
+                message=message,
+                base_classification={"domain": "empleados", "intent": "empleados_query", "needs_database": True},
+                session_context={},
+                run_context=run_context,
+                observability=_ObservabilityStub(),
+            )
+
+        self.assertEqual(str(payload.get("error") or ""), "")
+        self.assertEqual(str(((payload.get("resolved_query") or {}).get("intent") or {}).get("domain_code") or ""), "empleados")
+        self.assertEqual(str(((payload.get("execution_plan") or {}).get("strategy") or "")), "sql_assisted")
+        self.assertEqual(str(((payload.get("execution_plan") or {}).get("metadata") or {}).get("metric_used") or ""), "certificado_alturas_vigencia")
+
+    def test_resolve_query_intelligence_exposes_empleados_errors_in_metadata_and_observability(self):
+        service = ChatApplicationService()
+        observability = _ObservabilityStub()
+        run_context = RunContext.create(message="empleados activos", session_id="sess-qi-error", reset_memory=False)
+
+        with patch.object(
+            service.semantic_business_resolver,
+            "build_semantic_context",
+            side_effect=RuntimeError("boom empleados"),
+        ):
+            payload = service._resolve_query_intelligence(
+                message="empleados activos",
+                base_classification={"domain": "empleados", "intent": "empleados_query", "needs_database": True},
+                session_context={},
+                run_context=run_context,
+                observability=observability,
+            )
+
+        self.assertEqual(str(payload.get("mode") or ""), "active")
+        self.assertIn("boom empleados", str(payload.get("error") or ""))
+        self.assertIn("boom empleados", str((run_context.metadata.get("query_intelligence") or {}).get("error") or ""))
+        self.assertTrue(any(event.get("event_type") == "query_intelligence_error" for event in observability.events))
+
     def test_resolve_query_intelligence_realigns_semantic_context_to_employee_intent_domain(self):
         service = ChatApplicationService()
         service.intent_arbitration_service.enable_openai = False

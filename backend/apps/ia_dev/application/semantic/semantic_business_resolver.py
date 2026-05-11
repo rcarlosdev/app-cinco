@@ -35,6 +35,9 @@ from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
 from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
     get_groupable_dimensions as get_inventory_groupable_dimensions,
 )
+from apps.ia_dev.services.ai_dictionary_remediation_service import (
+    AIDictionaryRemediationService,
+)
 from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
     load_inventory_agent_yaml,
 )
