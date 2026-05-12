@@ -182,6 +182,30 @@ const normalizeTable = (value: unknown): NormalizedTable | null => {
   };
 };
 
+const normalizeColumnKey = (value: string) =>
+  value.trim().toLowerCase().replace(/\s+/g, "_");
+
+const hasRequiredColumns = (
+  table: NormalizedTable,
+  requiredColumns: readonly string[],
+) => {
+  const availableColumns = new Set(table.columns.map(normalizeColumnKey));
+  return requiredColumns.every((column) => availableColumns.has(column));
+};
+
+const isTransactionalInventoryKardexTable = (table: NormalizedTable | null) => {
+  if (!table || table.rows.length === 0) return false;
+  return hasRequiredColumns(table, [
+    "fecha",
+    "tipo_movimiento",
+    "codigo",
+    "cedula",
+    "cantidad",
+    "efecto",
+    "saldo_movimiento",
+  ]);
+};
+
 const rebuildChartFromTable = (
   table: NormalizedTable | null,
   title: string,
@@ -349,9 +373,10 @@ export const normalizeChatPayload = (
     (summary.length > 0 ? summary.slice(0, 72) : "Analisis de datos");
 
   const chartFromActions = getChartFromActions(response?.actions);
-  const rebuiltChart =
-    rebuildChartFromTable(table, title, meta) ||
-    rebuildChartFromLabelsSeries(labels, series, title, meta);
+  const rebuiltChart = isTransactionalInventoryKardexTable(table)
+    ? null
+    : rebuildChartFromTable(table, title, meta) ||
+      rebuildChartFromLabelsSeries(labels, series, title, meta);
 
   const charts = dedupeCharts([
     rawChart,

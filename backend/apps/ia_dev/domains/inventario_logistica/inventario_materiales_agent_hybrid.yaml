@@ -769,6 +769,15 @@ tables:
         is_groupable: true
         is_filterable: true
 
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, móvil, cuadrilla, brigada]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
       devuelto_por:
         data_type: string
         semantic_role: responsible_person

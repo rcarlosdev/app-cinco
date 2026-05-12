@@ -85,6 +85,23 @@ const inferInventoryTypePresentation = (table: NormalizedTable) => {
 };
 
 const inferTablePresentation = (table: NormalizedTable) => {
+  if (
+    hasRequiredColumns(table, [
+      "fecha",
+      "tipo_movimiento",
+      "codigo",
+      "cedula",
+      "cantidad",
+      "efecto",
+      "saldo_movimiento",
+    ])
+  ) {
+    return {
+      label: "Kardex Operativo",
+      badges: ["Kardex", "Empleado", "Codigo"],
+    };
+  }
+
   if (hasRequiredColumns(table, MATERIALS_COLUMNS)) {
     return inferInventoryTypePresentation(table);
   }

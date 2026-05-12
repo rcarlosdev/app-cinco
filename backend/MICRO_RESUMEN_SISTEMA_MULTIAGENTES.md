@@ -604,6 +604,21 @@ Ambos con enrichment de `cinco_base_de_personal`, incluyendo `estado_empleado`, 
 
 - Los saldos de inventario nunca deben filtrar solo positivos.
 - En consultas por empleado, tecnico, movil, cuadrilla, bodega o codigo se deben devolver saldos positivos, cero y negativos.
+
+## Estado validado 2026-05-11 dashboard kardex codigo + empleado
+
+- Consulta reproducida: `kardex del codigo 1025507 para el empleado 1037659267`
+- Estado backend validado:
+  - `final_domain = inventario_logistica`
+  - `capability = inventory_kardex_by_employee`
+  - `response_flow = sql_assisted`
+  - reply esperado: `Se consolido el kardex del codigo 1025507 para el empleado 1037659267`
+  - salida estructurada: `table` transaccional con columnas de kardex operativo
+- Regla de dashboard confirmada:
+  - si la tabla contiene `fecha, tipo_movimiento, codigo, cedula, cantidad, efecto, saldo_movimiento`
+  - tratar la vista como `Kardex Operativo`
+  - no reconstruir chart sintetico desde la tabla en frontend
+  - privilegiar tabla + insights sobre grafica automatica
 - `HAVING saldo <> 0` tambien es incorrecto cuando excluye saldos en cero.
 - Si la consulta es generica de inventario o saldo sin familia explicita, mantener ambos bloques cuando apliquen:
   - materiales/ferretero
@@ -847,3 +862,109 @@ El frontend final ya consume este sobre:
 - Estado vigente:
   - compilacion TypeScript: OK
   - lint: OK
+
+## Incidente persistido: certificados de alturas e impacto cruzado en empleados
+
+No reabrir esta investigacion desde cero salvo que aparezca un sintoma nuevo distinto.
+
+Hallazgo confirmado:
+
+- La falla reportada en `certificados de altura proximos a vencer` no fue causada por el agente hibrido `inventario_logistica`.
+- La causa raiz fue un `NameError` en `SemanticBusinessResolver` por uso de `AIDictionaryRemediationService` sin import activo.
+- Ese error hacia que `query_intelligence` entrara en `except`, dejara `execution_plan` vacio y degradara la consulta a:
+  - `general.answer.v1`
+  - `legacy_fallback`
+  - razon visible: `capability_mode_domain_not_enabled_yet`
+
+Archivo causal corregido:
+
+- `backend/apps/ia_dev/application/semantic/semantic_business_resolver.py`
+
+Impacto confirmado antes del fix:
+
+- consultas de `empleados`
+- consultas de `rrhh`
+- rescates que arrancaban clasificados como `empleados` aunque terminaran en otro dominio
+- caso confirmado:
+  - `certificados de altura proximos a vencer`
+  - `personal activo hoy`
+  - `stock por movil TIRAN224`
+
+Estado confirmado despues del fix:
+
+- `certificados de altura proximos a vencer` vuelve a resolver por `sql_assisted`
+- `personal activo hoy` vuelve a resolver por `sql_assisted`
+- `stock por movil TIRAN224` vuelve a resolver por `inventario_logistica` con `sql_assisted`
+
+Regla operativa persistida:
+
+- Si vuelve a aparecer el mensaje generico `Consulta recibida. Puedo ayudarte con empleados...` en una consulta moderna de `empleados` o en un rescate hacia `inventario_logistica`, primero validar:
+  - si `query_intelligence` trae `error`
+  - si `execution_plan` llega vacio
+  - si la ruta cae en `legacy_fallback`
+- Antes de culpar al hibrido YAML-DB de inventario, revisar primero errores internos del pipeline moderno de `empleados`.
+
+Regla para futuros chats:
+
+- No repetir la auditoria completa del agente hibrido `inventario_logistica` para este incidente.
+- Reusar como hecho confirmado que la causa raiz historica fue el import faltante de `AIDictionaryRemediationService`.
+
+## Sesion 2026-05-11: validacion focalizada empleados, ausentismo e inventario_logistica
+
+Alcance ejecutado en esta sesion:
+
+- validacion focalizada de `query_intelligence`, planner y respuesta final para `empleados`
+- validacion focalizada de respuesta de negocio en `ausentismo`
+- validacion focalizada de integridad semantica/YAML en `inventario_logistica`
+- sin reauditar arquitectura ni tocar `fallback_policy`
+
+Hechos nuevos confirmados:
+
+- El caso `certificados de altura proximos a vencer` quedo blindado con prueba de servicio sobre `ChatApplicationService._resolve_query_intelligence`.
+- La regresion historica no se reabrio: la consulta sigue resolviendo en `empleados` con `execution_plan.strategy = sql_assisted` y `metric_used = certificado_alturas_vigencia`.
+- Se agrego cobertura para que un fallo interno de `query_intelligence` en `empleados` quede expuesto en:
+  - `run_context.metadata.query_intelligence.error`
+  - evento de observabilidad `query_intelligence_error`
+- Esto evita que una excepcion vuelva a degradarse silenciosamente sin rastro diagnostico util.
+
+Hallazgo nuevo corregido:
+
+- `inventario_logistica` tenia una inconsistencia real en el YAML hibrido:
+  - existia la relacion `devolucion_movil_to_personal`
+  - pero `logistica_movimientos_devolucion` no declaraba la columna `movil`
+- El problema no estaba en runtime SQL del caso de certificados; era una falla de integridad de metadata versionada.
+- Se corrigio agregando la columna `movil` como `mobile_unit` con `missing_metadata_allowed: true` en `logistica_movimientos_devolucion`.
+
+Impacto validado por agente:
+
+- `empleados`
+  - sin falla nueva confirmada
+  - `query_intelligence` mantiene ruta moderna para certificados de alturas
+  - el error path queda trazable y testeado
+- `ausentismo`
+  - sin falla nueva confirmada en este barrido
+  - las respuestas de resumen siguen diferenciando foco `all` vs `unjustified`
+- `inventario_logistica`
+  - se descarta reabrir la causa de certificados contra el hibrido
+  - se confirma y corrige una falla distinta: integridad YAML de devoluciones por movil
+
+Pruebas focalizadas corridas en esta sesion:
+
+- `python manage.py test apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_inventario_yaml_agent`
+- `python manage.py test apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_ausentismo_handler_summary_focus apps.ia_dev.tests.test_inventario_yaml_agent apps.ia_dev.tests.test_simulate_ia_dev_chat_command apps.ia_dev.tests.test_chat_runtime_metadata`
+
+Resultado:
+
+- 22 tests: OK
+- 114 tests: OK
+
+Regla operativa persistida:
+
+- Si reaparece un sintoma parecido en `empleados`, no basta con mirar el fallback visible.
+- Confirmar siempre si existe:
+  - error en `query_intelligence`
+  - metadata de error en `run_context`
+  - evento `query_intelligence_error` en observabilidad
+- Si el rojo viene de `inventario_logistica`, distinguir entre:
+  - fallo de runtime/planner
+  - inconsistencia de metadata/YAML como relaciones con columnas no declaradas

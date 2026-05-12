@@ -443,6 +443,8 @@ Regla de negocio:
 
 - Kardex = movimientos dia a dia, entradas y salidas, y saldo por codigo
 - Kardex por empleado/tecnico se resuelve por cedula usando movimientos de materiales/ferretero, conservando fecha, tipo de movimiento, codigo, descripcion, tipo, cantidad y efecto sobre saldo.
+- Si la consulta combina `codigo + empleado/tecnico + cedula`, se mantiene la familia `kardex por empleado` y se agrega filtro por `codigo`; no debe degradarse a un kardex consolidado generico por codigo.
+- En dashboard, ese resultado debe mostrarse como tabla operativa de kardex. No se debe reconstruir un chart sintetico desde filas transaccionales salvo que el backend entregue una grafica explicita.
 
 Fuentes operativas minimas:
 
@@ -506,3 +508,78 @@ Regla sobre serializados:
 - si el usuario pide solo kardex generico, evaluar si existe trazabilidad suficiente para serializados/equipos
 - si no existe trazabilidad cronologica confiable por cedula para serializados, responder materiales/ferretero y aclarar esa limitacion concreta
 - no bloquear toda la consulta por la ausencia de esa trazabilidad serializada
+
+## Regla De Diagnostico Persistida Para Fallbacks Falsos En Empleados
+
+Cuando una consulta de `empleados`, `rrhh` o un rescate hacia `inventario_logistica`:
+
+- termine en `general.answer.v1`
+- caiga en `legacy_fallback`
+- o muestre la respuesta generica `Puedo ayudarte con empleados...`
+
+no asumir de entrada que:
+
+- el dominio no esta habilitado
+- el planner no soporta la consulta
+- el agente hibrido de inventario es la causa
+
+Secuencia minima obligatoria de validacion:
+
+1. revisar si `query_intelligence` produjo `error`
+2. revisar si `execution_plan` quedo vacio
+3. revisar si el `fallback_reason` visible es solo consecuencia de ese error interno
+
+Hecho confirmado y persistido:
+
+- existio un incidente real donde `query_intelligence` fallaba con `name 'AIDictionaryRemediationService' is not defined`
+- la causa era un import faltante en `SemanticBusinessResolver`
+- el efecto visible fue degradacion a:
+  - `general.answer.v1`
+  - `legacy_fallback`
+  - razon `capability_mode_domain_not_enabled_yet`
+
+Implicacion arquitectonica:
+
+- un `fallback_reason` de routing no siempre refleja la causa raiz
+- primero se debe descartar excepcion interna en la capa semantica moderna antes de diagnosticar contratos, rollout o YAML hibrido
+
+Caso ya validado y no reabrir sin sintoma nuevo:
+
+- `certificados de altura proximos a vencer`
+
+Estado confirmado:
+
+- el incidente no fue causado por `inventario_logistica` hibrido
+- despues de corregir el import faltante, la consulta volvio a resolver por `sql_assisted`
+
+## Refuerzo Operativo 2026-05-11
+
+Reglas confirmadas en esta sesion:
+
+- La consulta `certificados de altura proximos a vencer` debe seguir resolviendo en el dominio `empleados`.
+- Para este caso, la salida moderna esperada es:
+  - `query_intelligence` activo
+  - `execution_plan.strategy = sql_assisted`
+  - `metadata.metric_used = certificado_alturas_vigencia`
+- No diagnosticar esta consulta como falla del hibrido `inventario_logistica` salvo que exista un sintoma nuevo y especifico de ese dominio.
+
+Regla de observabilidad para `empleados`:
+
+- Si `query_intelligence` falla dentro del pipeline moderno de `empleados`, el error no debe perderse.
+- Debe quedar visible como minimo en:
+  - `run_context.metadata.query_intelligence.error`
+  - evento de observabilidad `query_intelligence_error`
+
+Regla de integridad semantica para YAML/metadata versionada:
+
+- Toda relacion declarada en el YAML hibrido debe apuntar a columnas explicitamente declaradas en `tables.<tabla>.columns`.
+- Si una relacion usa una columna opcional o incompleta en metadata real, declararla igual con `missing_metadata_allowed: true` cuando corresponda.
+- Caso confirmado:
+  - `devolucion_movil_to_personal` requeria declarar `logistica_movimientos_devolucion.movil`
+
+Implicacion practica:
+
+- No todo sintoma de runtime proviene del planner o del fallback.
+- Tambien deben vigilarse inconsistencias de metadata versionada:
+  - relaciones con columnas no declaradas
+  - campos usados por joins semanticos pero ausentes en el YAML
