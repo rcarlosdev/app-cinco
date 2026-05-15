@@ -24,6 +24,7 @@ import { z } from "zod";
 //         "movil": "PROGRAM01"
 //     },
 //     "ot": "00003",
+//     "ots": ["00003", "00004"],
 //     "estado": "pendiente",
 //     "responsable_id": 2761,
 //     "fecha_inicio": "2026-02-17",
@@ -40,6 +41,19 @@ import { z } from "zod";
 
 export const ActividadSchema = z.object({
   id: z.number().optional(),
+  ot_items: z
+    .array(
+      z.object({
+        id: z.number().optional(),
+        ot: z.string(),
+        is_active: z.boolean().optional(),
+        created_at: z.string().optional(),
+        created_by: z.number().nullable().optional(),
+        updated_at: z.string().optional(),
+        updated_by: z.number().nullable().optional(),
+      }),
+    )
+    .optional(),
 
   detalle: z.object({
     tipo_trabajo: z.string().min(1, "El tipo de trabajo es requerido"),
@@ -65,7 +79,9 @@ export const ActividadSchema = z.object({
     })
     .optional(),
 
-  ot: z.string().min(1, "La OT es requerida"),
+  ots: z
+    .array(z.string().min(1, "La OT no puede estar vacía"))
+    .min(1, "Debe registrar al menos una OT"),
 
   estado: z.string().optional(), // opcional, se asignará automáticamente al crear la actividad
 

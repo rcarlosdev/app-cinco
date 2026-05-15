@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 export const useActividadSubmit = () => {
   const { submit, isLoading, error } = useFormSubmit<ActividadFormData>();
-  const { setNuevaActividad } = useActividadStore();
+  const { upsertActividad } = useActividadStore();
 
   const handleSubmit = async (
     data: ActividadFormData,
@@ -32,7 +32,7 @@ export const useActividadSubmit = () => {
             : "Actividad actualizada exitosamente",
         );
 
-        setNuevaActividad(response);
+        upsertActividad(response);
 
         if (onSuccessCallback) {
           onSuccessCallback();

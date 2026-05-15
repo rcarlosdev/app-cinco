@@ -23,6 +23,11 @@ const truncateText = (value?: string, maxLength = 60) => {
   return `${value.slice(0, maxLength)}...`;
 };
 
+const formatOts = (ots?: string[]) => {
+  if (!ots?.length) return "-";
+  return ots.join(", ");
+};
+
 export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
   {
     id: "acciones",
@@ -39,7 +44,7 @@ export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
 
       const actividad = {
         id: id as number,
-        ot: row.original.ot,
+        ots: row.original.ots,
         estado: row.original.estado,
         responsable_snapshot: row.original.responsable_snapshot,
         responsable_id: row.original.responsable_id,
@@ -56,9 +61,13 @@ export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
     },
   },
   {
-    id: "ot",
-    header: "OT",
-    accessorKey: "ot",
+    id: "ots",
+    header: "OTS",
+    accessorKey: "ots",
+    cell: ({ row }) => {
+      const ots = formatOts(row.original.ots);
+      return <span title={ots}>{truncateText(ots, 50)}</span>;
+    },
   },
   {
     id: "tipo_trabajo",

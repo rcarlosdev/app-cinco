@@ -2,9 +2,12 @@ from rest_framework import serializers
 from apps.operaciones.models import (
     Actividad,
     ActividadDetalle,
-    ActividadUbicacion
+    ActividadOT,
+    ActividadUbicacion,
+    normalize_ot_values,
 )
 from apps.empleados.services import EmpleadoService
+from apps.operaciones.services.actividad_service import ActividadService
 
 
 class ActividadDetalleSerializer(serializers.ModelSerializer):
@@ -19,9 +22,28 @@ class ActividadUbicacionSerializer(serializers.ModelSerializer):
         exclude = ('actividad',)
 
 
-class ActividadCreateSerializer(serializers.ModelSerializer):
+class ActividadOTSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActividadOT
+        fields = (
+            'id',
+            'ot',
+            'is_active',
+            'created_at',
+            'created_by',
+            'updated_at',
+            'updated_by',
+        )
+
+
+class ActividadWriteSerializer(serializers.ModelSerializer):
     detalle = ActividadDetalleSerializer()
     ubicacion = ActividadUbicacionSerializer()
+    ots = serializers.ListField(
+        child=serializers.CharField(max_length=100),
+        allow_empty=False,
+    )
+    ot = serializers.CharField(required=False, allow_blank=False, write_only=True)
     
     # fecha_inicio = serializers.DateTimeField(
     #      input_formats=[
@@ -54,6 +76,8 @@ class ActividadCreateSerializer(serializers.ModelSerializer):
         model = Actividad
         fields = (
             'ot',
+            'ots',
+            'estado',
             'responsable_id',
             'fecha_inicio',
             'fecha_fin_estimado',
@@ -67,10 +91,46 @@ class ActividadCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El empleado no existe.")
         return value
 
+    def validate(self, attrs):
+        ot = attrs.pop('ot', None)
+        ots = attrs.get('ots')
+
+        if ot and not ots:
+            ots = [ot]
+        elif ots is None and self.instance is not None:
+            ots = self.instance.ots_list
+
+        normalized_ots = normalize_ot_values(ots)
+        if not normalized_ots:
+            raise serializers.ValidationError(
+                {"ots": "Debe registrar al menos una OT relacionada."}
+            )
+
+        try:
+            ActividadService.validar_ots_unicas(
+                normalized_ots,
+                actividad_id=self.instance.id if self.instance else None,
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError({"ots": str(exc)}) from exc
+
+        attrs['ots'] = normalized_ots
+        return attrs
+
+    def update(self, instance, validated_data):
+        actor_user_id = self.context.get('actor_user_id')
+        return ActividadService.actualizar(
+            instance,
+            validated_data,
+            actor_user_id=actor_user_id,
+        )
+
 class ActividadSerializer(serializers.ModelSerializer):
     detalle = ActividadDetalleSerializer(read_only=True)
     ubicacion = ActividadUbicacionSerializer(read_only=True)
     responsable_snapshot = serializers.SerializerMethodField()
+    ots = serializers.SerializerMethodField()
+    ot_items = serializers.SerializerMethodField()
 
     class Meta:
         model = Actividad
@@ -86,3 +146,14 @@ class ActividadSerializer(serializers.ModelSerializer):
                 "movil": obj.responsable_snapshot.movil,
             }
         return None
+
+    def get_ots(self, obj):
+        return obj.ots_list
+
+    def get_ot_items(self, obj):
+        prefetched = getattr(obj, '_prefetched_objects_cache', {}).get('ot_relaciones')
+        if prefetched is not None:
+            relaciones = [relation for relation in prefetched if relation.is_active]
+        else:
+            relaciones = obj.ot_relaciones.filter(is_active=True)
+        return ActividadOTSerializer(relaciones, many=True).data
