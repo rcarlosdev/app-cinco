@@ -7,6 +7,7 @@ import unicodedata
 import copy
 from typing import Any, Callable
 
+from apps.ia_dev.application.agents.agents_runtime_service import AgentsRuntimeService
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.agent_contract_loader import AgentContractLoader
 from apps.ia_dev.application.contracts.chat_contracts import ensure_chat_response_contract
@@ -37,6 +38,9 @@ from apps.ia_dev.application.policies.policy_guard import PolicyGuard
 from apps.ia_dev.application.runtime.runtime_capability_adapter import (
     RuntimeCapabilityAdapter,
 )
+from apps.ia_dev.application.runtime.background_runtime_service import BackgroundRuntimeService
+from apps.ia_dev.application.runtime.semantic_gap_registry_service import SemanticGapRegistryService
+from apps.ia_dev.application.runtime.tool_registry_service import ToolRegistryService
 from apps.ia_dev.application.routing.capability_catalog import CapabilityCatalog
 from apps.ia_dev.application.semantic.query_execution_planner import QueryExecutionPlanner
 from apps.ia_dev.application.semantic.query_intent_resolver import QueryIntentResolver
@@ -93,6 +97,7 @@ class ChatApplicationService:
         self,
         *,
         catalog: CapabilityCatalog | None = None,
+        tool_registry_service: ToolRegistryService | None = None,
         capability_runtime_adapter: RuntimeCapabilityAdapter | None = None,
         policy_guard: PolicyGuard | None = None,
         response_assembler: ResponseAssembler | None = None,
@@ -115,10 +120,16 @@ class ChatApplicationService:
         intent_arbitration_service: IntentArbitrationService | None = None,
         semantic_orchestrator_service: SemanticOrchestratorService | None = None,
         business_response_composer_service: BusinessResponseComposerService | None = None,
+        agents_runtime_service: AgentsRuntimeService | None = None,
+        background_runtime_service: BackgroundRuntimeService | None = None,
+        semantic_gap_registry_service: SemanticGapRegistryService | None = None,
     ):
         self.catalog = catalog or CapabilityCatalog()
+        self.tool_registry_service = tool_registry_service or ToolRegistryService(catalog=self.catalog)
         self.capability_runtime = capability_runtime_adapter or RuntimeCapabilityAdapter(
-            catalog=self.catalog
+            catalog=self.catalog,
+            tool_registry_service=self.tool_registry_service,
+            background_runtime_service=background_runtime_service,
         )
         self.policy_guard = policy_guard or PolicyGuard()
         self.response_assembler = response_assembler or ResponseAssembler()
@@ -150,6 +161,16 @@ class ChatApplicationService:
         )
         self.business_response_composer_service = (
             business_response_composer_service or BusinessResponseComposerService()
+        )
+        self.agents_runtime_service = agents_runtime_service or AgentsRuntimeService(
+            gateway=self.semantic_orchestrator_service.gateway,
+            tool_registry_service=self.tool_registry_service,
+        )
+        self.background_runtime_service = background_runtime_service or BackgroundRuntimeService(
+            task_state_service=self.task_state_service,
+        )
+        self.semantic_gap_registry_service = (
+            semantic_gap_registry_service or SemanticGapRegistryService()
         )
         self.contract_loader = getattr(self.catalog, "contract_loader", None) or AgentContractLoader()
 
@@ -597,6 +618,7 @@ class ChatApplicationService:
             except Exception:
                 session_context = {}
         user_key = self._resolve_user_key(actor_user_key=actor_user_key, run_context=run_context)
+        run_context.metadata["actor_user_key"] = str(user_key or "")
         self.reasoning_ledger_service.start_run(
             run_context=run_context,
             message=message,
@@ -1162,7 +1184,14 @@ class ChatApplicationService:
             "runtime_only_fallback_reason": str(cleanup_guard.get("runtime_only_fallback_reason") or ""),
             "cleanup_phase": str(cleanup_guard.get("cleanup_phase") or ""),
         }
+        approval_runtime = dict(run_context.metadata.get("approval_runtime") or {})
+        background_runtime = dict(run_context.metadata.get("background_runtime") or {})
         final_task_status = "completed" if satisfaction_snapshot.get("satisfied", True) else "verified"
+        if list(approval_runtime.get("approvals") or []):
+            final_task_status = str(approval_runtime.get("status") or "awaiting_approval")
+        background_status = str((background_runtime.get("background") or {}).get("run_status") or "").strip().lower()
+        if background_status:
+            final_task_status = background_status
         if str((query_intelligence.get("execution_plan") or {}).get("strategy") or "") == "ask_context":
             final_task_status = "needs_input"
         display_planned_capability_id = str(planned_capability.get("capability_id") or "")
@@ -1170,6 +1199,24 @@ class ChatApplicationService:
         if response_flow == "sql_assisted" and not bool(route.get("execute_capability")):
             display_planned_capability_id = "query_execution_planner.sql_assisted"
             planned_capability_authoritative = False
+        tool_execution_state = self._build_runtime_tool_execution_state(
+            run_context=run_context,
+            response_flow=response_flow,
+            route_payload=dict(route or {}),
+            execution_plan=dict(query_intelligence.get("execution_plan") or {}),
+            response=primary_response,
+            fallback_used=fallback_payload,
+            validation_result=satisfaction_snapshot,
+        )
+        agent_execution_state = self._build_runtime_agent_execution_state(
+            run_context=run_context,
+        )
+        approval_execution_state = self._build_runtime_approval_execution_state(
+            run_context=run_context,
+        )
+        background_execution_state = self._build_runtime_background_execution_state(
+            run_context=run_context,
+        )
         self._save_task_state(
             run_context=run_context,
             status=final_task_status,
@@ -1211,6 +1258,12 @@ class ChatApplicationService:
                 response_flow=response_flow,
                 fallback_used=fallback_payload,
             ),
+            extra_state={
+                **tool_execution_state,
+                **agent_execution_state,
+                **approval_execution_state,
+                **background_execution_state,
+            },
         )
         self._record_runtime_resolution_event(
             observability=observability,
@@ -1224,7 +1277,7 @@ class ChatApplicationService:
         )
         self.reasoning_ledger_service.finalize(
             run_context=run_context,
-            status="completed",
+            status=final_task_status,
             outcome={
                 "diagnostics_activated": bool(diagnostics.get("activated")),
                 "top_signature": str(((diagnostics.get("items") or [{}])[0] or {}).get("signature") or ""),
@@ -1254,6 +1307,10 @@ class ChatApplicationService:
             response=assembled,
             run_context=run_context,
             response_flow=response_flow,
+        )
+        final_response = self._attach_semantic_gap_learning(
+            response=final_response,
+            run_context=run_context,
         )
         final_response = self.business_response_composer_service.compose(
             response=final_response,
@@ -1727,8 +1784,38 @@ class ChatApplicationService:
                     "semantic_normalization": dict(semantic_normalization_payload or {}),
                     "canonical_resolution": dict(canonical_resolution_payload or {}),
                 },
+                run_context=run_context,
+                observability=observability,
             )
             run_context.metadata["semantic_orchestrator"] = dict(semantic_orchestrator or {})
+            agents_runtime = self.agents_runtime_service.orchestrate(
+                user_message=message,
+                candidate_domain=str(
+                    semantic_orchestrator.get("domain")
+                    or intent_arbitration.get("final_domain")
+                    or classification_for_qi.get("domain")
+                    or intent.domain_code
+                    or domain_code
+                    or ""
+                ),
+                candidate_intent=str(
+                    semantic_orchestrator.get("intent")
+                    or intent_arbitration.get("final_intent")
+                    or classification_for_qi.get("intent")
+                    or intent.operation
+                    or ""
+                ),
+                candidate_capability=str(semantic_orchestrator.get("capability") or ""),
+                semantic_orchestrator=dict(semantic_orchestrator or {}),
+                route_debug_hints={
+                    "pre_router": dict(inventory_pre_router or {}),
+                    "classification": dict(classification_for_qi or {}),
+                    "semantic_normalization": dict(semantic_normalization_payload or {}),
+                    "canonical_resolution": dict(canonical_resolution_payload or {}),
+                },
+                run_context=run_context,
+                observability=observability,
+            )
             self._record_event(
                 observability=observability,
                 event_type="intent_arbitration_resolved",
@@ -1763,6 +1850,20 @@ class ChatApplicationService:
                     "recommended_route": str(semantic_orchestrator.get("recommended_route") or ""),
                     "needs_clarification": bool(semantic_orchestrator.get("needs_clarification")),
                     "confidence": float(semantic_orchestrator.get("confidence") or 0.0),
+                },
+                only_if=True,
+            )
+            self._record_event(
+                observability=observability,
+                event_type="agents_runtime_resolved",
+                source="ChatApplicationService",
+                meta={
+                    "run_id": run_context.run_id,
+                    "trace_id": run_context.trace_id,
+                    "selected_specialist": str(agents_runtime.get("selected_specialist") or ""),
+                    "handoff_count": len(list(agents_runtime.get("handoffs") or [])),
+                    "agent_count": len(list(agents_runtime.get("agents") or [])),
+                    "implementation": str(((agents_runtime.get("bootstrap") or {}).get("implementation") or "")),
                 },
                 only_if=True,
             )
@@ -2104,6 +2205,7 @@ class ChatApplicationService:
                 "canonical_resolution": dict(run_context.metadata.get("canonical_resolution") or {}),
                 "intent_arbitration": dict(intent_arbitration or {}),
                 "semantic_orchestrator": dict(semantic_orchestrator or {}),
+                "agents_runtime": dict(run_context.metadata.get("agents_runtime") or {}),
                 "query_pattern_fastpath": {
                     "hit": bool(fastpath_intent is not None),
                     "openai_avoided": bool(fastpath_intent is not None),
@@ -4315,6 +4417,36 @@ class ChatApplicationService:
                     "used_legacy": False,
                     "fallback_reason": None,
                 }
+            if bool((capability_result.get("meta") or {}).get("approval_pending")):
+                approval_response = self._build_awaiting_approval_response(
+                    message=message,
+                    session_id=session_id,
+                    planned_capability=planned_capability,
+                    capability_result=capability_result,
+                )
+                return {
+                    "response": approval_response,
+                    "executed_capability": False,
+                    "ok": True,
+                    "used_legacy": False,
+                    "fallback_reason": str(capability_result.get("error") or "approval_required"),
+                    "approval_pending": True,
+                }
+            if bool((capability_result.get("meta") or {}).get("background_pending")):
+                background_response = self._build_background_queued_response(
+                    message=message,
+                    session_id=session_id,
+                    planned_capability=planned_capability,
+                    capability_result=capability_result,
+                )
+                return {
+                    "response": background_response,
+                    "executed_capability": False,
+                    "ok": True,
+                    "used_legacy": False,
+                    "fallback_reason": str(capability_result.get("error") or "background_execution_queued"),
+                    "background_pending": True,
+                }
 
             fallback_reason = str(capability_result.get("error") or "capability_handler_failed")
             self._record_event(
@@ -4422,6 +4554,112 @@ class ChatApplicationService:
             "ok": True,
             "used_legacy": True,
             "fallback_reason": str(route.get("reason") or "legacy_runner"),
+        }
+
+    @staticmethod
+    def _build_awaiting_approval_response(
+        *,
+        message: str,
+        session_id: str | None,
+        planned_capability: dict[str, Any],
+        capability_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        meta = dict(capability_result.get("meta") or {})
+        approvals = [
+            dict(item)
+            for item in list(meta.get("approvals") or [])
+            if isinstance(item, dict)
+        ]
+        approval = dict((approvals[0] if approvals else {}) or {})
+        evidence = dict(approval.get("evidence_before_approval") or {})
+        requested_tool = str(approval.get("target_tool") or meta.get("tool_id") or "")
+        required_role = str(approval.get("required_role") or "governance")
+        reply = (
+            "La accion solicitada quedo pausada a la espera de aprobacion humana. "
+            f"Tool objetivo: {requested_tool or str(planned_capability.get('capability_id') or '')}. "
+            f"Rol requerido: {required_role}. "
+            "Se conserva la evidencia previa para continuar con el mismo contexto cuando exista approval."
+        )
+        return {
+            "session_id": str(session_id or ""),
+            "reply": reply,
+            "data": {
+                "kpis": {},
+                "series": [],
+                "labels": [],
+                "insights": [
+                    "La ejecucion sensible no corrio porque falta approval.",
+                    f"Resume token: {str(approval.get('resume_token') or '')}",
+                ],
+                "table": {
+                    "columns": ["campo", "valor"],
+                    "rows": [[key, str(value)] for key, value in evidence.items()],
+                    "rowcount": len(evidence),
+                },
+            },
+            "actions": [],
+            "working_updates": [],
+            "pending_proposals": [],
+            "memory_candidates": [],
+            "orchestrator": {
+                "intent": str((planned_capability.get("source") or {}).get("intent") or ""),
+                "domain": str((planned_capability.get("source") or {}).get("domain") or ""),
+                "selected_agent": str((planned_capability.get("source") or {}).get("selected_agent") or ""),
+                "used_tools": [requested_tool] if requested_tool else [],
+            },
+            "trace": [],
+        }
+
+    @staticmethod
+    def _build_background_queued_response(
+        *,
+        message: str,
+        session_id: str | None,
+        planned_capability: dict[str, Any],
+        capability_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        del message
+        meta = dict(capability_result.get("meta") or {})
+        background = dict(meta.get("background") or {})
+        polling = dict(background.get("polling") or {})
+        partial_evidence = dict(background.get("partial_evidence") or {})
+        tool_id = str(background.get("tool_id") or meta.get("tool_id") or "")
+        reply = (
+            "La tarea se encolo como background run para continuar sin bloquear el flujo sincrono actual. "
+            f"Tool objetivo: {tool_id or str(planned_capability.get('capability_id') or '')}. "
+            "Puedes consultar su progreso usando el background_run_id o el task_id."
+        )
+        return {
+            "session_id": str(session_id or ""),
+            "reply": reply,
+            "data": {
+                "kpis": {},
+                "series": [],
+                "labels": [],
+                "insights": [
+                    f"Background run id: {str(background.get('background_run_id') or '')}",
+                    f"Poll interval ms: {int(polling.get('poll_interval_ms') or 0)}",
+                ],
+                "table": {
+                    "columns": ["campo", "valor"],
+                    "rows": [[key, str(value)] for key, value in partial_evidence.items()],
+                    "rowcount": len(partial_evidence),
+                },
+            },
+            "actions": [],
+            "working_updates": [],
+            "pending_proposals": [],
+            "memory_candidates": [],
+            "orchestrator": {
+                "intent": str((planned_capability.get("source") or {}).get("intent") or ""),
+                "domain": str((planned_capability.get("source") or {}).get("domain") or ""),
+                "selected_agent": str((planned_capability.get("source") or {}).get("selected_agent") or ""),
+                "classifier_source": "background_runtime",
+                "needs_database": bool((planned_capability.get("source") or {}).get("needs_database", True)),
+                "output_mode": "summary",
+                "used_tools": [tool_id] if tool_id else [],
+            },
+            "trace": [],
         }
 
     def _apply_attendance_memory_hints(
@@ -5258,6 +5496,7 @@ class ChatApplicationService:
         validation_result: dict[str, Any] | None = None,
         fallback_used: dict[str, Any] | None = None,
         recommendations: list[str] | None = None,
+        extra_state: dict[str, Any] | None = None,
     ) -> None:
         try:
             workflow = self.task_state_service.save(
@@ -5271,10 +5510,781 @@ class ChatApplicationService:
                 validation_result=validation_result,
                 fallback_used=fallback_used,
                 recommendations=recommendations,
+                extra_state=extra_state,
             )
             run_context.metadata["task_state"] = dict(workflow or {})
         except Exception:
             logger.exception("No se pudo persistir task state runtime")
+
+    def _attach_semantic_gap_learning(
+        self,
+        *,
+        response: dict[str, Any],
+        run_context: RunContext,
+    ) -> dict[str, Any]:
+        payload = dict(response or {})
+        try:
+            registration = self.semantic_gap_registry_service.register_from_runtime(
+                response=payload,
+                run_context=run_context,
+            )
+        except Exception:
+            logger.exception("No se pudo registrar brecha semantica de runtime")
+            return payload
+
+        learning_trace = {
+            "registrada": bool(registration.get("registrada")),
+            "idempotente": bool(registration.get("idempotente")),
+            "registro_id": int((dict(registration.get("registro") or {})).get("id") or 0),
+            "categoria_brecha": str((dict(registration.get("registro") or {})).get("categoria_brecha") or ""),
+            "prioridad": str((dict(registration.get("registro") or {})).get("prioridad") or ""),
+            "estado_revision": str((dict(registration.get("registro") or {})).get("estado_revision") or ""),
+            "origen_registro": str((dict(registration.get("registro") or {})).get("origen_registro") or ""),
+        }
+        if not any(learning_trace.values()):
+            return payload
+
+        task = dict(payload.get("task") or {})
+        current_run = dict(task.get("current_run") or {})
+        evidence = dict(current_run.get("evidence") or {})
+        evidence["continuous_runtime_learning"] = learning_trace
+        current_run["evidence"] = evidence
+        semantic_explanation = dict(current_run.get("semantic_explanation") or {})
+        semantic_explanation["continuous_runtime_learning"] = learning_trace
+        current_run["semantic_explanation"] = semantic_explanation
+        task["current_run"] = current_run
+        payload["task"] = task
+
+        task_state = dict(payload.get("task_state") or {})
+        task_state_state = dict(task_state.get("state") or {})
+        task_state_state["continuous_runtime_learning"] = learning_trace
+        task_state["state"] = task_state_state
+        payload["task_state"] = task_state
+        run_context.metadata["task_state"] = task_state
+
+        data_sources = dict(payload.get("data_sources") or {})
+        runtime = dict(data_sources.get("runtime") or {})
+        runtime["continuous_runtime_learning"] = learning_trace
+        data_sources["runtime"] = runtime
+        payload["data_sources"] = data_sources
+
+        try:
+            self.task_state_service.update_state(
+                run_id=run_context.run_id,
+                extra_state={"continuous_runtime_learning": learning_trace},
+            )
+            run_context.metadata["task_state"] = dict(
+                self.task_state_service.get(run_id=run_context.run_id) or task_state
+            )
+            payload["task_state"] = dict(run_context.metadata.get("task_state") or task_state)
+        except Exception:
+            logger.exception("No se pudo reflejar continuous runtime learning en task_state")
+
+        return payload
+
+    def poll_background_run(
+        self,
+        *,
+        run_id: str | None = None,
+        background_run_id: str | None = None,
+        resume_token: str | None = None,
+    ) -> dict[str, Any]:
+        return self.background_runtime_service.poll_run(
+            run_id=run_id,
+            background_run_id=background_run_id,
+            resume_token=resume_token,
+        )
+
+    def resume_background_run(
+        self,
+        *,
+        resume_token: str,
+        approved_by: str,
+        approver_role: str,
+        evidence_after_approval: dict[str, Any] | None = None,
+        final_evidence: dict[str, Any] | None = None,
+        tool_execution_trace: list[dict[str, Any]] | None = None,
+        agent_trace_append: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return self.background_runtime_service.resume_after_approval(
+            resume_token=resume_token,
+            approved_by=approved_by,
+            approver_role=approver_role,
+            approval_runtime_service=self.capability_runtime.approval_runtime_service,
+            evidence_after_approval=evidence_after_approval,
+            final_evidence=final_evidence,
+            tool_execution_trace=tool_execution_trace,
+            agent_trace_append=agent_trace_append,
+        )
+
+    def cancel_background_run(
+        self,
+        *,
+        run_id: str,
+        cancelled_by: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        return self.background_runtime_service.cancel_run(
+            run_id=run_id,
+            cancelled_by=cancelled_by,
+            reason=reason,
+        )
+
+    @staticmethod
+    def _resolve_task_required_tools(
+        *,
+        response_flow: str,
+        orchestrator: dict[str, Any],
+        execution_plan: dict[str, Any],
+        route_payload: dict[str, Any],
+    ) -> list[str]:
+        tools: list[str] = []
+        for item in list(orchestrator.get("used_tools") or []):
+            label = str(item or "").strip()
+            if label:
+                tools.append(label)
+        capability_id = str(
+            execution_plan.get("capability_id") or route_payload.get("selected_capability_id") or ""
+        ).strip()
+        normalized_flow = str(response_flow or "").strip().lower()
+        if normalized_flow == "sql_assisted":
+            tools.append("query_execution_planner.sql_assisted")
+        elif capability_id:
+            tools.append(capability_id)
+        return list(dict.fromkeys(tools))
+
+    def _build_runtime_tool_execution_state(
+        self,
+        *,
+        run_context: RunContext,
+        response_flow: str,
+        route_payload: dict[str, Any],
+        execution_plan: dict[str, Any],
+        response: dict[str, Any],
+        fallback_used: dict[str, Any],
+        validation_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        capability_id = str(
+            execution_plan.get("capability_id") or route_payload.get("selected_capability_id") or ""
+        ).strip()
+        tool_definition = self.tool_registry_service.resolve_tool_for_runtime(
+            response_flow=response_flow,
+            capability_id=capability_id,
+            route_payload=route_payload,
+            execution_plan=execution_plan,
+        )
+        tool_trace = self.tool_registry_service.build_runtime_trace(
+            run_context=run_context,
+            response_flow=response_flow,
+            capability_id=capability_id,
+            route_payload=route_payload,
+            execution_plan=execution_plan,
+            response=response,
+            fallback_used=fallback_used,
+            validation_result=validation_result,
+        )
+        native_tool_trace = [
+            dict(item)
+            for item in list(run_context.metadata.get("response_native_tool_trace") or [])
+            if isinstance(item, dict)
+        ]
+        merged_tool_trace = native_tool_trace + list(tool_trace or [])
+        selected_tool_id = str((tool_definition.tool_id if tool_definition else capability_id) or "")
+        return {
+            "tool_execution": {
+                "selected_tool_id": selected_tool_id,
+                "selected_capability_id": capability_id,
+                "registry_version": self.tool_registry_service.REGISTRY_VERSION,
+                "tool_definition": tool_definition.as_dict() if tool_definition else {},
+                "native_tool_calls_count": len(native_tool_trace),
+                "response_tool_loop": dict(run_context.metadata.get("response_native_tool_loop") or {}),
+            },
+            "tool_execution_trace": merged_tool_trace,
+        }
+
+    @staticmethod
+    def _build_runtime_agent_execution_state(
+        *,
+        run_context: RunContext,
+    ) -> dict[str, Any]:
+        agents_runtime = dict(run_context.metadata.get("agents_runtime") or {})
+        return {
+            "agents": [
+                dict(item)
+                for item in list(agents_runtime.get("agents") or [])
+                if isinstance(item, dict)
+            ],
+            "handoffs": [
+                dict(item)
+                for item in list(agents_runtime.get("handoffs") or [])
+                if isinstance(item, dict)
+            ],
+            "handoff_trace": [
+                dict(item)
+                for item in list(agents_runtime.get("handoff_trace") or agents_runtime.get("handoffs") or [])
+                if isinstance(item, dict)
+            ],
+            "agent_trace": [
+                dict(item)
+                for item in list(agents_runtime.get("agent_trace") or [])
+                if isinstance(item, dict)
+            ],
+            "agents_runtime_bootstrap": dict(agents_runtime.get("bootstrap") or {}),
+        }
+
+    @staticmethod
+    def _build_runtime_approval_execution_state(
+        *,
+        run_context: RunContext,
+    ) -> dict[str, Any]:
+        approval_runtime = dict(run_context.metadata.get("approval_runtime") or {})
+        return {
+            "approvals": [
+                dict(item)
+                for item in list(approval_runtime.get("approvals") or [])
+                if isinstance(item, dict)
+            ],
+            "approval_trace": [
+                dict(item)
+                for item in list(approval_runtime.get("approval_trace") or [])
+                if isinstance(item, dict)
+            ],
+        }
+
+    @staticmethod
+    def _build_runtime_background_execution_state(
+        *,
+        run_context: RunContext,
+    ) -> dict[str, Any]:
+        background_runtime = dict(run_context.metadata.get("background_runtime") or {})
+        return {
+            "background": dict(background_runtime.get("background") or {}),
+            "background_trace": [
+                dict(item)
+                for item in list(background_runtime.get("background_trace") or [])
+                if isinstance(item, dict)
+            ],
+            "checkpoints": [
+                dict(item)
+                for item in list(background_runtime.get("checkpoints") or [])
+                if isinstance(item, dict)
+            ],
+        }
+
+    @staticmethod
+    def _build_semantic_timeline(
+        *,
+        status: str,
+        domain: str,
+        intent: str,
+        selected_capability: str,
+        selected_tool: str,
+        validation: dict[str, Any],
+        evidence: dict[str, Any],
+        approvals: list[dict[str, Any]],
+        background: dict[str, Any],
+        clarification_required: bool,
+        limitation_declared: bool,
+    ) -> list[dict[str, Any]]:
+        normalized_status = str(status or "").strip().lower()
+        background_status = str(background.get("run_status") or "").strip().lower()
+        pending_approvals = [
+            dict(item)
+            for item in approvals
+            if str(dict(item).get("approval_status") or "").strip().lower() == "awaiting_approval"
+        ]
+        validation_satisfied = bool(validation.get("satisfied", True))
+        evidence_ready = bool(
+            int(evidence.get("table_rowcount") or 0) > 0
+            or int(evidence.get("extra_table_count") or 0) > 0
+            or str(evidence.get("missing_evidence_reason") or "").strip()
+            or limitation_declared
+            or clarification_required
+        )
+
+        def _step(step: str, completed: bool = False, current: bool = False, detail: str = "") -> dict[str, Any]:
+            state = "current" if current else "completed" if completed else "pending"
+            payload = {"step": step, "state": state}
+            if detail:
+                payload["detail"] = detail
+            return payload
+
+        return [
+            _step("received", completed=True),
+            _step(
+                "semantic_plan_created",
+                completed=bool(domain or intent),
+            ),
+            _step("capability_selected", completed=bool(selected_capability)),
+            _step("tool_selected", completed=bool(selected_tool)),
+            _step(
+                "validation_passed",
+                completed=validation_satisfied and not clarification_required,
+                current=not validation_satisfied and normalized_status not in {"failed", "completed"},
+                detail=str(validation.get("reason") or ""),
+            ),
+            _step(
+                "executing",
+                completed=normalized_status in {"completed", "blocked", "awaiting_approval", "failed"}
+                or evidence_ready,
+                current=normalized_status in {"planned", "executing", "running", "queued", "resumed"}
+                or background_status in {"queued", "running", "resumed"},
+                detail=background_status or normalized_status,
+            ),
+            _step("evidence_ready", completed=evidence_ready),
+            _step(
+                "awaiting_approval",
+                completed=bool(approvals) and not pending_approvals,
+                current=bool(pending_approvals) or normalized_status == "awaiting_approval",
+            ),
+            _step(
+                "blocked",
+                current=normalized_status in {"blocked", "needs_input"}
+                or (clarification_required and normalized_status != "completed")
+                or limitation_declared,
+            ),
+            _step("completed", current=normalized_status == "completed"),
+            _step("failed", current=normalized_status == "failed"),
+        ]
+
+    @staticmethod
+    def _build_semantic_explanation(
+        *,
+        payload: dict[str, Any],
+        run_context: RunContext,
+        status: str,
+        domain: str,
+        intent: str,
+        validation: dict[str, Any],
+        evidence: dict[str, Any],
+        tool_execution: dict[str, Any],
+        approvals: list[dict[str, Any]],
+        background: dict[str, Any],
+        agents: list[dict[str, Any]],
+        handoffs: list[dict[str, Any]],
+        fallback_used: dict[str, Any],
+        execution_plan: dict[str, Any],
+        route_payload: dict[str, Any],
+        orchestrator: dict[str, Any],
+        intent_arbitration: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = dict(payload.get("data") or {})
+        business_response = dict(data.get("business_response") or {})
+        metadata = dict(business_response.get("metadata") or {})
+        evidence_summary = dict(business_response.get("evidence_summary") or {})
+        semantic_trace = dict(
+            metadata.get("semantic_trace")
+            or evidence_summary.get("semantic_trace")
+            or {}
+        )
+        output_profile = dict(
+            evidence_summary.get("output_profile")
+            or business_response.get("response_profile")
+            or {}
+        )
+        entity = dict(evidence_summary.get("entity") or {})
+        normalized_filters = dict(
+            evidence_summary.get("filters")
+            or metadata.get("filters")
+            or {}
+        )
+        selected_capability = str(
+            metadata.get("candidate_capability")
+            or execution_plan.get("capability_id")
+            or route_payload.get("selected_capability_id")
+            or ""
+        ).strip()
+        selected_tool = str(
+            tool_execution.get("selected_tool_id")
+            or metadata.get("tool_id")
+            or ""
+        ).strip()
+        planner_route_hint = str(
+            metadata.get("planner_route_hint")
+            or semantic_trace.get("planner_route_hint")
+            or route_payload.get("response_flow")
+            or ""
+        ).strip()
+        clarification_question = str(
+            orchestrator.get("clarification_question")
+            or intent_arbitration.get("required_clarification")
+            or validation.get("clarification_reason")
+            or ""
+        ).strip()
+        clarification_required = bool(
+            clarification_question
+            or validation.get("needs_clarification")
+            or (payload.get("response_envelope") or {}).get("needs_clarification")
+        )
+        limitation_texts = [
+            str(item or "").strip()
+            for item in list(metadata.get("limitations") or [])
+            if str(item or "").strip()
+        ]
+        missing_metadata = [
+            str(item or "").strip()
+            for item in list(metadata.get("missing_metadata") or [])
+            if str(item or "").strip()
+        ]
+        if str(evidence.get("missing_evidence_reason") or "").strip():
+            limitation_texts.append(str(evidence.get("missing_evidence_reason") or "").strip())
+        limitation_declared = str(metadata.get("response_status") or "").strip() == "limitation_declared"
+        metadata_sources = list(
+            dict.fromkeys(
+                [
+                    str(item or "").strip()
+                    for item in list(semantic_trace.get("fuente_dd") or [])
+                    if str(item or "").strip()
+                ]
+                + [
+                    str(item or "").strip()
+                    for item in list(semantic_trace.get("regla_metadata_usada") or [])
+                    if str(item or "").strip()
+                ]
+            )
+        )
+        capability_pack = {
+            "paquete_capacidad_usado": str(
+                semantic_trace.get("paquete_capacidad_usado")
+                or metadata.get("paquete_capacidad_usado")
+                or ""
+            ).strip(),
+            "version_paquete": str(
+                semantic_trace.get("version_paquete")
+                or metadata.get("version_paquete")
+                or ""
+            ).strip(),
+            "capacidades_declaradas": list(
+                semantic_trace.get("capacidades_declaradas")
+                or metadata.get("capacidades_declaradas")
+                or []
+            ),
+            "reglas_declaradas": list(
+                semantic_trace.get("reglas_declaradas")
+                or metadata.get("reglas_declaradas")
+                or []
+            ),
+            "perfiles_respuesta": list(
+                semantic_trace.get("perfiles_respuesta")
+                or metadata.get("perfiles_respuesta")
+                or []
+            ),
+            "evaluaciones_asociadas": list(
+                semantic_trace.get("evaluaciones_asociadas")
+                or metadata.get("evaluaciones_asociadas")
+                or []
+            ),
+        }
+        agent_names = []
+        for raw_item in agents:
+            item = dict(raw_item or {})
+            name = str(item.get("display_name") or item.get("agent_name") or item.get("agent_id") or item.get("name") or "").strip()
+            if name:
+                agent_names.append(name)
+        selected_agent = str(orchestrator.get("selected_agent") or "").strip()
+        if selected_agent:
+            agent_names.append(selected_agent)
+        agents_involved = list(dict.fromkeys(agent_names))
+        approval_status = "approved"
+        if approvals:
+            approval_status = "awaiting_approval"
+            if all(
+                str(dict(item).get("approval_status") or "").strip().lower() in {"approved", "applied"}
+                for item in approvals
+            ):
+                approval_status = "approved"
+            elif all(
+                str(dict(item).get("approval_status") or "").strip().lower() == "rejected"
+                for item in approvals
+            ):
+                approval_status = "rejected"
+
+        understood_parts = []
+        if domain:
+            understood_parts.append(domain)
+        if intent:
+            understood_parts.append(intent)
+        if entity.get("field") and entity.get("identifier"):
+            understood_parts.append(
+                f"{str(entity.get('field') or '').strip()} {str(entity.get('identifier') or '').strip()}"
+            )
+        elif entity.get("field"):
+            understood_parts.append(str(entity.get("field") or "").strip())
+        understood_as = " | ".join(part for part in understood_parts if part)
+
+        return {
+            "user_question": str(run_context.message or "").strip(),
+            "understood_as": understood_as,
+            "domain": domain,
+            "intent": intent,
+            "entity": entity,
+            "normalized_filters": normalized_filters,
+            "selected_capability": selected_capability,
+            "selected_tool": selected_tool,
+            "planner_route_hint": planner_route_hint,
+            "validation_status": {
+                "status": "passed" if bool(validation.get("satisfied", True)) and not clarification_required else "review_required",
+                "satisfied": bool(validation.get("satisfied", True)),
+                "reason": str(validation.get("reason") or "").strip(),
+                "needs_clarification": clarification_required,
+            },
+            "evidence_summary": {
+                "rowcount": int(evidence.get("table_rowcount") or 0),
+                "extra_table_count": int(evidence.get("extra_table_count") or 0),
+                "response_profile": str(evidence.get("response_profile_usado") or metadata.get("response_profile_usado") or "").strip(),
+                "sources": [
+                    str(item or "").strip()
+                    for item in list(evidence.get("evidence_sources_used") or [])
+                    if str(item or "").strip()
+                ],
+                "output_profile": output_profile,
+                "result_empty": int(evidence.get("table_rowcount") or 0) <= 0
+                and int(evidence.get("extra_table_count") or 0) <= 0,
+            },
+            "limitations": list(dict.fromkeys(limitation_texts + missing_metadata)),
+            "clarification_needed": {
+                "required": clarification_required,
+                "question": clarification_question,
+            },
+            "metadata_used": {
+                "governed_used": bool(metadata_sources),
+                "sources": metadata_sources,
+            },
+            "capability_pack": capability_pack,
+            "fallback_used": {
+                "used": bool(fallback_used.get("used")),
+                "reason": str(fallback_used.get("reason") or "").strip(),
+                "flow": str(fallback_used.get("flow") or "").strip(),
+                "shadow_fallback_used": bool(semantic_trace.get("fallback_sombreado_usado")),
+                "legacy_rule_detected": bool(semantic_trace.get("regla_legacy_detectada")),
+            },
+            "agents_involved": agents_involved,
+            "route_participants": {
+                "agents": agents_involved,
+                "handoff_count": len(handoffs),
+                "selected_agent": selected_agent,
+            },
+            "approvals_status": {
+                "status": approval_status,
+                "pending_count": sum(
+                    1
+                    for item in approvals
+                    if str(dict(item).get("approval_status") or "").strip().lower() == "awaiting_approval"
+                ),
+            },
+            "background_status": {
+                "status": str(background.get("run_status") or "").strip(),
+                "background_run_id": str(background.get("background_run_id") or "").strip(),
+                "resume_token_available": bool(str(background.get("resume_token") or "").strip()),
+            },
+            "final_state": {
+                "task_status": str(status or "").strip(),
+                "response_status": str(metadata.get("response_status") or "").strip(),
+            },
+            "timeline": ChatApplicationService._build_semantic_timeline(
+                status=status,
+                domain=domain,
+                intent=intent,
+                selected_capability=selected_capability,
+                selected_tool=selected_tool,
+                validation=validation,
+                evidence=evidence,
+                approvals=approvals,
+                background=background,
+                clarification_required=clarification_required,
+                limitation_declared=limitation_declared,
+            ),
+        }
+
+    @staticmethod
+    def _build_task_envelope(
+        *,
+        payload: dict[str, Any],
+        run_context: RunContext,
+        response_flow: str,
+    ) -> dict[str, Any]:
+        task_state = dict(run_context.metadata.get("task_state") or {})
+        task_state_data = dict(task_state.get("state") or {})
+        query_intelligence = dict(run_context.metadata.get("query_intelligence") or {})
+        execution_plan = dict(query_intelligence.get("execution_plan") or {})
+        intent_arbitration = dict(run_context.metadata.get("intent_arbitration") or {})
+        runtime_payload = dict(((payload.get("data_sources") or {}).get("runtime") or {}))
+        orchestrator = dict(payload.get("orchestrator") or {})
+        route_payload = dict(runtime_payload.get("route") or {})
+        validation = dict(task_state_data.get("validation_result") or {})
+        fallback_used = dict(task_state_data.get("fallback_used") or {})
+        tool_execution = dict(task_state_data.get("tool_execution") or {})
+        tool_execution_trace = list(task_state_data.get("tool_execution_trace") or [])
+        background = dict(task_state_data.get("background") or {})
+        agents = list(task_state_data.get("agents") or [])
+        handoffs = list(task_state_data.get("handoffs") or [])
+        approvals = list(task_state_data.get("approvals") or [])
+        background_trace = list(task_state_data.get("background_trace") or [])
+        checkpoints = list(task_state_data.get("checkpoints") or [])
+        satisfaction_review = dict(run_context.metadata.get("satisfaction_review") or {})
+        table = dict((payload.get("data") or {}).get("table") or {})
+        extra_tables = list((payload.get("data") or {}).get("extra_tables") or [])
+        business_response = dict((payload.get("data") or {}).get("business_response") or {})
+        business_response_metadata = dict(business_response.get("metadata") or {})
+        business_evidence_summary = dict(business_response.get("evidence_summary") or {})
+
+        status = str(
+            task_state_data.get("task_status")
+            or task_state.get("status")
+            or ("needs_input" if satisfaction_review.get("needs_clarification") else "completed")
+        ).strip().lower() or "planned"
+        domain = str(
+            runtime_payload.get("final_domain")
+            or orchestrator.get("final_domain")
+            or orchestrator.get("domain")
+            or task_state_data.get("detected_domain")
+            or ""
+        ).strip().lower()
+        intent = str(
+            runtime_payload.get("final_intent")
+            or orchestrator.get("final_intent")
+            or orchestrator.get("intent")
+            or intent_arbitration.get("final_intent")
+            or ""
+        ).strip()
+        required_tools = ChatApplicationService._resolve_task_required_tools(
+            response_flow=response_flow,
+            orchestrator=orchestrator,
+            execution_plan=execution_plan,
+            route_payload=route_payload,
+        )
+        evidence = {
+            "executed_query": str(task_state_data.get("executed_query") or execution_plan.get("sql_query") or ""),
+            "table_rowcount": int(table.get("rowcount") or len(table.get("rows") or [])),
+            "extra_table_count": len(extra_tables),
+            "trace_count": len(list(payload.get("trace") or [])),
+            "source_used": dict(task_state_data.get("source_used") or {}),
+            "tool_trace_count": len(tool_execution_trace),
+            "background_trace_count": len(background_trace),
+            "checkpoint_count": len(checkpoints),
+            "background_run_id": str(background.get("background_run_id") or ""),
+            "agent_count": len(agents),
+            "handoff_count": len(handoffs),
+            "approval_count": len(approvals),
+            "partial_evidence": dict(background.get("partial_evidence") or {}),
+            "final_evidence": dict(background.get("final_evidence") or {}),
+            "response_profile_usado": str(
+                business_response_metadata.get("response_profile_usado")
+                or business_evidence_summary.get("response_profile_usado")
+                or ""
+            ),
+            "evidence_sources_used": list(
+                business_response_metadata.get("evidence_sources_used")
+                or business_evidence_summary.get("evidence_sources_used")
+                or []
+            ),
+            "semantic_context_used": bool(
+                business_response_metadata.get("semantic_context_used")
+                or business_evidence_summary.get("semantic_context_used")
+            ),
+            "fallback_narrativo_usado": bool(
+                business_response_metadata.get("fallback_narrativo_usado")
+                or business_evidence_summary.get("fallback_narrativo_usado")
+            ),
+            "missing_evidence_reason": str(
+                business_response_metadata.get("missing_evidence_reason")
+                or business_evidence_summary.get("missing_evidence_reason")
+                or ""
+            ),
+            "paquete_capacidad_usado": str(
+                business_response_metadata.get("paquete_capacidad_usado")
+                or business_evidence_summary.get("capability_pack", {}).get("paquete_capacidad_usado")
+                or ""
+            ),
+            "version_paquete": str(
+                business_response_metadata.get("version_paquete")
+                or business_evidence_summary.get("capability_pack", {}).get("version_paquete")
+                or ""
+            ),
+            "capacidades_declaradas": list(
+                business_response_metadata.get("capacidades_declaradas")
+                or business_evidence_summary.get("capability_pack", {}).get("capacidades_declaradas")
+                or []
+            ),
+            "reglas_declaradas": list(
+                business_response_metadata.get("reglas_declaradas")
+                or business_evidence_summary.get("capability_pack", {}).get("reglas_declaradas")
+                or []
+            ),
+            "perfiles_respuesta": list(
+                business_response_metadata.get("perfiles_respuesta")
+                or business_evidence_summary.get("capability_pack", {}).get("perfiles_respuesta")
+                or []
+            ),
+            "evaluaciones_asociadas": list(
+                business_response_metadata.get("evaluaciones_asociadas")
+                or business_evidence_summary.get("capability_pack", {}).get("evaluaciones_asociadas")
+                or []
+            ),
+        }
+        final_state = {
+            "response_flow": str(response_flow or ""),
+            "fallback_used": fallback_used,
+            "needs_clarification": bool(satisfaction_review.get("needs_clarification")),
+            "session_id": str(payload.get("session_id") or run_context.session_id or ""),
+            "workflow_key": str(task_state.get("workflow_key") or TaskStateService.workflow_key_for_run(run_context.run_id)),
+            "agents_sdk": dict(task_state_data.get("agents_runtime_bootstrap") or {}),
+            "background_run_id": str(background.get("background_run_id") or ""),
+            "resume_token": str(background.get("resume_token") or ""),
+        }
+        semantic_explanation = ChatApplicationService._build_semantic_explanation(
+            payload=payload,
+            run_context=run_context,
+            status=status,
+            domain=domain,
+            intent=intent,
+            validation=validation,
+            evidence=evidence,
+            tool_execution={
+                **tool_execution,
+                "trace": tool_execution_trace,
+            },
+            approvals=approvals,
+            background=background,
+            agents=agents,
+            handoffs=handoffs,
+            fallback_used=fallback_used,
+            execution_plan=execution_plan,
+            route_payload=route_payload,
+            orchestrator=dict(run_context.metadata.get("semantic_orchestrator") or {}),
+            intent_arbitration=intent_arbitration,
+        )
+        return {
+            "task_id": str(
+                task_state_data.get("task_id")
+                or task_state.get("workflow_key")
+                or TaskStateService.task_id_for_run(run_context.run_id)
+            ),
+            "current_run": {
+                "run_id": run_context.run_id,
+                "status": status,
+                "domain": domain,
+                "intent": intent,
+                "plan": dict(task_state_data.get("plan") or {}),
+                "semantic_explanation": semantic_explanation,
+                "background": background,
+                "agents": agents,
+                "handoffs": handoffs,
+                "approvals": approvals,
+                "required_tools": required_tools,
+                "tool_execution": {
+                    **tool_execution,
+                    "trace": tool_execution_trace,
+                },
+                "validation": {
+                    **validation,
+                    "needs_clarification": bool(satisfaction_review.get("needs_clarification")),
+                },
+                "evidence": evidence,
+                "final_state": final_state,
+                "reply": str(payload.get("reply") or ""),
+            },
+        }
 
     def _build_runtime_only_sql_failure_meta(
         self,
@@ -5787,8 +6797,12 @@ class ChatApplicationService:
         )
         payload["orchestrator"] = orchestrator
         payload["task_state"] = dict((run_context.metadata.get("task_state") or {}))
+        task_state_payload = dict(payload.get("task_state") or {})
+        task_state_data = dict(task_state_payload.get("state") or {})
         data_sources = dict(payload.get("data_sources") or {})
         cleanup_guard = dict(run_context.metadata.get("cleanup_guard") or {})
+        agents_runtime = dict(run_context.metadata.get("agents_runtime") or {})
+        approval_runtime = dict(run_context.metadata.get("approval_runtime") or {})
         fallback_used_payload = dict(
             (((payload.get("task_state") or {}).get("state") or {}).get("fallback_used") or {})
             or {}
@@ -5828,7 +6842,12 @@ class ChatApplicationService:
                 or ""
             ),
             "route": route_payload,
-            "execute": str(response_flow or "").strip().lower() in {"handler", "sql_assisted"},
+            "execute": (
+                str(response_flow or "").strip().lower() in {"handler", "sql_assisted"}
+                and not bool(task_state_data.get("approvals"))
+                and str((task_state_data.get("background") or {}).get("run_status") or "").strip().lower()
+                not in {"queued", "running", "awaiting_approval", "paused", "resumed"}
+            ),
             "legacy_used": bool(execution_meta.get("used_legacy")),
             "fallback_used": fallback_used_payload,
             "planner_called": bool(
@@ -5884,6 +6903,51 @@ class ChatApplicationService:
             ),
             "pilot_phase": ChatApplicationService.PILOT_PHASE,
             "legacy_runtime_fallback_used": bool(execution_meta.get("used_legacy")),
+            "tool_execution": {
+                **dict(task_state_data.get("tool_execution") or {}),
+                "trace": list(task_state_data.get("tool_execution_trace") or []),
+            },
+            "background": dict(task_state_data.get("background") or {}),
+            "background_trace": [
+                dict(item)
+                for item in list(task_state_data.get("background_trace") or [])
+                if isinstance(item, dict)
+            ],
+            "checkpoints": [
+                dict(item)
+                for item in list(task_state_data.get("checkpoints") or [])
+                if isinstance(item, dict)
+            ],
+            "agents": [
+                dict(item)
+                for item in list(task_state_data.get("agents") or agents_runtime.get("agents") or [])
+                if isinstance(item, dict)
+            ],
+            "handoffs": [
+                dict(item)
+                for item in list(task_state_data.get("handoffs") or agents_runtime.get("handoffs") or [])
+                if isinstance(item, dict)
+            ],
+            "handoff_trace": [
+                dict(item)
+                for item in list(task_state_data.get("handoff_trace") or agents_runtime.get("handoff_trace") or [])
+                if isinstance(item, dict)
+            ],
+            "agent_trace": [
+                dict(item)
+                for item in list(task_state_data.get("agent_trace") or agents_runtime.get("agent_trace") or [])
+                if isinstance(item, dict)
+            ],
+            "approvals": [
+                dict(item)
+                for item in list(task_state_data.get("approvals") or approval_runtime.get("approvals") or [])
+                if isinstance(item, dict)
+            ],
+            "approval_trace": [
+                dict(item)
+                for item in list(task_state_data.get("approval_trace") or approval_runtime.get("approval_trace") or [])
+                if isinstance(item, dict)
+            ],
         }
         payload["data_sources"] = data_sources
         envelope = dict(payload.get("response_envelope") or {})
@@ -5902,6 +6966,11 @@ class ChatApplicationService:
             }
         )
         payload["response_envelope"] = envelope
+        payload["task"] = ChatApplicationService._build_task_envelope(
+            payload=payload,
+            run_context=run_context,
+            response_flow=response_flow,
+        )
         return payload
 
     @staticmethod

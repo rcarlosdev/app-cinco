@@ -1,0 +1,125 @@
+reglas:
+  - id: inventario.route.stock_balance_holder
+    descripcion: Inventario operativo por cedula o movil se organiza como saldo por portador.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.stock_balance_holder
+        - inventario.scope.dual_block_unspecified_family
+      dd_sinonimos:
+        - inventario.entity.movil
+        - inventario.entity.cedula
+      ia_dev_capacidades_columna:
+        - cedula
+        - movil
+        - tipo
+  - id: inventario.route.kardex_employee
+    descripcion: Kardex por tecnico o empleado se resuelve por cedula.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.kardex_employee
+        - inventario.kardex.signos_operativos
+      dd_sinonimos:
+        - inventario.intent.movement_history
+        - inventario.entity.cedula
+      ia_dev_capacidades_columna:
+        - cedula
+        - codigo
+        - fecha
+  - id: inventario.route.kardex_codigo
+    descripcion: Kardex consolidado por codigo aplica cuando no existe cedula del portador.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.kardex_codigo
+      dd_sinonimos:
+        - inventario.intent.movement_history
+      ia_dev_capacidades_columna:
+        - codigo
+        - fecha
+  - id: inventario.route.serial_holder
+    descripcion: La consulta serializada por portador usa la ruta dedicada de seriales.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.serial_holder
+        - inventario.metric.serial_count_only
+      dd_sinonimos:
+        - inventario.family.serializados
+      ia_dev_capacidades_columna:
+        - serial
+        - movil
+        - cedula
+  - id: inventario.scope.dual_block_unspecified_family
+    descripcion: Inventario generico por portador sin familia explicita muestra materiales y serializados.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.scope.dual_block_unspecified_family
+      dd_sinonimos:
+        - inventario.entity.movil
+        - inventario.entity.cedula
+      ia_dev_capacidades_columna:
+        - movil
+        - cedula
+  - id: inventario.metric.stock_include_zero_negative
+    descripcion: Los saldos operativos deben conservar positivos, cero y negativos.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.metric.stock_include_zero_negative
+      dd_sinonimos:
+        - inventario.family.material_generico
+      ia_dev_capacidades_columna:
+        - tipo
+  - id: inventario.metric.serial_count_only
+    descripcion: Serializados y equipos se gobiernan por conteo, no por cantidad.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.metric.serial_count_only
+      dd_sinonimos:
+        - inventario.family.serializados
+      ia_dev_capacidades_columna:
+        - serial
+        - estado
+  - id: inventario.kardex.signos_operativos
+    descripcion: Entrega suma; devolucion, consumo y cobro restan en el kardex.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.kardex.signos_operativos
+      dd_sinonimos:
+        - inventario.intent.movement_history
+      ia_dev_capacidades_columna:
+        - fecha
+        - codigo
+  - id: inventario.limit.document_generation_pending
+    descripcion: SAP, actas y documentos se declaran como limitacion, no como dato inventado.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.limit.document_generation_pending
+      dd_sinonimos:
+        - inventario.entity.cedula
+      ia_dev_capacidades_columna:
+        - cedula
+  - id: inventario.limit.transfer_destination_missing_metadata
+    descripcion: Bodega destino no se habilita sin metadata fisica segura.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.limit.transfer_destination_missing_metadata
+      dd_sinonimos:
+        - inventario.entity.bodega
+      ia_dev_capacidades_columna:
+        - bodega
+  - id: inventario.route.transfer_warehouse
+    descripcion: Traslado de bodega se documenta como ruta operativa segura sin bodega destino.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.limit.transfer_destination_missing_metadata
+      dd_sinonimos:
+        - inventario.entity.bodega
+      ia_dev_capacidades_columna:
+        - bodega
+  - id: inventario.route.transfer_other_ally
+    descripcion: Traslados a otro aliado usan la ruta declarada del dominio.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.limit.transfer_destination_missing_metadata
+      dd_sinonimos:
+        - inventario.entity.bodega
+      ia_dev_capacidades_columna:
+        - bodega

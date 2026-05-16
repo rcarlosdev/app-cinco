@@ -14,6 +14,10 @@ from apps.ia_dev.views import (
     IADevMemoryProposalView,
     IADevMemoryResetView,
     IADevObservabilitySummaryView,
+    IADevRuntimeGovernanceHealthView,
+    IADevRuntimeOperationsSummaryView,
+    IADevSemanticGapOperationsView,
+    IADevRuntimeTaskExplorerView,
     IADevTicketView,
     IADevUserMemoryView,
 )
@@ -34,4 +38,8 @@ urlpatterns = [
     path("knowledge/proposals/reject/", IADevKnowledgeRejectView.as_view(), name="ia-dev-knowledge-reject"),
     path("async/jobs/", IADevAsyncJobView.as_view(), name="ia-dev-async-job-status"),
     path("observability/summary/", IADevObservabilitySummaryView.as_view(), name="ia-dev-observability-summary"),
+    path("runtime/operations/summary/", IADevRuntimeOperationsSummaryView.as_view(), name="ia-dev-runtime-operations-summary"),
+    path("runtime/semantic-gaps/", IADevSemanticGapOperationsView.as_view(), name="ia-dev-runtime-semantic-gap-operations"),
+    path("runtime/tasks/explorer/", IADevRuntimeTaskExplorerView.as_view(), name="ia-dev-runtime-task-explorer"),
+    path("runtime/governance/health/", IADevRuntimeGovernanceHealthView.as_view(), name="ia-dev-runtime-governance-health"),
 ]

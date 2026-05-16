@@ -5,6 +5,7 @@ import type {
   IADevChatResponse,
   IADevMemoryCandidate,
   IADevMemoryProposal,
+  IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 
 export type ChatRole = "user" | "assistant";
@@ -58,6 +59,7 @@ export type NormalizedAssistantPayload = {
   needsClarification: boolean;
   blockReason: string;
   progressSource: string;
+  semanticExplanation: IADevSemanticExplanation | null;
 };
 
 export type ChatMessageModel = {

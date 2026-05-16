@@ -189,3 +189,41 @@ class MemoryRepository:
             status=status,
             limit=limit,
         )
+
+    # Continuous runtime learning
+    def get_gap_record_by_idempotency(self, idempotency_key: str) -> dict | None:
+        return self.store.get_registro_brecha_semantica_por_clave(idempotency_key)
+
+    def create_gap_record(self, payload: dict) -> dict:
+        return self.store.insert_registro_brecha_semantica(payload)
+
+    def get_gap_record(self, registro_id: int) -> dict | None:
+        return self.store.get_registro_brecha_semantica(registro_id)
+
+    def update_gap_record(self, registro_id: int, updates: dict) -> dict | None:
+        return self.store.update_registro_brecha_semantica(registro_id, updates)
+
+    def find_equivalent_open_gap_record(self, payload: dict) -> dict | None:
+        return self.store.find_equivalent_open_gap_record(payload)
+
+    def list_gap_records(
+        self,
+        *,
+        estado_revision: str | None = None,
+        categoria_brecha: str | None = None,
+        dominio_detectado: str | None = None,
+        capacidad_candidata: str | None = None,
+        solo_con_sugerencia_metadata: bool = False,
+        limit: int = 100,
+    ) -> list[dict]:
+        return self.store.list_registro_brechas_semanticas(
+            estado_revision=estado_revision,
+            categoria_brecha=categoria_brecha,
+            dominio_detectado=dominio_detectado,
+            capacidad_candidata=capacidad_candidata,
+            solo_con_sugerencia_metadata=solo_con_sugerencia_metadata,
+            limit=limit,
+        )
+
+    def summarize_gap_records(self, *, limit: int = 10) -> dict:
+        return self.store.summarize_registro_brechas_semanticas(limit=limit)

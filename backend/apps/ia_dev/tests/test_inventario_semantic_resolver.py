@@ -254,6 +254,62 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
         self.assertEqual(str(resolved.normalized_filters.get("codigo") or ""), "1025507")
 
+    def test_variacion_que_tiene_asignado_cuadrilla_resuelve_movil_con_bloque_dual(self):
+        resolved = self._resolve("qué tiene asignado la cuadrilla TIRAN224", operation="stock_balance")
+        plan = self._semantic_plan(resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "movil")
+        self.assertTrue(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_variacion_muestrame_lo_que_tiene_el_movil_resuelve_movil_con_bloque_dual(self):
+        resolved = self._resolve("muéstrame lo que tiene el móvil TIRAN224", operation="stock_balance")
+        plan = self._semantic_plan(resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertTrue(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_variacion_movimientos_del_tecnico_prioriza_cedula(self):
+        resolved = self._resolve("movimientos del técnico 5098747", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+
+    def test_variacion_entradas_y_salidas_de_cedula_prioriza_kardex_empleado(self):
+        resolved = self._resolve("entradas y salidas de 5098747", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+
+    def test_variacion_material_de_claro_para_movil_resuelve_tipo_material(self):
+        resolved = self._resolve("solo material de claro de TIRAN224", operation="stock_balance")
+        plan = self._semantic_plan(resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "material")
+        self.assertFalse(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_variacion_ferreteria_asignada_al_tecnico_resuelve_tipo_ferretero(self):
+        resolved = self._resolve("ferretería asignada al técnico 5098747", operation="stock_balance")
+
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "ferretero")
+
+    def test_variacion_nombre_propio_sin_identificador_queda_bloqueada_para_aclaracion(self):
+        resolved = self._resolve("qué tiene Juan Pérez", operation="detail")
+        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+        self.assertEqual(str(inference.get("intent") or ""), "needs_clarification")
+        self.assertTrue(any("cédula" in item.lower() or "móvil" in item.lower() for item in list(resolved.warnings or [])))
+
+    def test_variacion_actas_sap_declara_limitacion(self):
+        resolved = self._resolve("actas SAP del empleado 5098747", operation="detail")
+        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_document_generation_pending")
+        self.assertIn("documentos_sap_y_actas_no_habilitados", list(inference.get("limitations") or []))
+
     def test_saldo_material_claro_empleado_resuelve_tipo_material(self):
         resolved = self._resolve("saldo material claro empleado 5098747", operation="stock_balance")
 

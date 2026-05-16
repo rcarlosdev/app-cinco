@@ -12,6 +12,7 @@ import ChartRenderer from "@/modules/agente-ia/components/ChartRenderer";
 import DataTable from "@/modules/agente-ia/components/DataTable";
 import InsightCards from "@/modules/agente-ia/components/InsightCards";
 import KPIGrid from "@/modules/agente-ia/components/KPIGrid";
+import SemanticExplanationPanel from "@/modules/agente-ia/components/SemanticExplanationPanel";
 import type { DashboardSnapshot, DashboardWidget } from "@/modules/agente-ia/types";
 
 type RendererProps = {
@@ -30,6 +31,11 @@ const TableWidget = ({ widget }: RendererProps) =>
 const InsightWidget = ({ widget }: RendererProps) =>
   widget.type === "insights" ? <InsightCards items={widget.data.items} /> : null;
 
+const SemanticExplanationWidget = ({ widget }: RendererProps) =>
+  widget.type === "semantic_explanation" ? (
+    <SemanticExplanationPanel explanation={widget.data.explanation} />
+  ) : null;
+
 const widgetRegistry: Record<
   DashboardWidget["type"],
   ComponentType<RendererProps>
@@ -38,6 +44,7 @@ const widgetRegistry: Record<
   chart: ChartWidget,
   table: TableWidget,
   insights: InsightWidget,
+  semantic_explanation: SemanticExplanationWidget,
 };
 
 type DashboardRendererProps = {
@@ -94,6 +101,8 @@ const DashboardRenderer = ({
               ? AreaChart
               : widget.type === "table"
                 ? Table2
+                : widget.type === "semantic_explanation"
+                  ? WandSparkles
                 : BarChart3;
 
         return (

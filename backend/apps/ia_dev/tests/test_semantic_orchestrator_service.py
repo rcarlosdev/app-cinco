@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from django.test import SimpleTestCase
 
+from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.semantic.semantic_orchestrator_service import (
     SemanticOrchestratorService,
+)
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import (
+    OpenAIGatewayResponse,
+    OpenAIToolLoopResult,
 )
 
 
@@ -245,6 +250,158 @@ class SemanticOrchestratorServiceTests(SimpleTestCase):
 
         self.assertEqual(str(result.get("domain") or ""), "inventario_logistica")
         self.assertEqual(str(result.get("capability") or ""), "inventory_stock_balance_by_mobile")
+
+    def test_inventory_governed_matcher_handles_real_variation_for_movil(self):
+        service = SemanticOrchestratorService()
+        result = service.orchestrate(
+            user_message="muéstrame lo que tiene el móvil TIRAN224",
+            candidate_domain="general",
+            candidate_agent="inventario_logistica_agent",
+            agent_contract=None,
+            ai_dictionary_summary=_inventory_dictionary_summary(),
+            domain_semantic_summary={},
+            memory_context={},
+            route_debug_hints={},
+        )
+
+        self.assertEqual(str(result.get("domain") or ""), "inventario_logistica")
+        self.assertEqual(str(result.get("capability") or ""), "inventory_stock_balance_by_mobile")
+        self.assertEqual(str((result.get("filters") or {}).get("movil") or ""), "TIRAN224")
+
+    def test_inventory_governed_matcher_requires_clarification_for_name_only(self):
+        service = SemanticOrchestratorService()
+        result = service.orchestrate(
+            user_message="qué tiene Juan Pérez",
+            candidate_domain="general",
+            candidate_agent="inventario_logistica_agent",
+            agent_contract=None,
+            ai_dictionary_summary=_inventory_dictionary_summary(),
+            domain_semantic_summary={},
+            memory_context={},
+            route_debug_hints={},
+        )
+
+        self.assertTrue(bool(result.get("needs_clarification")))
+        self.assertEqual(str(result.get("recommended_route") or ""), "needs_clarification")
+
+    def test_inventory_governed_matcher_declares_sap_acta_limitation(self):
+        service = SemanticOrchestratorService()
+        result = service.orchestrate(
+            user_message="actas SAP del empleado 5098747",
+            candidate_domain="inventario_logistica",
+            candidate_agent="inventario_logistica_agent",
+            agent_contract=None,
+            ai_dictionary_summary=_inventory_dictionary_summary(),
+            domain_semantic_summary={},
+            memory_context={},
+            route_debug_hints={},
+        )
+
+        self.assertEqual(str(result.get("domain") or ""), "inventario_logistica")
+        self.assertEqual(str(result.get("capability") or ""), "inventory_document_generation_pending")
+        self.assertEqual(str(result.get("recommended_route") or ""), "external_pending")
+
+    def test_native_tool_loop_persists_trace_without_moving_runtime_authority(self):
+        run_context = RunContext.create(
+            message="inventario de la cuadrilla TIRAN224 con datos del empleado",
+            session_id="sess-native-tools",
+            reset_memory=False,
+        )
+
+        class _Gateway:
+            @staticmethod
+            def create(request):
+                raise AssertionError("No debe usar create directo cuando el loop nativo esta habilitado")
+
+            @staticmethod
+            def run_function_tool_loop(*, request, tool_executor, max_rounds=4, on_tool_result=None):
+                tool_executor(
+                    {
+                        "name": "semantic_orchestrator.dictionary_summary.v1",
+                        "call_id": "call_dict_1",
+                        "arguments": {"focus": "joins"},
+                    }
+                )
+                if callable(on_tool_result):
+                    on_tool_result(
+                        {
+                            "tool_call_id": "call_dict_1",
+                            "tool_name": "semantic_orchestrator.dictionary_summary.v1",
+                            "arguments": {"focus": "joins"},
+                            "execution_status": "completed",
+                            "validation_status": "validated",
+                            "duration_ms": 3,
+                            "evidence_metadata": {"source": "test"},
+                            "output_payload": {"table_names": ["base_codigos"]},
+                            "model_response_id": "resp_native_1",
+                            "loop_iteration": 1,
+                            "started_at": "2026-05-16T00:00:00+00:00",
+                            "finished_at": "2026-05-16T00:00:00+00:00",
+                        }
+                    )
+                return OpenAIToolLoopResult(
+                    response=OpenAIGatewayResponse(
+                        response={},
+                        output_text=json_payload,
+                        model="gpt-test",
+                        model_source="explicit",
+                        response_id="resp_native_2",
+                        usage={},
+                        metadata={},
+                        output_items=[],
+                        function_calls=[],
+                    ),
+                    tool_traces=[
+                        {
+                            "tool_call_id": "call_dict_1",
+                            "tool_name": "semantic_orchestrator.dictionary_summary.v1",
+                        }
+                    ],
+                    response_ids=["resp_native_1", "resp_native_2"],
+                    turns=2,
+                )
+
+        json_payload = """{
+            "domain": "inventario_logistica",
+            "agent_id": "inventario_logistica_agent",
+            "intent": "inventory_stock_by_mobile",
+            "capability": "inventory_stock_balance_by_mobile",
+            "confidence": 0.93,
+            "scope": "persona_operativa",
+            "filters": {"movil": "TIRAN224"},
+            "entities": {"movil": "TIRAN224"},
+            "dimensions": [],
+            "metrics": ["cantidad"],
+            "required_tables": ["base_codigos"],
+            "required_joins": [],
+            "business_rules": [],
+            "risk_flags": [],
+            "needs_clarification": false,
+            "clarification_question": null,
+            "recommended_route": "sql_assisted",
+            "reasoning_summary": "ok",
+            "user_response_strategy": {"tone": "business", "sections": [], "warnings_to_include": [], "next_best_action": ""}
+        }"""
+
+        service = SemanticOrchestratorService(gateway=_Gateway())
+        result = service.orchestrate(
+            user_message="inventario de la cuadrilla TIRAN224 con datos del empleado",
+            candidate_domain="inventario_logistica",
+            candidate_agent="inventario_logistica_agent",
+            agent_contract=None,
+            ai_dictionary_summary=_inventory_dictionary_summary(),
+            domain_semantic_summary={},
+            memory_context={},
+            route_debug_hints={},
+            run_context=run_context,
+            observability=None,
+        )
+
+        self.assertEqual(str(result.get("capability") or ""), "inventory_stock_balance_by_mobile")
+        self.assertEqual(len(list(run_context.metadata.get("response_native_tool_trace") or [])), 1)
+        loop_meta = dict(run_context.metadata.get("response_native_tool_loop") or {})
+        self.assertEqual(int(loop_meta.get("turns") or 0), 2)
+        self.assertEqual(str((list(run_context.metadata.get("response_native_tool_trace") or [])[0] or {}).get("tool_call_id") or ""), "call_dict_1")
 
     def test_informacion_empleado_routes_to_empleados(self):
         service = SemanticOrchestratorService()

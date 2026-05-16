@@ -87,6 +87,123 @@ class Phase6ObservabilitySummaryTests(SimpleTestCase):
 
 
 class Phase6GovernanceServiceTests(SimpleTestCase):
+    def test_runtime_operations_summary_aggregates_task_runtime_state(self):
+        task_state_service = MagicMock()
+        task_state_service.list.return_value = [
+            {
+                "workflow_key": "task_runtime:run-1",
+                "status": "awaiting_approval",
+                "retry_count": 1,
+                "updated_at": 1710000200,
+                "state": {
+                    "run_id": "run-1",
+                    "task_id": "task_runtime:run-1",
+                    "task_status": "awaiting_approval",
+                    "detected_domain": "inventario_logistica",
+                    "runtime_metrics": {"tool_call_count": 3},
+                    "correlation": {"correlation_id": "corr-1"},
+                    "approvals": [
+                        {
+                            "approval_status": "awaiting_approval",
+                            "required_role": "governance",
+                            "expires_at": "2020-01-01T00:00:00+00:00",
+                        }
+                    ],
+                    "background": {"run_status": "awaiting_approval"},
+                    "dead_letter": {"dead_lettered": False},
+                },
+            },
+            {
+                "workflow_key": "task_runtime:run-2",
+                "status": "failed",
+                "retry_count": 2,
+                "updated_at": 1710000100,
+                "state": {
+                    "run_id": "run-2",
+                    "task_id": "task_runtime:run-2",
+                    "task_status": "failed",
+                    "detected_domain": "empleados",
+                    "runtime_metrics": {"tool_call_count": 1},
+                    "background": {"run_status": "failed"},
+                    "dead_letter": {"dead_lettered": True},
+                    "approvals": [],
+                },
+            },
+        ]
+        service = RuntimeGovernanceService(
+            task_state_service=task_state_service,
+            semantic_gap_registry_service=MagicMock(
+                build_operations_snapshot=MagicMock(return_value={"totales": {"brechas": 0}})
+            ),
+            semantic_gap_review_service=MagicMock(
+                build_operations_snapshot=MagicMock(return_value={"totales": {"pendientes": 0}})
+            ),
+        )
+
+        summary = service.build_runtime_operations_summary(limit=50)
+
+        self.assertEqual(int(summary.get("sample_size") or 0), 2)
+        totals = dict(summary.get("totals") or {})
+        self.assertEqual(int(totals.get("tasks") or 0), 2)
+        self.assertEqual(int(totals.get("approval_pending_count") or 0), 1)
+        self.assertEqual(int(totals.get("approval_overdue_count") or 0), 1)
+        self.assertEqual(int(totals.get("background_failed_count") or 0), 1)
+        self.assertEqual(int(totals.get("dead_letter_count") or 0), 1)
+        self.assertEqual(float(totals.get("avg_tool_calls_per_run") or 0.0), 2.0)
+        alerts = list(summary.get("alerts") or [])
+        self.assertTrue(any(str(item.get("reason") or "") == "approval_overdue" for item in alerts))
+        self.assertTrue(any(str(item.get("reason") or "") == "dead_lettered" for item in alerts))
+        self.assertIn("continuous_runtime_learning", summary)
+
+    def test_task_trace_explorer_returns_sanitized_operational_view(self):
+        task_state_service = MagicMock()
+        task_state_service.get.return_value = {
+            "workflow_key": "task_runtime:run-77",
+            "status": "awaiting_approval",
+            "retry_count": 1,
+            "created_at": 1710000000,
+            "updated_at": 1710000300,
+            "last_error": "timeout",
+            "state": {
+                "run_id": "run-77",
+                "task_id": "task_runtime:run-77",
+                "task_status": "awaiting_approval",
+                "detected_domain": "inventario_logistica",
+                "correlation": {"correlation_id": "corr-77", "run_id": "run-77"},
+                "governance": {"policy_version": "runtime_hardening.v1"},
+                "runtime_metrics": {"tool_call_count": 1},
+                "background": {"run_status": "awaiting_approval", "resume_token": "resume-77"},
+                "approvals": [
+                    {
+                        "approval_status": "awaiting_approval",
+                        "required_role": "governance",
+                        "token": "super-secret-token",
+                    }
+                ],
+                "dead_letter": {"dead_lettered": False},
+                "tool_execution_trace": [{"tool_name": "x", "arguments": {"cedula": "123456"}}],
+                "agent_trace": [{"agent_id": "manager_agent"}],
+                "handoff_trace": [{"handoff_id": "handoff-1"}],
+                "approval_trace": [{"approval_request_id": "apr-1"}],
+                "background_trace": [{"event_type": "background_run_queued"}],
+                "checkpoints": [{"step": "queued"}],
+                "history": [{"status": "awaiting_approval"}],
+            },
+        }
+        service = RuntimeGovernanceService(task_state_service=task_state_service)
+
+        explorer = service.build_task_trace_explorer(run_id="run-77")
+
+        self.assertEqual(str((dict(explorer.get("task") or {})).get("run_id") or ""), "run-77")
+        self.assertEqual(int((dict(explorer.get("trace_counts") or {})).get("tool_execution_trace") or 0), 1)
+        approvals = list(explorer.get("approvals") or [])
+        self.assertEqual(str((approvals[0]).get("token") or ""), "su***en")
+        tool_trace = list((dict(explorer.get("traces") or {})).get("tool_execution_trace") or [])
+        self.assertEqual(
+            str(((dict(tool_trace[0]).get("arguments") or {}).get("cedula")) or ""),
+            "12***56",
+        )
+
     def test_dictionary_audit_reports_missing_assets_and_yaml_leaks(self):
         dictionary_service = MagicMock()
         dictionary_service.get_domain_context.side_effect = [

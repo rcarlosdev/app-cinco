@@ -938,6 +938,21 @@ class QueryExecutionPlanner:
                 return "attendance.unjustified.summary.v1"
             return "attendance.unjustified.summary.v1"
         if normalized_domain == "inventario_logistica":
+            semantic_context = dict(resolved_query.semantic_context or {})
+            resolved_semantic = dict(semantic_context.get("resolved_semantic") or {})
+            binding = dict(
+                semantic_context.get("semantic_capability_registry")
+                or resolved_semantic.get("semantic_capability_registry")
+                or {}
+            )
+            binding_capability = str(
+                binding.get("candidate_capability")
+                or resolved_semantic.get("candidate_capability")
+                or (((semantic_context.get("business_query_semantic_plan") or {}).get("candidate_capability")))
+                or ""
+            ).strip()
+            if binding_capability:
+                return binding_capability
             if self._should_route_kardex_codigo_employee_to_employee(
                 domain_code=normalized_domain,
                 template_id=template_id,
@@ -1098,6 +1113,11 @@ class QueryExecutionPlanner:
             "semantic_plan": dict(
                 semantic_context.get("business_query_semantic_plan")
                 or semantic_context.get("inventory_semantic_plan")
+                or {}
+            ),
+            "semantic_binding": dict(
+                semantic_context.get("semantic_capability_registry")
+                or resolved_semantic.get("semantic_capability_registry")
                 or {}
             ),
             "rules_applied": list(resolved_semantic.get("rules_applied") or []),
@@ -5045,6 +5065,9 @@ class QueryExecutionPlanner:
                 resolved_query=resolved_query.as_dict(),
                 rows=rows,
                 limitations=list(metadata.get("limitations") or []),
+                supplemental_tables=supplemental_tables,
+                result_set=dict(result_meta),
+                execution_metadata=metadata,
             )
             if str(business_response.get("dato") or "").strip():
                 reply = str(business_response.get("dato") or "").strip()
@@ -5058,43 +5081,6 @@ class QueryExecutionPlanner:
             if inventory_insights:
                 insights = inventory_insights
         supplemental_tables = list(supplemental_tables or [])
-        if domain_code == "inventario_logistica" and supplemental_tables:
-            serial_table = next(
-                (item for item in supplemental_tables if str(item.get("name") or "") == "serializados_equipos"),
-                {},
-            )
-            serial_rowcount = int(serial_table.get("rowcount") or 0)
-            if not bool(serial_table.get("skipped")):
-                reply = (
-                    f"Se consolidaron {len(rows)} registros de materiales/ferretero y {serial_rowcount} registros "
-                    "de serializados/equipos para el alcance consultado."
-                )
-                findings = [
-                    {
-                        "title": "Bloques entregados",
-                        "detail": (
-                            "La respuesta incluye bloque de materiales/ferretero y bloque de serializados/equipos "
-                            "con cedula, movil y estado_empleado."
-                        ),
-                    }
-                ]
-                insights = [
-                    "Materiales: saldo = entregas - devoluciones - consumos - cobros.",
-                    "Serializados: saldo = en_movil + en_base - cobros.",
-                    "No se excluyeron empleados inactivos cuando aparecieron en el cruce historico.",
-                ]
-                if business_response:
-                    business_response["dato"] = reply
-                    business_response["hallazgo"] = findings[0]["detail"]
-                    business_response["recomendacion"] = "Si quieres, puedo resumir cualquiera de los dos bloques por movil, cedula o codigo."
-            elif business_response:
-                prior = str(business_response.get("hallazgo") or "").strip()
-                skip_reason = str(serial_table.get("reason") or "").strip()
-                business_response["hallazgo"] = (
-                    f"{prior} El bloque serializado no se genero: {skip_reason}.".strip()
-                    if prior
-                    else f"El bloque serializado no se genero: {skip_reason}."
-                )
         findings = locals().get("findings") or [
             {
                 "title": "Top hallazgo",

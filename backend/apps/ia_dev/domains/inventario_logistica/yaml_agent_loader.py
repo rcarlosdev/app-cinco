@@ -5,6 +5,11 @@ from typing import Any
 
 import yaml
 
+from .metadata_gobernada_inventario import (
+    obtener_capacidades_columna_inventario,
+    obtener_reglas_gobernadas_inventario,
+    obtener_sinonimos_gobernados_inventario,
+)
 
 RUNTIME_DOMAIN_CODE = "inventario_logistica"
 DEFAULT_AGENT_PATH = Path(__file__).with_name("inventario_materiales_agent_hybrid.yaml")
@@ -282,6 +287,18 @@ def get_examples_as_query_patterns(config: dict[str, Any]) -> list[dict[str, Any
             }
         )
     return rows
+
+
+def get_governed_synonyms_for_dictionary(config: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(obtener_sinonimos_gobernados_inventario())
+
+
+def get_governed_rules_for_dictionary(config: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(obtener_reglas_gobernadas_inventario())
+
+
+def get_governed_column_capabilities(config: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(obtener_capacidades_columna_inventario())
 
 
 def validate_yaml_integrity(config: dict[str, Any]) -> dict[str, Any]:

@@ -577,13 +577,14 @@ const shouldUseWorkspaceLayout =
 
       const normalizedPayload = normalizeChatPayload(result);
       const visibleActions = getVisibleActions(result.actions);
+      const assistantReply = result.reply || result.task?.current_run.reply || "";
 
       updateActiveChat((chat) => {
         const nextMessages = chat.messages.map((message) =>
           message.id === assistantMessageId
             ? {
                 ...message,
-                content: result.reply || message.content,
+                content: assistantReply || message.content,
                 status: "final" as const,
                 response: result,
                 normalized: normalizedPayload,
