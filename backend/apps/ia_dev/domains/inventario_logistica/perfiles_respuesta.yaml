@@ -15,6 +15,65 @@ perfiles_respuesta:
       - consumos
       - cobros
       - saldo
+  - id: inventory.stock.dimension.summary
+    expected_output: saldo_inventario
+    grain: saldo_por_dimension_y_codigo
+    columnas:
+      - dimension
+      - cedula
+      - empleado
+      - movil
+      - bodega
+      - codigo
+      - descripcion
+      - tipo
+      - entregas
+      - devoluciones
+      - consumos
+      - cobros
+      - saldo
+  - id: inventory.serial.stock.dimension.summary
+    expected_output: inventario_serializado
+    grain: saldo_serializado_por_dimension_y_codigo
+    columnas:
+      - dimension
+      - cedula
+      - nombre
+      - apellido
+      - empleado
+      - movil
+      - estado_empleado
+      - bodega
+      - codigo
+      - descripcion
+      - familia
+      - seriales_total
+      - cedulas_asociadas
+      - en_movil
+      - en_base
+      - cobros
+      - saldo
+  - id: inventory.serial.stock.dimension.detail
+    expected_output: inventario_serializado
+    grain: saldo_serializado_por_dimension_y_codigo
+    columnas:
+      - dimension
+      - cedula
+      - nombre
+      - apellido
+      - empleado
+      - movil
+      - estado_empleado
+      - bodega
+      - codigo
+      - descripcion
+      - familia
+      - seriales_total
+      - cedulas_asociadas
+      - en_movil
+      - en_base
+      - cobros
+      - saldo
   - id: inventory.stock.mobile.dual_block
     expected_output: saldo_inventario
     grain: saldo_por_codigo

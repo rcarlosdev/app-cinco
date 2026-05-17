@@ -236,11 +236,38 @@ class InventorySemanticResolver:
                 business_concept = "kardex_operativo_por_empleado" if filtros.get("cedula") else "kardex_consolidado"
             elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_document_generation_pending":
                 business_concept = "documentacion_no_habilitada"
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_serial_stock_by_family_grouped_dimension":
+                business_concept = "stock_serializado_por_dimension"
             else:
                 business_concept = "stock_movil"
             candidate_fields = ["cedula", "movil", "codigo", "tipo"]
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_devolucion",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+            ]
             if coincidencia_gobernada.get("intencion") == "movement_history":
                 candidate_fields = ["fecha", "tipo_movimiento", "codigo", "cedula", "movil", "cantidad", "saldo_movimiento"]
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_serial_stock_by_family_grouped_dimension":
+                candidate_fields = [
+                    "familia",
+                    "codigo",
+                    "descripcion",
+                    "movil",
+                    "cedula",
+                    "bodega",
+                    "en_movil",
+                    "en_base",
+                    "cobros",
+                    "saldo",
+                    "seriales_total",
+                ]
+                candidate_tables = [
+                    "logistica_base_seriales",
+                    "base_codigo_seriales",
+                    "cinco_base_de_personal",
+                ]
             return {
                 "domain": self.RUNTIME_DOMAIN_CODE,
                 "candidate_domain": self.RUNTIME_DOMAIN_CODE,
@@ -249,13 +276,8 @@ class InventorySemanticResolver:
                 "business_concept": business_concept,
                 "operation": str(coincidencia_gobernada.get("operation") or "detail"),
                 "filters": filtros,
-                "group_by": [],
-                "candidate_tables": [
-                    "logistica_movimientos_entrega",
-                    "logistica_movimientos_devolucion",
-                    "logistica_movimientos_consumo",
-                    "logistica_movimientos_cobro",
-                ],
+                "group_by": [str(item or "") for item in list(coincidencia_gobernada.get("group_by") or []) if str(item or "").strip()],
+                "candidate_tables": candidate_tables,
                 "candidate_fields": candidate_fields,
                 "requires_db_validation": True,
                 "should_use_sql_assisted": not bool(coincidencia_gobernada.get("limitaciones")),

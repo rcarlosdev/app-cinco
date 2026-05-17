@@ -358,3 +358,50 @@ Para nuevas ramas, nuevos chats o nuevas tareas:
 3. modelar primero el negocio y luego la ejecucion
 4. usar metadata gobernada, capability, tool y evidencia
 5. persistir reglas reutilizables en el documento correcto
+
+## Regla UX Persistida 2026-05-16
+
+Cuando el frontend exponga el sistema multiagente empresarial:
+
+1. el chat debe seguir siendo conversacional y simple
+2. el informe empresarial debe vivir en el panel derecho
+3. historial, herramientas y caracteristicas deben quedar en una zona de soporte separada
+4. la explicacion visible debe salir de `semantic_explanation`, evidencia y estado saneado
+5. no mostrar JSON crudo, traces internos, prompts, chain-of-thought ni SQL sensible
+
+Regla critica:
+
+- la UX debe demostrar `task-first` y `evidence-first`
+- no debe degradarse a panel de debugging
+- no debe duplicar tablas o dashboard dentro del chat
+
+## Regla UX Persistida 2026-05-17: dashboard historico desacoplado del chat
+
+En el frontend del `Agente IA`:
+
+1. cada respuesta del asistente debe poder abrir su propio dashboard asociado
+2. la asociacion visible debe ser estable por `message_id`
+3. el panel derecho no debe reemplazarse automaticamente por la ultima respuesta si el usuario esta inspeccionando una respuesta anterior
+4. una nueva corrida puede mostrar estado runtime vivo sin borrar el dashboard historico seleccionado
+5. la persistencia de seleccion del dashboard debe vivir como estado visual UI, separado del runtime y separado de la respuesta conversacional
+
+Regla critica:
+
+- `chat conversacional` != `panel operativo`
+- `runtime state` != `UI state`
+- el panel derecho debe comportarse como inspector reutilizable para dashboards, evidencia, explicacion y superficies futuras, no como render acoplado al ultimo mensaje textual
+
+## Regla UX Persistida 2026-05-17: adjuntos honestos antes de transporte binario real
+
+Cuando el frontend del chat permita adjuntar archivos:
+
+1. la UI puede aceptar adjuntos locales por selector o drag & drop
+2. los adjuntos pueden mostrarse en el compositor y en el mensaje del usuario
+3. si el transporte actual no soporta binarios reales, la interfaz debe decirlo de forma explicita
+4. no se debe insinuar que el sistema leyo el contenido del archivo si solo recibio su referencia nominal
+
+Regla critica:
+
+- la UX puede adelantarse al backend
+- la semantica y la evidencia no
+- si no hubo binario en runtime, no hay inspeccion real del archivo

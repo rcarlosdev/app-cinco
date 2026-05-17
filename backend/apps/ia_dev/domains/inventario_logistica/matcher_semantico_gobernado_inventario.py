@@ -4,6 +4,8 @@ import re
 import unicodedata
 from typing import Any
 
+from django.db import connections
+
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 
 from .metadata_gobernada_inventario import (
@@ -14,16 +16,32 @@ from .metadata_gobernada_inventario import (
 
 class MatcherSemanticoGobernadoInventario:
     _PALABRAS_NO_CODIGO = {
+        "almacen",
+        "almacenes",
+        "bodega",
+        "bodegas",
         "claro",
         "codigo",
+        "cuadrilla",
         "de",
         "del",
+        "equipo",
+        "equipos",
         "empleado",
+        "en",
         "ferretero",
+        "familia",
         "inventario",
         "material",
+        "materiales",
+        "moviles",
         "movil",
+        "por",
         "saldo",
+        "serial",
+        "seriales",
+        "serializado",
+        "serializados",
         "tecnico",
     }
     _SINONIMOS_BASE = {
@@ -58,22 +76,39 @@ class MatcherSemanticoGobernadoInventario:
         limitaciones: list[str] = []
 
         senal_kardex = self._contiene(texto, sinonimos["kardex"])
-        senal_stock = self._contiene(texto, sinonimos["inventario"]) or bool(
-            re.search(r"\bmaterial(?:es)?\b", texto)
-        ) or self._contiene(texto, sinonimos["ferretero"]) or self._contiene(texto, sinonimos["material_claro"])
         senal_limitacion_documental = self._contiene(texto, sinonimos["limitacion_documental"])
-        tiene_senal_inventario = senal_stock or senal_kardex or senal_limitacion_documental
-        if not tiene_senal_inventario:
-            return self._resultado_vacio()
 
         cedula = self._extraer_cedula(texto_original, texto)
         movil = self._extraer_movil(texto_original, texto)
         codigo = self._extraer_codigo(texto_original, texto)
+        descripcion_material = self._extraer_descripcion_material(
+            texto_original=texto_original,
+            texto=texto,
+            codigo=codigo,
+            cedula=cedula,
+            movil=movil,
+        )
+        familia_serializada = self._resolver_familia_serializada_gobernada(
+            valor=descripcion_material or texto_original,
+            contexto_semantico=contexto_semantico or {},
+            metadata=metadata,
+        )
+        dimension_agrupacion = self._extraer_dimension_agrupacion(texto)
         nombre_probable = self._detectar_nombre_probable(texto_original, texto)
         if not nombre_probable and "que tiene" in texto and re.search(r"\bque tiene [a-záéíóúñ]{2,}\s+[a-záéíóúñ]{2,}\b", texto):
             nombre_probable = True
         es_kardex = senal_kardex
-        es_serializado = self._contiene(texto, sinonimos["serializados"])
+        es_serializado = self._contiene(texto, sinonimos["serializados"]) or bool(familia_serializada)
+        senal_stock = (
+            self._contiene(texto, sinonimos["inventario"])
+            or bool(re.search(r"\bmaterial(?:es)?\b", texto))
+            or self._contiene(texto, sinonimos["ferretero"])
+            or self._contiene(texto, sinonimos["material_claro"])
+            or es_serializado
+        )
+        tiene_senal_inventario = senal_stock or senal_kardex or senal_limitacion_documental
+        if not tiene_senal_inventario:
+            return self._resultado_vacio()
         menciona_portador = self._contiene(texto, sinonimos["movil"]) or self._contiene(texto, sinonimos["tecnico"])
         es_consulta_tenencia_explicita = any(
             fragmento in texto
@@ -88,9 +123,21 @@ class MatcherSemanticoGobernadoInventario:
                 and (es_consulta_tenencia_explicita or es_kardex or senal_limitacion_documental)
             )
         )
-        es_consulta_agrupada = bool(re.search(r"\bpor\s+(?:cuadrilla|brigada|movil|m[oó]vil|tecnico|técnico|empleado)\b", texto))
+        es_consulta_agrupada = bool(dimension_agrupacion)
+        senal_familia_agrupable = self._contiene(texto, sinonimos["material_claro"]) or self._contiene(texto, sinonimos["ferretero"])
+        es_agrupacion_material_filtrado = bool(
+            senal_stock
+            and dimension_agrupacion
+            and (
+                codigo
+                or descripcion_material
+                or familia_serializada
+                or (senal_familia_agrupable and dimension_agrupacion in {"movil", "cedula"})
+            )
+        )
         if not tiene_portador and not (es_kardex and codigo):
-            return self._resultado_vacio()
+            if not es_agrupacion_material_filtrado:
+                return self._resultado_vacio()
 
         if cedula:
             filtros["cedula"] = cedula
@@ -106,6 +153,15 @@ class MatcherSemanticoGobernadoInventario:
         if codigo:
             filtros["codigo"] = codigo
             entidades.setdefault("codigo", codigo)
+        elif familia_serializada:
+            filtros["material_family"] = familia_serializada
+            filtros["material_family_match_mode"] = "contains"
+            entidades.setdefault("material_family", familia_serializada)
+            reglas_aplicadas.append("familia_serializada_desde_catalogo_gobernado")
+            reglas_metadata_usadas.append("inventario.serial_family.busqueda_parcial_catalogo")
+        elif descripcion_material:
+            filtros["descripcion"] = descripcion_material
+            entidades.setdefault("descripcion", descripcion_material)
 
         if self._contiene(texto, sinonimos["material_claro"]):
             filtros["tipo"] = "material"
@@ -119,6 +175,99 @@ class MatcherSemanticoGobernadoInventario:
             filtros["tipo"] = ["material", "ferretero"]
             reglas_aplicadas.append("material_generico_desde_dd_reglas")
             reglas_metadata_usadas.append("inventario.filter.material_generico")
+
+        if (
+            senal_stock
+            and dimension_agrupacion
+            and familia_serializada
+            and not (cedula or movil)
+        ):
+            filtros["grouping_dimension"] = dimension_agrupacion
+            reglas_aplicadas.extend(
+                [
+                    "familia_serializada_agrupada_por_dimension_desde_dd_reglas",
+                    "serializados_usan_conteo_si_aplica_desde_dd_reglas",
+                ]
+            )
+            return {
+                "coincidencia_gobernada": True,
+                "dominio_candidato": "inventario_logistica",
+                "intencion": "stock_balance",
+                "capacidad_candidata": "inventory_serial_stock_by_family_grouped_dimension",
+                "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                "operation": "aggregate",
+                "filtros": filtros,
+                "entidades": entidades,
+                "group_by": [dimension_agrupacion],
+                "familias": ["serializados"],
+                "incluye_serializados": True,
+                "reglas_aplicadas": [item for item in dict.fromkeys(reglas_aplicadas) if item],
+                "limitaciones": [],
+                "requiere_aclaracion": False,
+                "pregunta_aclaracion": "",
+                "regla_metadata_usada": [
+                    item
+                    for item in dict.fromkeys(
+                        [
+                            *reglas_metadata_usadas,
+                            "inventario.metric.serial_count_only",
+                            "inventario.route.serial_stock_family_grouped_dimension",
+                        ]
+                    )
+                    if item
+                ],
+                "fuente_dd": list(FUENTES_DD_GOBERNADAS),
+                "fallback_sombreado_usado": fallback_sombreado_usado,
+                "regla_legacy_detectada": False,
+                "regla_migrada": True,
+            }
+
+        if (
+            es_agrupacion_material_filtrado
+            and not (cedula or movil)
+            and "materiales criticos" not in texto
+            and "materiales críticos" not in texto
+        ):
+            familias = self._resolver_familias(filtros=filtros, es_serializado=False)
+            filtros["grouping_dimension"] = dimension_agrupacion
+            reglas_aplicadas.extend(
+                [
+                    "saldo_agrupado_por_dimension_desde_dd_reglas",
+                    "saldo_incluye_cero_y_negativo_desde_dd_reglas",
+                ]
+            )
+            return {
+                "coincidencia_gobernada": True,
+                "dominio_candidato": "inventario_logistica",
+                "intencion": "stock_balance",
+                "capacidad_candidata": "inventory_stock_balance_by_material_dimension",
+                "template_id": "inventory_material_stock_grouped_dimension",
+                "operation": "aggregate",
+                "filtros": filtros,
+                "entidades": entidades,
+                "group_by": [dimension_agrupacion],
+                "familias": familias,
+                "incluye_serializados": False,
+                "reglas_aplicadas": [item for item in dict.fromkeys(reglas_aplicadas) if item],
+                "limitaciones": [],
+                "requiere_aclaracion": False,
+                "pregunta_aclaracion": "",
+                "regla_metadata_usada": [
+                    item
+                    for item in dict.fromkeys(
+                        [
+                            *reglas_metadata_usadas,
+                            "inventario.metric.stock_include_zero_negative",
+                            "inventario.route.stock_balance_material_grouped_dimension",
+                        ]
+                    )
+                    if item
+                ],
+                "fuente_dd": list(FUENTES_DD_GOBERNADAS),
+                "fallback_sombreado_usado": fallback_sombreado_usado,
+                "regla_legacy_detectada": False,
+                "regla_migrada": True,
+            }
 
         habla_de_tenencia = senal_stock or "muestrame lo que tiene" in texto or "muestrame que tiene" in texto
         requiere_aclaracion = False
@@ -404,6 +553,8 @@ class MatcherSemanticoGobernadoInventario:
 
     @staticmethod
     def _extraer_cedula(texto_original: str, texto: str) -> str:
+        if any(token in texto for token in ("serial", "seriales", "trazabilidad")):
+            return ""
         for patron in (
             r"\b(?:empleado|tecnico|técnico|cedula|cédula)\s+([0-9]{5,15})\b",
         ):
@@ -417,6 +568,10 @@ class MatcherSemanticoGobernadoInventario:
 
     @staticmethod
     def _extraer_movil(texto_original: str, texto: str) -> str:
+        if any(token in texto for token in ("serial", "seriales", "trazabilidad")):
+            return ""
+        if re.search(r"\bcod(?:igo)?\s+[a-z0-9_-]{2,}\b", texto, re.IGNORECASE):
+            return ""
         movil = EmployeeIdentifierService.extract_movil_identifier(texto_original or texto)
         if movil:
             return str(movil).strip().upper()
@@ -426,7 +581,7 @@ class MatcherSemanticoGobernadoInventario:
     @staticmethod
     def _extraer_codigo(texto_original: str, texto: str) -> str:
         for patron in (
-            r"\bcod(?:igo)?\s+([A-Za-z0-9_-]{2,})\b",
+            r"\b(?:del?\s+)?cod(?:igo)?\s+([A-Za-z0-9_-]{2,})\b",
             r"\bmaterial\s+([A-Za-z0-9_-]{2,})\b",
         ):
             coincidencia = re.search(patron, texto_original, re.IGNORECASE)
@@ -438,6 +593,169 @@ class MatcherSemanticoGobernadoInventario:
             coincidencia = re.search(r"\bcodigo\s+([a-z0-9_-]{2,})\b", texto)
             if coincidencia:
                 return str(coincidencia.group(1) or "").strip().upper()
+        return ""
+
+    @classmethod
+    def _extraer_descripcion_material(
+        cls,
+        *,
+        texto_original: str,
+        texto: str,
+        codigo: str,
+        cedula: str,
+        movil: str,
+    ) -> str:
+        if codigo or cedula or movil:
+            return ""
+        patrones = (
+            r"\b(?:saldo|inventario|existencia|existencias|stock)\s+en\s+(?:moviles|m[oó]viles|cuadrillas|brigadas|tecnicos|t[eé]cnicos|empleados|bodegas)\s+de\s+(.+)$",
+            r"\b(?:saldo|inventario|existencia|existencias|stock)\s+de\s+(.+?)\s+por\s+(?:movil|m[oó]vil|cuadrilla|brigada|tecnico|t[eé]cnico|empleado|bodega)\b",
+        )
+        for patron in patrones:
+            coincidencia = re.search(patron, texto_original, re.IGNORECASE)
+            if not coincidencia:
+                continue
+            valor = str(coincidencia.group(1) or "").strip(" .,:;")
+            if not valor:
+                continue
+            valor_normalizado = cls._normalizar(valor)
+            if valor_normalizado in cls._PALABRAS_NO_CODIGO:
+                return ""
+            if valor_normalizado in {"ferretero", "material", "material claro", "material de claro"}:
+                return ""
+            return valor.upper()
+        return ""
+
+    @classmethod
+    def _resolver_familia_serializada_gobernada(
+        cls,
+        *,
+        valor: str,
+        contexto_semantico: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> str:
+        normalized_value = cls._normalizar(valor)
+        if not normalized_value:
+            return ""
+        aliases = cls._aliases_familias_serializadas(metadata=metadata)
+        has_alias_signal = any(
+            alias and re.search(rf"(^|\W){re.escape(alias)}($|\W)", normalized_value)
+            for alias in aliases
+        )
+        if not has_alias_signal and len(normalized_value.split()) > 2:
+            return ""
+        catalogo = cls._catalogo_familias_serializadas(contexto_semantico=contexto_semantico)
+        if not catalogo:
+            return ""
+        exact = cls._buscar_familia_exacta(catalogo=catalogo, valor=valor)
+        if exact:
+            return exact
+        contained_value = cls._buscar_familias_por_contiene(catalogo=catalogo, valor=valor)
+        if contained_value:
+            return contained_value
+        for alias, canonical in aliases.items():
+            if alias and re.search(rf"(^|\W){re.escape(alias)}($|\W)", normalized_value):
+                exact_alias = cls._buscar_familia_exacta(catalogo=catalogo, valor=canonical)
+                if exact_alias:
+                    return exact_alias
+                contained = cls._buscar_familia_por_token_unico(catalogo=catalogo, valor=canonical)
+                if contained:
+                    return contained
+                contained_alias = cls._buscar_familias_por_contiene(catalogo=catalogo, valor=canonical)
+                if contained_alias:
+                    return contained_alias
+        return ""
+
+    @classmethod
+    def _catalogo_familias_serializadas(cls, *, contexto_semantico: dict[str, Any]) -> list[str]:
+        families = [
+            str(item or "").strip().upper()
+            for item in list(contexto_semantico.get("inventory_catalog_families") or [])
+            if str(item or "").strip()
+        ]
+        if families:
+            return list(dict.fromkeys(families))
+        try:
+            with connections["logistica_cinco"].cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT UPPER(TRIM(familia)) AS familia
+                    FROM base_codigo_seriales
+                    WHERE familia IS NOT NULL AND TRIM(familia) <> ''
+                    GROUP BY UPPER(TRIM(familia))
+                    ORDER BY familia
+                    """
+                )
+                return [
+                    str(row[0] or "").strip().upper()
+                    for row in cursor.fetchall()
+                    if str(row[0] or "").strip()
+                ]
+        except Exception:
+            return []
+
+    @classmethod
+    def _aliases_familias_serializadas(cls, *, metadata: dict[str, Any]) -> dict[str, str]:
+        aliases: dict[str, str] = {}
+        for row in list(metadata.get("dd_sinonimos") or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("scope_tipo") or "").strip().lower() != "familia_serializada":
+                continue
+            alias = cls._normalizar(str(row.get("synonym") or ""))
+            canonical = str(row.get("canonical_value") or "").strip().upper()
+            if alias and canonical:
+                aliases[alias] = canonical
+        return aliases
+
+    @classmethod
+    def _buscar_familia_exacta(cls, *, catalogo: list[str], valor: str) -> str:
+        normalized_value = cls._normalizar(valor)
+        upper_value = str(valor or "").strip().upper()
+        for family in catalogo:
+            if family == upper_value:
+                return family
+        for family in catalogo:
+            if cls._normalizar(family) == normalized_value:
+                return family
+        return ""
+
+    @classmethod
+    def _buscar_familia_por_token_unico(cls, *, catalogo: list[str], valor: str) -> str:
+        normalized_value = cls._normalizar(valor)
+        if not normalized_value:
+            return ""
+        matches = [
+            family
+            for family in catalogo
+            if re.search(rf"(^|\W){re.escape(normalized_value)}($|\W)", cls._normalizar(family))
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return ""
+
+    @classmethod
+    def _buscar_familias_por_contiene(cls, *, catalogo: list[str], valor: str) -> str:
+        normalized_value = cls._normalizar(valor)
+        if not normalized_value:
+            return ""
+        matches = [
+            family
+            for family in catalogo
+            if normalized_value in cls._normalizar(family)
+        ]
+        if matches:
+            return str(valor or "").strip().upper()
+        return ""
+
+    @staticmethod
+    def _extraer_dimension_agrupacion(texto: str) -> str:
+        if re.search(r"\b(?:por|en)\s+(?:movil|m[oó]vil|moviles|m[oó]viles|cuadrilla|cuadrillas|brigada|brigadas)\b", texto):
+            return "movil"
+        if re.search(r"\bpor\s+(?:tecnico|t[eé]cnico|empleado|empleados|cedula|c[eé]dula)\b", texto):
+            return "cedula"
+        if re.search(r"\bpor\s+(?:bodega|bodegas|almacen|almacenes)\b", texto):
+            return "bodega"
         return ""
 
     @staticmethod

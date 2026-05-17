@@ -12,6 +12,38 @@ reglas:
         - cedula
         - movil
         - tipo
+  - id: inventario.route.stock_balance_material_grouped_dimension
+    descripcion: Saldo o inventario de material filtrado por codigo o descripcion se agrega por la dimension solicitada.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.stock_balance_material_grouped_dimension
+        - inventario.metric.stock_include_zero_negative
+      dd_sinonimos:
+        - inventario.entity.movil
+        - inventario.entity.cedula
+        - inventario.entity.bodega
+      ia_dev_capacidades_columna:
+        - codigo
+        - descripcion
+        - tipo
+        - movil
+        - cedula
+        - bodega
+  - id: inventario.route.serial_stock_family_grouped_dimension
+    descripcion: Saldo serializado por familia se agrega por movil, tecnico o bodega usando el catalogo gobernado.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.serial_family.busqueda_parcial_catalogo
+        - inventario.route.serial_stock_family_grouped_dimension
+        - inventario.metric.serial_count_only
+      dd_sinonimos:
+        - inventario.family.serializados
+      ia_dev_capacidades_columna:
+        - familia
+        - movil
+        - cedula
+        - bodega
+        - codigo
   - id: inventario.route.kardex_employee
     descripcion: Kardex por tecnico o empleado se resuelve por cedula.
     metadata_gobernada:

@@ -297,6 +297,8 @@ class QueryIntentResolver:
         if match_gobernado.get("coincidencia_gobernada") and str(match_gobernado.get("template_id") or "").strip():
             template_id = str(match_gobernado.get("template_id") or "").strip()
             operation = str(match_gobernado.get("operation") or operation or "detail").strip().lower()
+            if template_id == "inventory_material_stock_grouped_dimension" and operation == "aggregate":
+                operation = "stock_balance"
         if bool(match_gobernado.get("requiere_aclaracion")):
             warning = str(match_gobernado.get("pregunta_aclaracion") or "").strip()
             warnings = [warning] if warning else []
@@ -668,6 +670,11 @@ class QueryIntentResolver:
                 normalized,
             ):
                 return "inventory_material_critical_by_employee"
+            if QueryIntentResolver._is_inventory_material_grouped_dimension_query(
+                normalized=normalized,
+                dimension_tokens=dimension_tokens,
+            ):
+                return "inventory_material_stock_grouped_dimension"
             if (
                 QueryIntentResolver._is_inventory_operational_cross_query(normalized)
                 and re.search(
@@ -720,6 +727,9 @@ class QueryIntentResolver:
         guarded_cedula = QueryIntentResolver._match_inventory_employee_stock_query(normalized)
         if guarded_cedula:
             return "cedula", guarded_cedula
+        explicit_codigo = QueryIntentResolver._extract_inventory_code(normalized=normalized, raw_message=message)
+        if explicit_codigo:
+            return "codigo", explicit_codigo
         match = re.search(r"\b\d{6,13}\b", normalized)
         if match:
             return "cedula", "".join(ch for ch in match.group(0) if ch.isdigit())
@@ -735,6 +745,12 @@ class QueryIntentResolver:
         if guarded_cedula:
             filters["cedula"] = guarded_cedula
             filters["stock_scope"] = "movil"
+        explicit_codigo = QueryIntentResolver._extract_inventory_code(
+            normalized=normalized,
+            raw_message=normalized,
+        )
+        if explicit_codigo:
+            filters["codigo"] = explicit_codigo
         estado_match = re.search(
             r"\bestado(?:\s+del?\s+\w+)?\s+(?:es\s+)?([a-z_]+)\b",
             str(normalized or ""),
@@ -781,6 +797,55 @@ class QueryIntentResolver:
             text,
         )
         return str(match.group(1) or "").strip() if match else ""
+
+    @staticmethod
+    def _extract_inventory_code(*, normalized: str, raw_message: str) -> str:
+        text = str(raw_message or normalized or "")
+        match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([a-z0-9_-]{2,})\b", text, re.IGNORECASE)
+        if not match:
+            return ""
+        return str(match.group(1) or "").strip().upper()
+
+    @classmethod
+    def _is_inventory_material_grouped_dimension_query(
+        cls,
+        *,
+        normalized: str,
+        dimension_tokens: list[str] | None = None,
+    ) -> bool:
+        text = str(normalized or "")
+        normalized_dimensions = {
+            str(item or "").strip().lower()
+            for item in list(dimension_tokens or [])
+            if str(item or "").strip()
+        }
+        asks_group_dimension = bool(
+            normalized_dimensions & {"movil", "cedula", "bodega"}
+            or re.search(
+                r"\b(?:por|en)\s+(?:movil(?:es)?|m[oó]vil(?:es)?|cuadrilla(?:s)?|brigada(?:s)?|tecnico(?:s)?|t[eé]cnico(?:s)?|empleado(?:s)?|cedula|c[eé]dula|bodega(?:s)?|almacen(?:es)?)\b",
+                text,
+            )
+        )
+        if not asks_group_dimension:
+            return False
+        if cls._match_inventory_employee_stock_query(text):
+            return False
+        if EmployeeIdentifierService.has_movil_identifier(text):
+            return False
+        has_material_locator = bool(cls._extract_inventory_code(normalized=text, raw_message=text)) or bool(
+            re.search(
+                r"\b(?:saldo|stock|inventario|existencia(?:s)?)\s+en\s+(?:movil(?:es)?|m[oó]vil(?:es)?|cuadrilla(?:s)?|brigada(?:s)?|tecnico(?:s)?|t[eé]cnico(?:s)?|empleado(?:s)?|bodega(?:s)?|almacen(?:es)?)\s+de\s+.+$",
+                text,
+            )
+            or re.search(
+                r"\b(?:saldo|stock|inventario|existencia(?:s)?)\s+de\s+.+\s+por\s+(?:movil|m[oó]vil|cuadrilla|brigada|tecnico|t[eé]cnico|empleado|bodega|almacen)\b",
+                text,
+            )
+        )
+        has_material_family_scope = bool(
+            re.search(r"\b(?:ferretero|ferreteria|material(?:es)?(?:\s+de\s+claro|\s+claro)?)\b", text)
+        )
+        return has_material_locator or has_material_family_scope
 
     @staticmethod
     def _extract_employee_name_filter(*, normalized: str) -> str:

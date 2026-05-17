@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
-import { type ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
+import type {
+  ChatAttachmentSummary,
+  ChatMessageModel,
+} from "@/modules/programacion/ia-dev/chat/types";
 import { mergeStreamingResponse } from "@/modules/programacion/ia-dev/chat/utils/mergeStreamingResponse";
 import { normalizeChatPayload } from "@/modules/programacion/ia-dev/chat/utils/normalizeChatPayload";
 import { usePromptHistory } from "@/modules/programacion/ia-dev/chat/hooks/usePromptHistory";
@@ -23,7 +26,11 @@ import {
   loadSplitViewState,
   saveSplitViewState,
 } from "@/modules/agente-ia/persistence/splitViewStorage";
-import { buildDashboardSnapshot } from "@/modules/agente-ia/utils/buildDashboardSnapshot";
+import {
+  buildDashboardSnapshot,
+  buildDashboardSnapshotFromMessage,
+  getNormalizedPayload,
+} from "@/modules/agente-ia/utils/buildDashboardSnapshot";
 import HistoryPanel from "@/modules/agente-ia/components/HistoryPanel";
 
 const INITIAL_ASSISTANT_MESSAGE =
@@ -31,11 +38,50 @@ const INITIAL_ASSISTANT_MESSAGE =
 const INITIAL_CHAT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 const MAX_CHAT_HISTORY = 30;
 
+type ComposerAttachment = ChatAttachmentSummary & {
+  file: File;
+  lastModified: number;
+};
+
 const createMessageId = (role: "user" | "assistant") =>
   `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const createChatId = () =>
   `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createAttachmentId = (file: File) =>
+  `attachment-${file.name}-${file.size}-${file.lastModified}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+
+const inferAttachmentKind = (file: File): ChatAttachmentSummary["kind"] =>
+  file.type.startsWith("image/") ? "image" : "document";
+
+const toAttachmentSummary = (
+  attachment: ComposerAttachment,
+): ChatAttachmentSummary => ({
+  id: attachment.id,
+  name: attachment.name,
+  mimeType: attachment.mimeType,
+  size: attachment.size,
+  kind: attachment.kind,
+});
+
+const buildAttachmentTransportNote = (attachments: ComposerAttachment[]) => {
+  if (attachments.length === 0) return "";
+
+  const attachmentList = attachments
+    .map((attachment) => `${attachment.name} (${attachment.kind})`)
+    .join(", ");
+
+  return [
+    "",
+    "",
+    "[Adjuntos seleccionados en la interfaz]",
+    attachmentList,
+    "Nota: el transporte actual no envio el contenido binario de estos archivos; solo se comparte su referencia nominal.",
+  ].join("\n");
+};
 
 const INITIAL_MESSAGES: ChatMessageModel[] = [
   {
@@ -116,6 +162,46 @@ const buildChatPreview = (messages: ChatMessageModel[]) => {
   return compact.length > 86 ? `${compact.slice(0, 86)}...` : compact;
 };
 
+const buildSemanticHint = (messages: ChatMessageModel[]) => {
+  const latestAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const understoodAs =
+    latestAssistant?.normalized?.semanticExplanation?.understood_as?.trim() || "";
+  if (understoodAs) return understoodAs;
+
+  const explanation = latestAssistant?.normalized?.semanticExplanation;
+  if (!explanation?.domain && !explanation?.intent) return "";
+
+  const domain = explanation.domain
+    ? explanation.domain.replace(/[_-]+/g, " ")
+    : "la consulta";
+  const intent = explanation.intent
+    ? explanation.intent.replace(/[_-]+/g, " ")
+    : "la solicitud";
+
+  return `Entendi que quieres revisar ${intent} en ${domain}.`;
+};
+
+const buildBusinessReportText = (snapshot: ReturnType<typeof buildDashboardSnapshot>) => {
+  const lines = [
+    `Resumen ejecutivo: ${snapshot.executiveSummary}`,
+    `Estado: ${snapshot.taskStatusLabel}`,
+    `Dominio: ${snapshot.domain}`,
+    `Intencion: ${snapshot.intent}`,
+  ];
+
+  if (snapshot.clarificationQuestion) {
+    lines.push(`Aclaracion requerida: ${snapshot.clarificationQuestion}`);
+  }
+
+  if (snapshot.limitations.length > 0) {
+    lines.push(`Limitaciones: ${snapshot.limitations.join(" | ")}`);
+  }
+
+  return lines.join("\n");
+};
+
 const createInitialChat = (): AgenteIAChatThread => ({
   id: "chat-inicial",
   title: "Nuevo chat",
@@ -148,13 +234,18 @@ const AgenteIAModule = () => {
 
   const [initialHistoryState] = useState(() => {
     const persistedHistory = loadAgenteIAChatHistory();
-    const initialChat = createNewChat();
+    if (persistedHistory && persistedHistory.chats.length > 0) {
+      const restoredChats = sortChatsByRecent(persistedHistory.chats);
+      return {
+        chats: restoredChats,
+        activeChatId: persistedHistory.activeChatId ?? restoredChats[0]?.id ?? null,
+        restoredFromHistory: true,
+      };
+    }
 
+    const initialChat = createNewChat();
     return {
-      chats:
-        persistedHistory && persistedHistory.chats.length > 0
-          ? [initialChat, ...sortChatsByRecent(persistedHistory.chats)]
-          : [initialChat],
+      chats: [initialChat],
       activeChatId: initialChat.id,
       restoredFromHistory: false,
     };
@@ -174,6 +265,9 @@ const AgenteIAModule = () => {
   });
 
   const [chatInput, setChatInput] = useState("");
+  const [composerAttachments, setComposerAttachments] = useState<
+    ComposerAttachment[]
+  >([]);
   const [chats, setChats] = useState<AgenteIAChatThread[]>(
     initialHistoryState.chats,
   );
@@ -198,6 +292,8 @@ const AgenteIAModule = () => {
   const [activeTabletTab, setActiveTabletTab] = useState<
     "history" | "chat" | "dashboard"
   >(initialSplitViewState.activeTabletTab);
+  const [selectedDashboardMessageByChat, setSelectedDashboardMessageByChat] =
+    useState(initialSplitViewState.selectedDashboardMessageByChat);
 
   const resolvedActiveChatId = useMemo(() => {
     if (activeChatId && chats.some((chat) => chat.id === activeChatId)) {
@@ -219,17 +315,58 @@ const AgenteIAModule = () => {
     [messageWindowSize, messages],
   );
   const hasCollapsedMessages = messages.length > messageWindowSize;
+  const dashboardEntries = useMemo(() => {
+    const assistantMessages = messages.filter(
+      (message) => message.role === "assistant" && message.id !== "assistant-initial",
+    );
+
+    return assistantMessages.map((message, index) => {
+      const snapshot = buildDashboardSnapshotFromMessage(message);
+      const payload = getNormalizedPayload(message);
+      const label = `Respuesta ${index + 1}`;
+      const shortLabel = payload?.hasStructuredContent
+        ? `${label} · dashboard`
+        : `${label} · ${snapshot.lifecycleLabel.toLowerCase()}`;
+
+      return {
+        messageId: message.id,
+        label,
+        shortLabel,
+        snapshot,
+      };
+    });
+  }, [messages]);
+  const latestDashboardEntry = dashboardEntries[dashboardEntries.length - 1] ?? null;
+  const persistedSelectedDashboardMessageId = resolvedActiveChatId
+    ? selectedDashboardMessageByChat[resolvedActiveChatId] ?? null
+    : null;
+  const resolvedSelectedDashboardMessageId = useMemo(() => {
+    if (
+      persistedSelectedDashboardMessageId &&
+      dashboardEntries.some(
+        (entry) => entry.messageId === persistedSelectedDashboardMessageId,
+      )
+    ) {
+      return persistedSelectedDashboardMessageId;
+    }
+
+    return latestDashboardEntry?.messageId ?? null;
+  }, [
+    dashboardEntries,
+    latestDashboardEntry?.messageId,
+    persistedSelectedDashboardMessageId,
+  ]);
   const dashboardSnapshot = useMemo(
-    () => buildDashboardSnapshot(messages),
-    [messages],
+    () => buildDashboardSnapshot(messages, resolvedSelectedDashboardMessageId),
+    [messages, resolvedSelectedDashboardMessageId],
   );
+  const liveDashboardSnapshot = latestDashboardEntry?.snapshot ?? null;
+  const semanticHint = useMemo(() => buildSemanticHint(messages), [messages]);
 
-  const hasDashboardWorkspace = Boolean(
-  dashboardSnapshot.hasStructuredContent && dashboardSnapshot.widgets.length > 0,
-);
+  const hasDashboardWorkspace = dashboardEntries.length > 0;
 
-const shouldUseWorkspaceLayout =
-  hasDashboardWorkspace && messages.some((message) => message.role === "assistant");
+  const shouldUseWorkspaceLayout =
+    hasDashboardWorkspace && messages.some((message) => message.role === "assistant");
 
   const effectiveChatStatus = useMemo(() => {
     if (transportError) {
@@ -278,6 +415,16 @@ const shouldUseWorkspaceLayout =
     [resolvedActiveChatId],
   );
 
+  const setActiveChatStatus = useCallback(
+    (nextStatus: string) => {
+      updateActiveChat((chat) => ({
+        ...chat,
+        chatStatus: nextStatus,
+      }));
+    },
+    [updateActiveChat],
+  );
+
   useEffect(() => {
     const persistableChats = chats.filter((chat) => chatHasUserMessages(chat));
 
@@ -307,6 +454,7 @@ const shouldUseWorkspaceLayout =
       historyCollapsed,
       chatCollapsed,
       dashboardCollapsed,
+      selectedDashboardMessageByChat,
     });
   }, [
     activeTabletTab,
@@ -314,7 +462,23 @@ const shouldUseWorkspaceLayout =
     dashboardCollapsed,
     historyCollapsed,
     layoutSizes,
+    selectedDashboardMessageByChat,
     shouldUseWorkspaceLayout,
+  ]);
+
+  useEffect(() => {
+    if (!resolvedActiveChatId) return;
+    if (resolvedSelectedDashboardMessageId) return;
+    if (!latestDashboardEntry) return;
+
+    setSelectedDashboardMessageByChat((prev) => ({
+      ...prev,
+      [resolvedActiveChatId]: latestDashboardEntry.messageId,
+    }));
+  }, [
+    latestDashboardEntry,
+    resolvedActiveChatId,
+    resolvedSelectedDashboardMessageId,
   ]);
 
   useEffect(() => {
@@ -364,8 +528,55 @@ const shouldUseWorkspaceLayout =
     redoStackRef.current = [];
   };
 
+  const clearComposerAttachments = useCallback(() => {
+    setComposerAttachments([]);
+  }, []);
+
+  const removeComposerAttachment = useCallback((attachmentId: string) => {
+    setComposerAttachments((prev) =>
+      prev.filter((attachment) => attachment.id !== attachmentId),
+    );
+  }, []);
+
+  const addComposerFiles = useCallback((files: File[]) => {
+    setComposerAttachments((prev) => {
+      const existingKeys = new Set(
+        prev.map(
+          (attachment) =>
+            `${attachment.name}-${attachment.size}-${attachment.lastModified}`,
+        ),
+      );
+
+      const nextAttachments = files.reduce<ComposerAttachment[]>(
+        (accumulator, file) => {
+          const dedupeKey = `${file.name}-${file.size}-${file.lastModified}`;
+          if (existingKeys.has(dedupeKey)) {
+            return accumulator;
+          }
+
+          existingKeys.add(dedupeKey);
+          accumulator.push({
+            id: createAttachmentId(file),
+            name: file.name,
+            mimeType: file.type || "application/octet-stream",
+            size: file.size,
+            kind: inferAttachmentKind(file),
+            file,
+            lastModified: file.lastModified,
+          });
+          return accumulator;
+        },
+        [],
+      );
+
+      return [...prev, ...nextAttachments];
+    });
+    setActiveChatStatus("Adjuntos listos para acompañar la consulta.");
+  }, [setActiveChatStatus]);
+
   const resetComposerForChatChange = () => {
     setChatInput("");
+    clearComposerAttachments();
     resetNavigation();
     resetChatInputHistory();
     setComposerResetSignal((prev) => prev + 1);
@@ -399,6 +610,57 @@ const shouldUseWorkspaceLayout =
     notifyContentChanged("new-message", { behavior: "smooth" });
   };
 
+  const jumpToDashboard = useCallback(() => {
+    if (!shouldUseWorkspaceLayout) return;
+    setDashboardCollapsed(false);
+    setChatCollapsed(false);
+    setActiveTabletTab("dashboard");
+  }, [shouldUseWorkspaceLayout]);
+
+  const selectDashboardMessage = useCallback(
+    (messageId: string) => {
+      if (!resolvedActiveChatId) return;
+
+      setSelectedDashboardMessageByChat((prev) => ({
+        ...prev,
+        [resolvedActiveChatId]: messageId,
+      }));
+      jumpToDashboard();
+    },
+    [jumpToDashboard, resolvedActiveChatId],
+  );
+
+  const copyTextToClipboard = async (text: string, successStatus: string) => {
+    const normalized = text.trim();
+    if (!normalized || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(normalized);
+      setActiveChatStatus(successStatus);
+    } catch {
+      setActiveChatStatus("No fue posible copiar el contenido.");
+    }
+  };
+
+  const prepareRelatedQuery = () => {
+    const base = dashboardSnapshot.executiveSummary || dashboardSnapshot.summary;
+    const prompt = `Quiero profundizar sobre esto: ${base}`;
+    setChatInputTracked(prompt);
+    setActiveTabletTab("chat");
+  };
+
+  const copyAssistantMessageById = (messageId: string) => {
+    const entry = dashboardEntries.find((item) => item.messageId === messageId);
+    const text =
+      entry?.snapshot.executiveSummary ||
+      entry?.snapshot.summary ||
+      messages.find((message) => message.id === messageId)?.content ||
+      "";
+    void copyTextToClipboard(text, "Respuesta copiada al portapapeles.");
+  };
+
   const openChat = (chatId: string) => {
     if (isSubmitting || chatId === activeChatId) return;
 
@@ -425,6 +687,48 @@ const shouldUseWorkspaceLayout =
     setActiveChatId(nextChat.id);
     setHistoryCollapsed(false);
     resetComposerForChatChange();
+  };
+
+  const renameChat = (chatId: string) => {
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat || typeof window === "undefined") return;
+
+    const nextTitle = window.prompt("Nuevo nombre de la conversacion", chat.title);
+    const normalizedTitle = nextTitle?.trim();
+    if (!normalizedTitle) return;
+
+    setChats((prev) =>
+      prev.map((item) =>
+        item.id === chatId
+          ? { ...item, title: normalizedTitle, updatedAt: item.updatedAt }
+          : item,
+      ),
+    );
+  };
+
+  const deleteChat = (chatId: string) => {
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat || typeof window === "undefined") return;
+    const confirmed = window.confirm(
+      `Se borrara la conversacion "${chat.title}". Esta accion solo afecta la persistencia local.`,
+    );
+    if (!confirmed) return;
+
+    setChats((prev) => {
+      const remaining = prev.filter((item) => item.id !== chatId);
+      if (remaining.length > 0) {
+        if (resolvedActiveChatId === chatId) {
+          setActiveChatId(remaining[0].id);
+          resetComposerForChatChange();
+        }
+        return remaining;
+      }
+
+      const nextChat = createNewChat();
+      setActiveChatId(nextChat.id);
+      resetComposerForChatChange();
+      return [nextChat];
+    });
   };
 
   const formatChatTimestamp = (chat: AgenteIAChatThread) => {
@@ -480,6 +784,12 @@ const shouldUseWorkspaceLayout =
     });
 
     notifyContentChanged("new-message", { behavior: "smooth", force: true });
+    if (resolvedActiveChatId) {
+      setSelectedDashboardMessageByChat((prev) => ({
+        ...prev,
+        [resolvedActiveChatId]: assistantMessageId,
+      }));
+    }
   };
 
   const submitChat = async (overridePrompt?: string) => {
@@ -489,6 +799,15 @@ const shouldUseWorkspaceLayout =
     const userMessageId = createMessageId("user");
     const assistantMessageId = createMessageId("assistant");
     const submittedAt = new Date().toISOString();
+    const attachmentsForSubmission = composerAttachments.map((attachment) => ({
+      ...attachment,
+    }));
+    const userMessageAttachments = attachmentsForSubmission.map((attachment) =>
+      toAttachmentSummary(attachment),
+    );
+    const transportMessage = `${value}${buildAttachmentTransportNote(
+      attachmentsForSubmission,
+    )}`;
 
     updateActiveChat((chat) => {
       const nextMessages = [
@@ -499,6 +818,7 @@ const shouldUseWorkspaceLayout =
           content: value,
           createdAt: Date.now(),
           status: "final" as const,
+          attachments: userMessageAttachments,
         },
         {
           id: assistantMessageId,
@@ -517,6 +837,7 @@ const shouldUseWorkspaceLayout =
       };
     });
     setChatInput("");
+    clearComposerAttachments();
     setComposerResetSignal((prev) => prev + 1);
     resetChatInputHistory();
     pushPrompt(value);
@@ -529,7 +850,7 @@ const shouldUseWorkspaceLayout =
     try {
       setIsSubmitting(true);
       const result = await sendMessage({
-        message: value,
+        message: transportMessage,
         sessionId: sessionId ?? undefined,
         callbacks: {
           onStart: () => {
@@ -693,12 +1014,24 @@ const shouldUseWorkspaceLayout =
     }
   };
 
+  const selectedDashboardIndex = dashboardEntries.findIndex(
+    (entry) => entry.messageId === resolvedSelectedDashboardMessageId,
+  );
+  const canSelectPreviousDashboard = selectedDashboardIndex > 0;
+  const canSelectNextDashboard =
+    selectedDashboardIndex >= 0 &&
+    selectedDashboardIndex < dashboardEntries.length - 1;
+  const selectedDashboardLabel =
+    dashboardEntries.find(
+      (entry) => entry.messageId === resolvedSelectedDashboardMessageId,
+    )?.label || "Consulta actual";
+
   return (
     <div className="w-full min-w-0 overflow-hidden">
       <PageBreadcrumb pageTitle={["Agente IA"]} />
 
       <div className="h-[calc(100vh-190px)] min-h-180 w-full min-w-0">
-        <div className="mx-auto h-full max-w-395 min-w-0">
+        <div className="h-full w-full min-w-0 px-1 md:px-2 xl:px-3">
           <section className="h-full overflow-hidden rounded-[32px] border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950">
             <SplitLayout
               hasDashboard={shouldUseWorkspaceLayout}
@@ -717,8 +1050,11 @@ const shouldUseWorkspaceLayout =
                   threads={chats.filter((chat) => chatHasUserMessages(chat))}
                   activeChatId={resolvedActiveChatId}
                   isSubmitting={isSubmitting}
+                  snapshot={dashboardSnapshot}
                   onOpenChat={openChat}
                   onStartNewChat={startNewChat}
+                  onRenameChat={renameChat}
+                  onDeleteChat={deleteChat}
                   formatChatTimestamp={formatChatTimestamp}
                   buildChatPreview={buildChatPreview}
                 />
@@ -728,6 +1064,13 @@ const shouldUseWorkspaceLayout =
                   chatTitle={activeChat?.title || "Nuevo chat"}
                   chatStatus={effectiveChatStatus}
                   streaming={Boolean(streamingMessageId)}
+                  isWorkspaceLayout={shouldUseWorkspaceLayout}
+                  activeDashboardMessageId={resolvedSelectedDashboardMessageId}
+                  taskStatusLabel={dashboardSnapshot.taskStatusLabel}
+                  taskStatusTone={dashboardSnapshot.taskStatusTone}
+                  taskPreparationLabel={dashboardSnapshot.taskPreparationLabel}
+                  semanticHint={semanticHint}
+                  clarificationQuestion={dashboardSnapshot.clarificationQuestion}
                   visibleMessages={visibleMessages}
                   messages={messages}
                   hasCollapsedMessages={hasCollapsedMessages}
@@ -735,6 +1078,9 @@ const shouldUseWorkspaceLayout =
                   unreadCount={unreadCount}
                   showScrollButton={showScrollButton}
                   chatInput={chatInput}
+                  attachments={composerAttachments.map((attachment) =>
+                    toAttachmentSummary(attachment),
+                  )}
                   composerResetSignal={composerResetSignal}
                   chatScrollRef={chatScrollRef}
                   onLoadOlderMessages={() =>
@@ -753,6 +1099,9 @@ const shouldUseWorkspaceLayout =
                     void submitChat();
                   }}
                   onInputChange={setChatInputTracked}
+                  onFilesAdded={addComposerFiles}
+                  onRemoveAttachment={removeComposerAttachment}
+                  onClearAttachments={clearComposerAttachments}
                   onNavigateHistory={(direction) => {
                     setChatInputTracked(navigate(direction, chatInput));
                   }}
@@ -760,12 +1109,45 @@ const shouldUseWorkspaceLayout =
                   onRedo={redoChatInput}
                   onScrollToBottomClick={onScrollToBottomClick}
                   onLoadDemo={appendMockDemo}
+                  onShowDashboard={selectDashboardMessage}
+                  onOpenDashboardPanel={jumpToDashboard}
+                  onCopyMessage={copyAssistantMessageById}
+                  onPrepareRelatedQuery={prepareRelatedQuery}
                 />
               }
               dashboard={
                 <DashboardPanel
                   snapshot={dashboardSnapshot}
+                  liveSnapshot={liveDashboardSnapshot}
+                  historyEntries={dashboardEntries.map((entry) => ({
+                    messageId: entry.messageId,
+                    label: entry.label,
+                    shortLabel: entry.shortLabel,
+                  }))}
+                  selectedMessageId={resolvedSelectedDashboardMessageId}
+                  selectedMessageLabel={selectedDashboardLabel}
+                  canSelectPrevious={canSelectPreviousDashboard}
+                  canSelectNext={canSelectNextDashboard}
+                  onSelectPrevious={() => {
+                    if (!canSelectPreviousDashboard) return;
+                    selectDashboardMessage(
+                      dashboardEntries[selectedDashboardIndex - 1].messageId,
+                    );
+                  }}
+                  onSelectNext={() => {
+                    if (!canSelectNextDashboard) return;
+                    selectDashboardMessage(
+                      dashboardEntries[selectedDashboardIndex + 1].messageId,
+                    );
+                  }}
+                  onSelectMessage={selectDashboardMessage}
                   onLoadDemo={appendMockDemo}
+                  onCopyReport={() => {
+                    void copyTextToClipboard(
+                      buildBusinessReportText(dashboardSnapshot),
+                      "Informe copiado al portapapeles.",
+                    );
+                  }}
                 />
               }
             />

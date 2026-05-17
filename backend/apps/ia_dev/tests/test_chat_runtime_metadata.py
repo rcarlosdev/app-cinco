@@ -1029,6 +1029,67 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         self.assertEqual(str(background.get("status") or ""), "awaiting_approval")
         self.assertTrue(bool(background.get("resume_token_available")))
 
+    def test_attach_runtime_metadata_humanizes_inventory_shadow_fallback_for_semantic_explanation(self):
+        run_context = RunContext.create(message="saldo en moviles de CONECTOR RJ 45", session_id="sess-shadow", reset_memory=False)
+        run_context.metadata["semantic_orchestrator"] = {
+            "domain": "inventario_logistica",
+            "intent": "stock_balance",
+            "selected_agent": "inventory_agent",
+        }
+        run_context.metadata["query_intelligence"] = {
+            "execution_plan": {
+                "strategy": "sql_assisted",
+                "capability_id": "inventory_stock_balance_by_material_dimension",
+            }
+        }
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-shadow",
+            "status": "completed",
+            "state": {
+                "task_id": "task_runtime:run-shadow",
+                "task_status": "completed",
+                "detected_domain": "inventario_logistica",
+                "validation_result": {"satisfied": True, "reason": "ok"},
+                "fallback_used": {"used": False},
+                "tool_execution": {"selected_tool_id": "query_execution_planner.sql_assisted"},
+                "tool_execution_trace": [],
+            },
+        }
+
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={
+                "reply": "ok",
+                "orchestrator": {"domain": "inventario_logistica", "intent": "stock_balance"},
+                "data_sources": {},
+                "data": {
+                    "business_response": {
+                        "metadata": {
+                            "response_profile_usado": "inventory.stock.dimension.summary",
+                            "candidate_capability": "inventory_stock_balance_by_material_dimension",
+                            "tool_id": "query_execution_planner.sql_assisted",
+                            "semantic_trace": {
+                                "fallback_sombreado_usado": True,
+                                "regla_legacy_detectada": True,
+                                "fuente_dd": ["ai_dictionary.dd_sinonimos"],
+                            },
+                        },
+                        "evidence_summary": {
+                            "response_profile_usado": "inventory.stock.dimension.summary",
+                            "filters": {"descripcion": "CONECTOR RJ 45", "grouping_dimension": "movil"},
+                            "output_profile": {"grain": "saldo_por_dimension_y_codigo", "columns": ["movil", "codigo", "saldo"]},
+                        },
+                    }
+                },
+            },
+            run_context=run_context,
+            response_flow="sql_assisted",
+        )
+
+        explanation = dict((((response.get("task") or {}).get("current_run") or {}).get("semantic_explanation") or {}))
+        fallback = dict(explanation.get("fallback_used") or {})
+        self.assertIn("compatibilidad semántica temporal", str(fallback.get("reason") or "").lower())
+        self.assertNotIn("legacy_semantic_binding_shadowed", str(explanation))
+
     def test_build_runtime_compatibility_metadata_marks_legacy_path_usage(self):
         metadata = ChatApplicationService._build_runtime_compatibility_metadata(
             query_intelligence={"execution_plan": {"strategy": "fallback"}},

@@ -10,6 +10,15 @@ import type {
 
 export type ChatRole = "user" | "assistant";
 export type ChatMessageStatus = "streaming" | "final" | "error";
+export type ChatAttachmentKind = "image" | "document";
+
+export type ChatAttachmentSummary = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: ChatAttachmentKind;
+};
 
 export type NormalizedKPI = {
   key: string;
@@ -68,6 +77,7 @@ export type ChatMessageModel = {
   content: string;
   createdAt: number;
   status: ChatMessageStatus;
+  attachments?: ChatAttachmentSummary[];
   response?: Partial<IADevChatResponse>;
   normalized?: NormalizedAssistantPayload | null;
   actions?: IADevAction[];

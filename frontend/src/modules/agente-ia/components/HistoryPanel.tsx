@@ -1,38 +1,70 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
+import ChatHistoryPanel from "@/modules/agente-ia/components/ChatHistoryPanel";
+import FeaturePanel from "@/modules/agente-ia/components/FeaturePanel";
+import ToolsPanel from "@/modules/agente-ia/components/ToolsPanel";
 import type { AgenteIAChatThread } from "@/modules/agente-ia/persistence/chatSessionStorage";
+import type { DashboardSnapshot } from "@/modules/agente-ia/types";
 
 type HistoryPanelProps = {
   threads: AgenteIAChatThread[];
   activeChatId: string | null;
   isSubmitting: boolean;
+  snapshot: DashboardSnapshot;
   onOpenChat: (chatId: string) => void;
   onStartNewChat: () => void;
+  onRenameChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => void;
   formatChatTimestamp: (chat: AgenteIAChatThread) => string;
   buildChatPreview: (messages: ChatMessageModel[]) => string;
 };
+
+const tabs = [
+  { id: "history", label: "Historial" },
+  { id: "tools", label: "Herramientas" },
+  { id: "features", label: "Caracteristicas" },
+] as const;
 
 const HistoryPanel = ({
   threads,
   activeChatId,
   isSubmitting,
+  snapshot,
   onOpenChat,
   onStartNewChat,
+  onRenameChat,
+  onDeleteChat,
   formatChatTimestamp,
   buildChatPreview,
 }: HistoryPanelProps) => {
+  const [activeTab, setActiveTab] =
+    useState<(typeof tabs)[number]["id"]>("history");
+  const [search, setSearch] = useState("");
+
+  const filteredThreads = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return threads;
+
+    return threads.filter((chat) => {
+      const title = chat.title.toLowerCase();
+      const preview = buildChatPreview(chat.messages).toLowerCase();
+      return title.includes(query) || preview.includes(query);
+    });
+  }, [buildChatPreview, search, threads]);
+
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
       <header className="border-b border-gray-200 px-4 py-4 dark:border-gray-800">
         <div className="flex items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-gray-950 dark:text-white">
-              Chats
+              Soporte operativo
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {threads.length} conversaciones
+              Historial, capacidades y guia de uso.
             </p>
           </div>
 
@@ -46,35 +78,44 @@ const HistoryPanel = ({
             Nuevo
           </button>
         </div>
-      </header>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 py-3">
-        {threads.map((chat) => {
-          const isActive = chat.id === activeChatId;
-
-          return (
+        <div className="mt-4 inline-flex rounded-full border border-gray-300 p-1 dark:border-gray-700">
+          {tabs.map((tab) => (
             <button
-              key={chat.id}
+              key={tab.id}
               type="button"
-              onClick={() => onOpenChat(chat.id)}
-              className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                isActive
-                  ? "border-[#111827] bg-gray-100 dark:border-white dark:bg-gray-900"
-                  : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900"
+              onClick={() => setActiveTab(tab.id)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                activeTab === tab.id
+                  ? "bg-[#111827] text-white"
+                  : "text-gray-600 dark:text-gray-300"
               }`}
             >
-              <p className="line-clamp-2 text-sm font-semibold text-gray-900 dark:text-white">
-                {chat.title}
-              </p>
-              <p className="mt-1 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
-                {buildChatPreview(chat.messages)}
-              </p>
-              <p className="mt-2 text-[11px] text-gray-400">
-                {formatChatTimestamp(chat)}
-              </p>
+              {tab.label}
             </button>
-          );
-        })}
+          ))}
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
+        {activeTab === "history" ? (
+          <ChatHistoryPanel
+            search={search}
+            threads={filteredThreads}
+            activeChatId={activeChatId}
+            isSubmitting={isSubmitting}
+            onSearchChange={setSearch}
+            onOpenChat={onOpenChat}
+            onRenameChat={onRenameChat}
+            onDeleteChat={onDeleteChat}
+            formatChatTimestamp={formatChatTimestamp}
+            buildChatPreview={buildChatPreview}
+          />
+        ) : activeTab === "tools" ? (
+          <ToolsPanel snapshot={snapshot} />
+        ) : (
+          <FeaturePanel />
+        )}
       </div>
     </aside>
   );

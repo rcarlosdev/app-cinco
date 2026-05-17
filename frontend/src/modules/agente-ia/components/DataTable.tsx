@@ -64,7 +64,11 @@ const DataTable = ({ tabs }: DataTableProps) => {
       }),
     );
   }, [activeTab]);
-  const tableRows = activeTab?.table.exportRows ?? activeTab?.table.rows ?? [];
+  const tableRows = activeTab?.table.rows ?? [];
+  const exportRowsSource =
+    activeTab?.table.exportRows && activeTab.table.exportRows.length > 0
+      ? activeTab.table.exportRows
+      : tableRows;
 
   const table = useReactTable({
     data: tableRows,
@@ -104,7 +108,7 @@ const DataTable = ({ tabs }: DataTableProps) => {
   const totalRows = activeTab.table.totalRecords ?? activeTab.table.rowcount;
   const returnedRows =
     activeTab.table.returnedRecords ?? activeTab.table.rows.length;
-  const exportRows = activeTab.table.exportRecords ?? tableRows.length;
+  const exportRows = activeTab.table.exportRecords ?? exportRowsSource.length;
   const isTruncated = Boolean(activeTab.table.truncated);
   const isExportTruncated = Boolean(activeTab.table.exportTruncated);
 
@@ -122,7 +126,10 @@ const DataTable = ({ tabs }: DataTableProps) => {
   const handleExportCsv = () => {
     if (!hasFilteredRows) return;
 
-    exportToCsv(filteredRows, {
+    const rowsToExport =
+      deferredGlobalFilter.trim().length > 0 ? filteredRows : exportRowsSource;
+
+    exportToCsv(rowsToExport, {
       fileName: buildExportFileName(activeTab.label, "csv"),
       columns: activeTab.table.columns.map((column) => ({
         header: column,
@@ -134,8 +141,10 @@ const DataTable = ({ tabs }: DataTableProps) => {
   const handleExportXlsx = async () => {
     if (!hasFilteredRows) return;
 
+    const rowsToExport =
+      deferredGlobalFilter.trim().length > 0 ? filteredRows : exportRowsSource;
     const XLSX = await import("xlsx");
-    const worksheet = XLSX.utils.json_to_sheet(filteredRows, {
+    const worksheet = XLSX.utils.json_to_sheet(rowsToExport, {
       header: activeTab.table.columns,
     });
     const workbook = XLSX.utils.book_new();

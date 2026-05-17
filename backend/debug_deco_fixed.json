@@ -1,0 +1,4202 @@
+﻿{
+  "session_id": "debug-deco-fixed-20260517",
+  "reply": "Encontre la familia DECO en el catalogo, pero no hay evidencia de seriales asociados para el alcance solicitado La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada Limitaciones: la ejecucion termino sin evidencia util para afirmar un resultado positivo. Si quieres, puedo revisar la misma familia por otra dimension operativa o validar otra familia del catalogo",
+  "orchestrator": {
+    "intent": "aggregate",
+    "domain": "inventario_logistica",
+    "selected_agent": "analista_agent",
+    "classifier_source": "query_intelligence_sql_assisted",
+    "needs_database": true,
+    "output_mode": "summary",
+    "used_tools": [
+      "query_sql_assisted_executor"
+    ],
+    "response_flow": "sql_assisted",
+    "runtime_flow": "sql_assisted",
+    "arbitrated_intent": "analytics_query",
+    "final_intent": "analytics_query",
+    "final_domain": "inventario_logistica",
+    "compiler_used": "inventory_semantic_sql",
+    "analytics_router_decision": "sql_assisted",
+    "fallback_reason": ""
+  },
+  "data": {
+    "kpis": {
+      "rowcount": 0,
+      "returned_records": 0,
+      "total_records": 0,
+      "total_saldo": 0,
+      "seriales_total": 0,
+      "dimensiones_con_saldo": 0,
+      "codigos_coincidentes": 0,
+      "registros_evidencia": 0,
+      "moviles_con_saldo": 0
+    },
+    "series": [],
+    "labels": [],
+    "insights": [
+      "La validacion se hizo contra el catalogo gobernado de serializados y la ejecucion no devolvio filas operativas.",
+      "La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada.",
+      "Si quieres, puedo revisar la misma familia por otra dimension operativa o validar otra familia del catalogo."
+    ],
+    "table": {
+      "columns": [
+        "dimension",
+        "cedula",
+        "nombre",
+        "empleado",
+        "movil",
+        "bodega",
+        "codigo",
+        "descripcion",
+        "familia",
+        "seriales_total",
+        "cedulas_asociadas",
+        "en_movil",
+        "en_base",
+        "cobros",
+        "saldo"
+      ],
+      "rows": [],
+      "export_rows": [],
+      "rowcount": 0,
+      "total_records": 0,
+      "returned_records": 0,
+      "export_records": 0,
+      "export_truncated": false,
+      "export_limit": 20000,
+      "truncated": false,
+      "limit": 500
+    },
+    "meta": {
+      "result_set": {
+        "total_records": 0,
+        "returned_records": 0,
+        "truncated": false,
+        "limit": 500
+      },
+      "presentation": {
+        "primary": "kpi_cards",
+        "has_kpis": true,
+        "has_table": false,
+        "has_chart_inputs": false
+      }
+    },
+    "charts": [],
+    "findings": [
+      {
+        "title": "Alertas",
+        "detail": "La validacion se hizo contra el catalogo gobernado de serializados y la ejecucion no devolvio filas operativas."
+      }
+    ],
+    "business_response": {
+      "dato": "Encontre la familia DECO en el catalogo, pero no hay evidencia de seriales asociados para el alcance solicitado.",
+      "hallazgo": "La validacion se hizo contra el catalogo gobernado de serializados y la ejecucion no devolvio filas operativas.",
+      "riesgo_o_interpretacion": "La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada.",
+      "riesgo": "La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada.",
+      "interpretacion": "La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada.",
+      "recomendacion": "Si quieres, puedo revisar la misma familia por otra dimension operativa o validar otra familia del catalogo.",
+      "siguiente_accion": "Si quieres, puedo revisar la misma familia por otra dimension operativa o validar otra familia del catalogo.",
+      "response_profile": {
+        "id": "inventory.serial.stock.dimension.detail",
+        "expected_output": "inventario_serializado",
+        "grain": "saldo_serializado_por_dimension_y_codigo",
+        "columns": [
+          "dimension",
+          "cedula",
+          "empleado",
+          "movil",
+          "bodega",
+          "codigo",
+          "descripcion",
+          "familia",
+          "seriales_total",
+          "cedulas_asociadas",
+          "en_movil",
+          "en_base",
+          "cobros",
+          "saldo"
+        ]
+      },
+      "evidence_summary": {
+        "response_profile_usado": "inventory.serial.stock.dimension.detail",
+        "evidence_sources_used": [
+          "semantic_context",
+          "business_query_semantic_plan",
+          "semantic_capability_registry",
+          "ai_dictionary.dd_sinonimos",
+          "ai_dictionary.dd_reglas",
+          "ai_dictionary.ia_dev_capacidades_columna",
+          "inventario.route.serial_stock_family_grouped_dimension",
+          "ai_dictionary.dd_relaciones",
+          "ai_dictionary.dd_campos",
+          "ai_dictionary.dd_tablas",
+          "ai_dictionary.dd_capacidades_campo",
+          "ai_dictionary.ia_dev_business_memory",
+          "ToolRegistryService",
+          "BusinessQuerySemanticPlan"
+        ],
+        "semantic_context_used": true,
+        "fallback_narrativo_usado": false,
+        "missing_evidence_reason": "result_set_empty",
+        "semantic_trace": {
+          "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+          "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+          "planner_route_hint": "inventory.serial_stock.family_dimension",
+          "regla_metadata_usada": [
+            "inventario.route.serial_stock_family_grouped_dimension"
+          ],
+          "fuente_dd": [
+            "ai_dictionary.dd_sinonimos",
+            "ai_dictionary.dd_reglas",
+            "ai_dictionary.ia_dev_capacidades_columna"
+          ],
+          "fallback_sombreado_usado": false,
+          "regla_legacy_detectada": false,
+          "paquete_capacidad_usado": "inventario_logistica",
+          "version_paquete": "1.0.0",
+          "capacidades_declaradas": [
+            "inventory_document_generation_pending",
+            "inventory_kardex_by_employee",
+            "inventory_kardex_consolidated",
+            "inventory_serial_by_operational_holder",
+            "inventory_serial_stock_by_family_grouped_dimension",
+            "inventory_stock_balance",
+            "inventory_stock_balance_by_material_dimension",
+            "inventory_stock_balance_by_mobile",
+            "inventory_stock_balance_by_warehouse",
+            "inventory_traceability_by_serial",
+            "inventory_transfer_destination_not_available",
+            "inventory_transfer_other_ally",
+            "inventory_transfer_warehouse"
+          ],
+          "reglas_declaradas": [
+            "inventario.kardex.signos_operativos",
+            "inventario.limit.document_generation_pending",
+            "inventario.limit.transfer_destination_missing_metadata",
+            "inventario.metric.serial_count_only",
+            "inventario.metric.stock_include_zero_negative",
+            "inventario.route.kardex_codigo",
+            "inventario.route.kardex_employee",
+            "inventario.route.serial_holder",
+            "inventario.route.serial_stock_family_grouped_dimension",
+            "inventario.route.stock_balance_holder",
+            "inventario.route.stock_balance_material_grouped_dimension",
+            "inventario.route.transfer_other_ally",
+            "inventario.route.transfer_warehouse",
+            "inventario.scope.dual_block_unspecified_family"
+          ],
+          "perfiles_respuesta": [
+            "inventory.document_generation.pending",
+            "inventory.kardex.consolidated.detail",
+            "inventory.kardex.employee.detail",
+            "inventory.serial.holder.detail",
+            "inventory.serial.stock.dimension.detail",
+            "inventory.serial.stock.dimension.summary",
+            "inventory.stock.balance.summary",
+            "inventory.stock.dimension.summary",
+            "inventory.stock.mobile.detail",
+            "inventory.stock.mobile.dual_block",
+            "inventory.stock.warehouse.detail",
+            "inventory.traceability.serial.detail",
+            "inventory.transfer.destination.blocked",
+            "inventory.transfer.other_ally.detail",
+            "inventory.transfer.warehouse.detail"
+          ],
+          "evaluaciones_asociadas": [
+            "inventario_runtime_eval_v1"
+          ]
+        },
+        "result_set": {
+          "rowcount": 0,
+          "total_records": 0,
+          "returned_records": 0,
+          "truncated": false
+        },
+        "extra_tables": [],
+        "output_profile": {
+          "id": "inventory.serial.stock.dimension.detail",
+          "expected_output": "inventario_serializado",
+          "grain": "saldo_serializado_por_dimension_y_codigo",
+          "columns": [
+            "dimension",
+            "cedula",
+            "empleado",
+            "movil",
+            "bodega",
+            "codigo",
+            "descripcion",
+            "familia",
+            "seriales_total",
+            "cedulas_asociadas",
+            "en_movil",
+            "en_base",
+            "cobros",
+            "saldo"
+          ]
+        },
+        "entity": {
+          "type": "",
+          "identifier": "",
+          "field": "",
+          "physical_field": "",
+          "resolution_source": "deterministic"
+        },
+        "filters": {
+          "material_family": "DECO",
+          "grouping_dimension": "movil",
+          "categoria": "Deco"
+        },
+        "capability_pack": {
+          "paquete_capacidad_usado": "inventario_logistica",
+          "version_paquete": "1.0.0",
+          "capacidades_declaradas": [
+            "inventory_document_generation_pending",
+            "inventory_kardex_by_employee",
+            "inventory_kardex_consolidated",
+            "inventory_serial_by_operational_holder",
+            "inventory_serial_stock_by_family_grouped_dimension",
+            "inventory_stock_balance",
+            "inventory_stock_balance_by_material_dimension",
+            "inventory_stock_balance_by_mobile",
+            "inventory_stock_balance_by_warehouse",
+            "inventory_traceability_by_serial",
+            "inventory_transfer_destination_not_available",
+            "inventory_transfer_other_ally",
+            "inventory_transfer_warehouse"
+          ],
+          "reglas_declaradas": [
+            "inventario.kardex.signos_operativos",
+            "inventario.limit.document_generation_pending",
+            "inventario.limit.transfer_destination_missing_metadata",
+            "inventario.metric.serial_count_only",
+            "inventario.metric.stock_include_zero_negative",
+            "inventario.route.kardex_codigo",
+            "inventario.route.kardex_employee",
+            "inventario.route.serial_holder",
+            "inventario.route.serial_stock_family_grouped_dimension",
+            "inventario.route.stock_balance_holder",
+            "inventario.route.stock_balance_material_grouped_dimension",
+            "inventario.route.transfer_other_ally",
+            "inventario.route.transfer_warehouse",
+            "inventario.scope.dual_block_unspecified_family"
+          ],
+          "perfiles_respuesta": [
+            "inventory.document_generation.pending",
+            "inventory.kardex.consolidated.detail",
+            "inventory.kardex.employee.detail",
+            "inventory.serial.holder.detail",
+            "inventory.serial.stock.dimension.detail",
+            "inventory.serial.stock.dimension.summary",
+            "inventory.stock.balance.summary",
+            "inventory.stock.dimension.summary",
+            "inventory.stock.mobile.detail",
+            "inventory.stock.mobile.dual_block",
+            "inventory.stock.warehouse.detail",
+            "inventory.traceability.serial.detail",
+            "inventory.transfer.destination.blocked",
+            "inventory.transfer.other_ally.detail",
+            "inventory.transfer.warehouse.detail"
+          ],
+          "evaluaciones_asociadas": [
+            "inventario_runtime_eval_v1"
+          ]
+        },
+        "validation": {
+          "satisfied": true,
+          "reason": "empty_inventory_result_is_actionable",
+          "needs_clarification": false
+        },
+        "tool_execution": {
+          "selected_tool_id": "query_execution_planner.sql_assisted",
+          "trace_count": 1
+        },
+        "runtime_trace": {
+          "response_flow": "",
+          "final_domain": "inventario_logistica",
+          "final_intent": "analytics_query"
+        }
+      },
+      "metadata": {
+        "domain": "inventario_logistica",
+        "response_status": "empty_result",
+        "material_family": "serializados",
+        "intent": "stock_balance",
+        "business_concept": "stock_serializado_por_dimension",
+        "operation": "aggregate",
+        "tables_used": [
+          "logistica_base_seriales",
+          "base_codigo_seriales",
+          "cinco_base_de_personal"
+        ],
+        "fields_used": [
+          "familia",
+          "codigo",
+          "descripcion",
+          "movil",
+          "cedula",
+          "bodega",
+          "en_movil",
+          "en_base",
+          "cobros",
+          "saldo",
+          "seriales_total"
+        ],
+        "filters": {
+          "material_family": "DECO",
+          "grouping_dimension": "movil",
+          "categoria": "Deco"
+        },
+        "group_by": [
+          "movil"
+        ],
+        "runtime_flow": "sql_assisted",
+        "limitations": [],
+        "requires_business_validation": false,
+        "requires_external_source": false,
+        "missing_metadata": [],
+        "implementation_status": "ready_for_dictionary_validation",
+        "requires_threshold_metadata": false,
+        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+        "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+        "planner_route_hint": "inventory.serial_stock.family_dimension",
+        "response_profile_usado": "inventory.serial.stock.dimension.detail",
+        "tool_id": "query_execution_planner.sql_assisted",
+        "paquete_capacidad_usado": "inventario_logistica",
+        "version_paquete": "1.0.0",
+        "capacidades_declaradas": [
+          "inventory_document_generation_pending",
+          "inventory_kardex_by_employee",
+          "inventory_kardex_consolidated",
+          "inventory_serial_by_operational_holder",
+          "inventory_serial_stock_by_family_grouped_dimension",
+          "inventory_stock_balance",
+          "inventory_stock_balance_by_material_dimension",
+          "inventory_stock_balance_by_mobile",
+          "inventory_stock_balance_by_warehouse",
+          "inventory_traceability_by_serial",
+          "inventory_transfer_destination_not_available",
+          "inventory_transfer_other_ally",
+          "inventory_transfer_warehouse"
+        ],
+        "reglas_declaradas": [
+          "inventario.kardex.signos_operativos",
+          "inventario.limit.document_generation_pending",
+          "inventario.limit.transfer_destination_missing_metadata",
+          "inventario.metric.serial_count_only",
+          "inventario.metric.stock_include_zero_negative",
+          "inventario.route.kardex_codigo",
+          "inventario.route.kardex_employee",
+          "inventario.route.serial_holder",
+          "inventario.route.serial_stock_family_grouped_dimension",
+          "inventario.route.stock_balance_holder",
+          "inventario.route.stock_balance_material_grouped_dimension",
+          "inventario.route.transfer_other_ally",
+          "inventario.route.transfer_warehouse",
+          "inventario.scope.dual_block_unspecified_family"
+        ],
+        "perfiles_respuesta": [
+          "inventory.document_generation.pending",
+          "inventory.kardex.consolidated.detail",
+          "inventory.kardex.employee.detail",
+          "inventory.serial.holder.detail",
+          "inventory.serial.stock.dimension.detail",
+          "inventory.serial.stock.dimension.summary",
+          "inventory.stock.balance.summary",
+          "inventory.stock.dimension.summary",
+          "inventory.stock.mobile.detail",
+          "inventory.stock.mobile.dual_block",
+          "inventory.stock.warehouse.detail",
+          "inventory.traceability.serial.detail",
+          "inventory.transfer.destination.blocked",
+          "inventory.transfer.other_ally.detail",
+          "inventory.transfer.warehouse.detail"
+        ],
+        "evaluaciones_asociadas": [
+          "inventario_runtime_eval_v1"
+        ],
+        "evidence_sources_used": [
+          "semantic_context",
+          "business_query_semantic_plan",
+          "semantic_capability_registry",
+          "ai_dictionary.dd_sinonimos",
+          "ai_dictionary.dd_reglas",
+          "ai_dictionary.ia_dev_capacidades_columna",
+          "inventario.route.serial_stock_family_grouped_dimension",
+          "ai_dictionary.dd_relaciones",
+          "ai_dictionary.dd_campos",
+          "ai_dictionary.dd_tablas",
+          "ai_dictionary.dd_capacidades_campo",
+          "ai_dictionary.ia_dev_business_memory",
+          "ToolRegistryService",
+          "BusinessQuerySemanticPlan"
+        ],
+        "semantic_context_used": true,
+        "fallback_narrativo_usado": false,
+        "missing_evidence_reason": "result_set_empty",
+        "semantic_trace": {
+          "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+          "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+          "planner_route_hint": "inventory.serial_stock.family_dimension",
+          "regla_metadata_usada": [
+            "inventario.route.serial_stock_family_grouped_dimension"
+          ],
+          "fuente_dd": [
+            "ai_dictionary.dd_sinonimos",
+            "ai_dictionary.dd_reglas",
+            "ai_dictionary.ia_dev_capacidades_columna"
+          ],
+          "fallback_sombreado_usado": false,
+          "regla_legacy_detectada": false,
+          "paquete_capacidad_usado": "inventario_logistica",
+          "version_paquete": "1.0.0",
+          "capacidades_declaradas": [
+            "inventory_document_generation_pending",
+            "inventory_kardex_by_employee",
+            "inventory_kardex_consolidated",
+            "inventory_serial_by_operational_holder",
+            "inventory_serial_stock_by_family_grouped_dimension",
+            "inventory_stock_balance",
+            "inventory_stock_balance_by_material_dimension",
+            "inventory_stock_balance_by_mobile",
+            "inventory_stock_balance_by_warehouse",
+            "inventory_traceability_by_serial",
+            "inventory_transfer_destination_not_available",
+            "inventory_transfer_other_ally",
+            "inventory_transfer_warehouse"
+          ],
+          "reglas_declaradas": [
+            "inventario.kardex.signos_operativos",
+            "inventario.limit.document_generation_pending",
+            "inventario.limit.transfer_destination_missing_metadata",
+            "inventario.metric.serial_count_only",
+            "inventario.metric.stock_include_zero_negative",
+            "inventario.route.kardex_codigo",
+            "inventario.route.kardex_employee",
+            "inventario.route.serial_holder",
+            "inventario.route.serial_stock_family_grouped_dimension",
+            "inventario.route.stock_balance_holder",
+            "inventario.route.stock_balance_material_grouped_dimension",
+            "inventario.route.transfer_other_ally",
+            "inventario.route.transfer_warehouse",
+            "inventario.scope.dual_block_unspecified_family"
+          ],
+          "perfiles_respuesta": [
+            "inventory.document_generation.pending",
+            "inventory.kardex.consolidated.detail",
+            "inventory.kardex.employee.detail",
+            "inventory.serial.holder.detail",
+            "inventory.serial.stock.dimension.detail",
+            "inventory.serial.stock.dimension.summary",
+            "inventory.stock.balance.summary",
+            "inventory.stock.dimension.summary",
+            "inventory.stock.mobile.detail",
+            "inventory.stock.mobile.dual_block",
+            "inventory.stock.warehouse.detail",
+            "inventory.traceability.serial.detail",
+            "inventory.transfer.destination.blocked",
+            "inventory.transfer.other_ally.detail",
+            "inventory.transfer.warehouse.detail"
+          ],
+          "evaluaciones_asociadas": [
+            "inventario_runtime_eval_v1"
+          ]
+        }
+      }
+    },
+    "cause_generation_meta": {},
+    "business_response_composer": {
+      "que_entendi": "Consulta de inventario logistica resuelta con el perfil inventory serial stock dimension detail",
+      "datos_usados": "Perfil de respuesta: inventory.serial.stock.dimension.detail. Datos usados: base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro. Fuentes de evidencia: semantic_context, business_query_semantic_plan, semantic_capability_registry, .dd_sinonimos, .dd_reglas",
+      "resultado": "Encontre la familia DECO en el catalogo, pero no hay evidencia de seriales asociados para el alcance solicitado",
+      "alertas": "La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada",
+      "limitaciones": "Limitaciones: la ejecucion termino sin evidencia util para afirmar un resultado positivo.",
+      "siguiente_accion": "Si quieres, puedo revisar la misma familia por otra dimension operativa o validar otra familia del catalogo"
+    }
+  },
+  "actions": [
+    {
+      "id": "task-followup-run_85c628771f234a76",
+      "type": "followup",
+      "label": "Profundizar analisis",
+      "payload": {
+        "suggested_dimensions": [
+          "sede",
+          "area",
+          "cargo"
+        ],
+        "current_strategy": "sql_assisted"
+      }
+    }
+  ],
+  "data_sources": {
+    "query_intelligence": {
+      "ok": true,
+      "strategy": "sql_assisted",
+      "query": "SELECT COALESCE(emp.movil, '') AS dimension, '' AS cedula, COALESCE(MAX(emp.nombre), '') AS nombre, '' AS empleado, COALESCE(emp.movil, '') AS movil, '' AS bodega, s.codigo AS codigo, COALESCE(MAX(cat.descripcion), '') AS descripcion, COALESCE(MAX(cat.familia), '') AS familia, COUNT(DISTINCT s.numero_serial) AS seriales_total, GROUP_CONCAT(DISTINCT CAST(s.cedula AS CHAR) ORDER BY s.cedula SEPARATOR '; ') AS cedulas_asociadas, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END) AS en_movil, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END) AS en_base, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS cobros, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END + CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END - CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS saldo FROM logistica_cinco.logistica_base_seriales AS s LEFT JOIN (SELECT p.cedula AS cedula, COALESCE(MAX(p.movil), '') AS movil, COALESCE(MAX(p.nombre), '') AS nombre, COALESCE(MAX(p.apellido), '') AS apellido, COALESCE(MAX(p.estado), '') AS estado_empleado FROM bd_c3nc4s1s.cinco_base_de_personal AS p GROUP BY p.cedula) AS emp ON emp.cedula = s.cedula LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo WHERE UPPER(TRIM(COALESCE(cat.familia, ''))) = 'DECO' GROUP BY COALESCE(emp.movil, ''), s.codigo, cat.descripcion, cat.familia ORDER BY dimension ASC, saldo DESC, codigo ASC LIMIT 500",
+      "db_alias": "logistica_cinco",
+      "compiler": "inventory_semantic_sql",
+      "relations_used": [],
+      "metric_used": "saldo_serializado",
+      "aggregation_used": "serial_family_balance_by_dimension_and_code",
+      "dimensions_used": [
+        "movil",
+        "codigo",
+        "familia"
+      ],
+      "result_set": {
+        "total_records": 0,
+        "returned_records": 0,
+        "truncated": false,
+        "limit": 500
+      },
+      "total_records": 0,
+      "returned_records": 0,
+      "truncated": false,
+      "limit": 500,
+      "declared_metric_source": "ai_dictionary.dd_campos",
+      "declared_dimensions_source": "ai_dictionary.dd_campos",
+      "mode": "active",
+      "semantic_diagnostics": {
+        "mode": "active",
+        "domain_code": "inventario_logistica",
+        "operation": "aggregate",
+        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+        "strategy": "sql_assisted",
+        "synonyms_applied": [],
+        "column_actions": [],
+        "unresolved_terms": [
+          {
+            "scope": "filter",
+            "requested_term": "material_family",
+            "reason": "no_semantic_column_match",
+            "searched_in": [
+              "ai_dictionary.dd_sinonimos",
+              "ai_dictionary.dd_campos",
+              "domain_runtime.column_profiles"
+            ]
+          },
+          {
+            "scope": "filter",
+            "requested_term": "grouping_dimension",
+            "reason": "no_semantic_column_match",
+            "searched_in": [
+              "ai_dictionary.dd_sinonimos",
+              "ai_dictionary.dd_campos",
+              "domain_runtime.column_profiles"
+            ]
+          },
+          {
+            "scope": "filter",
+            "requested_term": "categoria",
+            "reason": "no_semantic_column_match",
+            "searched_in": [
+              "ai_dictionary.dd_sinonimos",
+              "ai_dictionary.dd_campos",
+              "domain_runtime.column_profiles"
+            ]
+          },
+          {
+            "scope": "group_by",
+            "requested_term": "movil",
+            "reason": "group_dimension_not_resolved",
+            "searched_in": [
+              "ai_dictionary.dd_sinonimos",
+              "ai_dictionary.dd_campos",
+              "domain_runtime.column_profiles"
+            ]
+          }
+        ],
+        "search_bases": {
+          "ai_dictionary": {
+            "database_alias": "default",
+            "dictionary_table": "ai_dictionary.dd_dominios",
+            "schema": "ai_dictionary",
+            "domain_code": "inventario_logistica",
+            "domain_name": "Inventario Logistica",
+            "domain_matched": true,
+            "searched_tables": [
+              "dd_dominios",
+              "dd_tablas",
+              "dd_campos",
+              "dd_relaciones",
+              "dd_reglas",
+              "dd_sinonimos"
+            ]
+          },
+          "operational_context": {
+            "tables_considered": [
+              "a_promedios_consumo",
+              "logistica_cinco.a_promedios_consumo",
+              "logistica_cinco.base_codigo_seriales",
+              "base_codigo_seriales",
+              "base_codigos",
+              "bd_c3nc4s1s.cinco_base_de_personal",
+              "bd_c3nc4s1s.facturacion_facturado_wfm",
+              "logistica_cinco.logistica_base_seriales",
+              "logistica_base_seriales",
+              "logistica_movimientos_cobro",
+              "logistica_movimientos_consumo",
+              "logistica_cinco.logistica_movimientos_consumo",
+              "logistica_movimientos_devolucion",
+              "logistica_movimientos_entrada",
+              "logistica_movimientos_entrega",
+              "logistica_movimientos_traslado",
+              "logistica_cinco.logistica_movimientos_traslado",
+              "logistica_cinco.logistica_seriales_asociados",
+              "logistica_seriales_asociados"
+            ],
+            "databases_detected": [
+              "bd_c3nc4s1s",
+              "logistica_cinco"
+            ],
+            "filters_normalized": {
+              "material_family": "DECO",
+              "grouping_dimension": "movil",
+              "categoria": "Deco"
+            },
+            "mapped_columns": {}
+          }
+        },
+        "warnings": []
+      }
+    },
+    "runtime": {
+      "ok": true,
+      "flow": "sql_assisted",
+      "agent_id": "analista_agent",
+      "domain": "general",
+      "intent": "analytics_query",
+      "capability": "inventory_serial_stock_by_family_grouped_dimension",
+      "route": {
+        "selected_capability_id": "query_execution_planner.sql_assisted",
+        "reason": "query_intelligence_active_precomputed_response",
+        "execute_capability": false,
+        "use_legacy": false,
+        "runtime_authority": "query_execution_planner",
+        "planner_was_authority": true
+      },
+      "execute": true,
+      "legacy_used": false,
+      "fallback_used": {
+        "used": false,
+        "reason": "query_intelligence_active_precomputed_response",
+        "flow": "",
+        "legacy_analytics_fallback_disabled": false,
+        "blocked_legacy_fallback": false,
+        "analytics_router_decision": "sql_assisted",
+        "legacy_analytics_isolated": false,
+        "blocked_tool_ausentismo_service": false,
+        "blocked_run_legacy_for_analytics": false,
+        "runtime_only_fallback_reason": "",
+        "cleanup_phase": ""
+      },
+      "planner_called": true,
+      "block_reason": "",
+      "block_reason_code": "",
+      "contract_policy_applied": {
+        "agent_id": "analista_agent",
+        "domain": "general",
+        "fallback_policy": true,
+        "memory_policy": true,
+        "response_policy": true,
+        "observability": true
+      },
+      "arbitrated_intent": "analytics_query",
+      "final_intent": "analytics_query",
+      "final_domain": "inventario_logistica",
+      "task_state_key": "task_runtime:run_85c628771f234a76",
+      "runtime_authority": "query_execution_planner",
+      "planner_was_authority": true,
+      "legacy_capability_path_used": false,
+      "routing_mode": "capability",
+      "legacy_analytics_fallback_disabled": false,
+      "blocked_legacy_fallback": false,
+      "analytics_router_decision": "sql_assisted",
+      "legacy_analytics_isolated": false,
+      "blocked_tool_ausentismo_service": false,
+      "blocked_run_legacy_for_analytics": false,
+      "runtime_only_fallback_reason": "",
+      "fallback_reason": "",
+      "cleanup_phase": "",
+      "compiler_used": "inventory_semantic_sql",
+      "structural_source": "ai_dictionary",
+      "yaml_role": "narrative_only",
+      "yaml_structural_ignored": false,
+      "pilot_enabled": false,
+      "pilot_phase": "phase_9",
+      "legacy_runtime_fallback_used": false,
+      "tool_execution": {
+        "selected_tool_id": "query_execution_planner.sql_assisted",
+        "selected_capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+        "registry_version": "tool_registry.v1",
+        "tool_definition": {
+          "tool_id": "query_execution_planner.sql_assisted",
+          "capability_id": "query_execution_planner.sql_assisted",
+          "domain": "shared",
+          "handler_key": "query_execution_planner",
+          "title": "SQL Assisted Planner Execution",
+          "description": "Ejecuta una consulta segura validada por QueryExecutionPlanner.",
+          "execution_policy": {
+            "mode": "sql_assisted",
+            "runtime_authority": "query_execution_planner",
+            "planner_authority": "QueryExecutionPlanner",
+            "supports_background": false,
+            "idempotent": true
+          },
+          "approval_policy": {
+            "mode": "auto",
+            "approval_required": false,
+            "reason": "",
+            "approval_type": "none",
+            "required_role": "",
+            "risk_level": "low"
+          },
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "constraints": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "message"
+            ]
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "reply": {
+                "type": "string"
+              },
+              "table": {
+                "type": "object"
+              },
+              "trace": {
+                "type": "array"
+              }
+            }
+          },
+          "audit_metadata": {
+            "owner": "QueryExecutionPlanner",
+            "tool_kind": "planner",
+            "sensitivity": "governed_read_only",
+            "approval_role_matrix": {
+              "approve": [],
+              "reject": []
+            },
+            "source": "runtime_registry"
+          },
+          "enabled": true,
+          "model_visible": true
+        },
+        "native_tool_calls_count": 0,
+        "response_tool_loop": {},
+        "trace": [
+          {
+            "tool_id": "query_execution_planner.sql_assisted",
+            "capability_id": "query_execution_planner.sql_assisted",
+            "status": "completed",
+            "run_id": "run_85c628771f234a76",
+            "trace_id": "trace_148869f3d19d4ead",
+            "started_at": "2026-05-17T05:16:11.719979+00:00",
+            "finished_at": "2026-05-17T05:16:23.519150+00:00",
+            "duration_ms": 911,
+            "tool_call_id": "",
+            "tool_name": "query_execution_planner.sql_assisted",
+            "arguments": {},
+            "execution_status": "completed",
+            "validation_status": "validated",
+            "evidence_metadata": {
+              "reply_present": true,
+              "table_rowcount": 0,
+              "fallback_used": false
+            },
+            "model_response_id": "",
+            "loop_iteration": 0,
+            "tool_definition": {
+              "tool_id": "query_execution_planner.sql_assisted",
+              "capability_id": "query_execution_planner.sql_assisted",
+              "domain": "shared",
+              "handler_key": "query_execution_planner",
+              "title": "SQL Assisted Planner Execution",
+              "description": "Ejecuta una consulta segura validada por QueryExecutionPlanner.",
+              "execution_policy": {
+                "mode": "sql_assisted",
+                "runtime_authority": "query_execution_planner",
+                "planner_authority": "QueryExecutionPlanner",
+                "supports_background": false,
+                "idempotent": true
+              },
+              "approval_policy": {
+                "mode": "auto",
+                "approval_required": false,
+                "reason": "",
+                "approval_type": "none",
+                "required_role": "",
+                "risk_level": "low"
+              },
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  },
+                  "constraints": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              },
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "reply": {
+                    "type": "string"
+                  },
+                  "table": {
+                    "type": "object"
+                  },
+                  "trace": {
+                    "type": "array"
+                  }
+                }
+              },
+              "audit_metadata": {
+                "owner": "QueryExecutionPlanner",
+                "tool_kind": "planner",
+                "sensitivity": "governed_read_only",
+                "approval_role_matrix": {
+                  "approve": [],
+                  "reject": []
+                },
+                "source": "runtime_registry"
+              },
+              "enabled": true,
+              "model_visible": true
+            },
+            "input_payload": {
+              "message": "saldo en moviles de Deco",
+              "session_id": "debug-deco-fixed-20260517",
+              "response_flow": "sql_assisted",
+              "route": {
+                "routing_mode": "capability",
+                "selected_capability_id": "query_execution_planner.sql_assisted",
+                "execute_capability": false,
+                "use_legacy": false,
+                "shadow_enabled": true,
+                "selected_capability_authoritative": false,
+                "runtime_authority": "query_execution_planner",
+                "planner_was_authority": true,
+                "planner_selected_strategy": "sql_assisted",
+                "legacy_capability_path_used": false,
+                "reason": "query_intelligence_active_precomputed_response",
+                "policy_action": "allow",
+                "policy_allowed": true,
+                "capability_exists": false,
+                "rollout_enabled": false
+              },
+              "execution_plan": {
+                "strategy": "sql_assisted",
+                "constraints": {
+                  "entity_scope": {
+                    "entity_type": "",
+                    "entity_id": "",
+                    "has_entity_filter": false
+                  },
+                  "filters": {
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil",
+                    "categoria": "Deco"
+                  },
+                  "period_scope": {
+                    "label": "hoy",
+                    "start_date": "2026-05-17",
+                    "end_date": "2026-05-17"
+                  },
+                  "temporal_scope": {},
+                  "group_by": [
+                    "movil"
+                  ],
+                  "metrics": [
+                    "count"
+                  ],
+                  "result_shape": "table",
+                  "joins": [],
+                  "chart_requested": true,
+                  "operation": "aggregate",
+                  "template_id": "inventory_serial_stock_by_family_grouped_dimension"
+                }
+              }
+            },
+            "output_payload": {
+              "reply_present": true,
+              "table_rowcount": 0,
+              "used_tools": [
+                "query_sql_assisted_executor"
+              ],
+              "fallback_used": {
+                "used": false,
+                "reason": "query_intelligence_active_precomputed_response",
+                "flow": "",
+                "legacy_analytics_fallback_disabled": false,
+                "blocked_legacy_fallback": false,
+                "analytics_router_decision": "sql_assisted",
+                "legacy_analytics_isolated": false,
+                "blocked_tool_ausentismo_service": false,
+                "blocked_run_legacy_for_analytics": false,
+                "runtime_only_fallback_reason": "",
+                "cleanup_phase": ""
+              },
+              "validation": {
+                "satisfied": true,
+                "reason": "empty_inventory_result_is_actionable",
+                "gate_approved": true,
+                "gate_score": 0.0
+              }
+            },
+            "execution_policy": {
+              "mode": "sql_assisted",
+              "runtime_authority": "query_execution_planner",
+              "planner_authority": "QueryExecutionPlanner",
+              "supports_background": false,
+              "idempotent": true
+            },
+            "approval_policy": {
+              "mode": "auto",
+              "approval_required": false,
+              "reason": "",
+              "approval_type": "none",
+              "required_role": "",
+              "risk_level": "low"
+            },
+            "audit_metadata": {
+              "owner": "QueryExecutionPlanner",
+              "tool_kind": "planner",
+              "sensitivity": "governed_read_only",
+              "approval_role_matrix": {
+                "approve": [],
+                "reject": []
+              },
+              "source": "runtime_registry",
+              "registry_version": "tool_registry.v1"
+            }
+          }
+        ]
+      },
+      "background": {},
+      "background_trace": [],
+      "checkpoints": [],
+      "agents": [
+        {
+          "agent_name": "manager_agent",
+          "role": "manager",
+          "status": "completed",
+          "reasoning_steps": [
+            {
+              "step": "intake",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "delegation_policy",
+              "detail": "El manager coordina y delega; el runtime deterministico conserva la autoridad de ejecucion."
+            },
+            {
+              "step": "selected_specialist",
+              "detail": "Delegacion preparada hacia inventory_agent."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "specialist_selection",
+              "selected_specialist": "inventory_agent",
+              "llm_used": false
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "selected_specialist": "inventory_agent",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "implementation": "gateway_function_loop"
+          }
+        },
+        {
+          "agent_name": "inventory_agent",
+          "role": "specialist",
+          "domain_scope": "inventario_logistica",
+          "status": "completed",
+          "reasoning_steps": [
+            {
+              "step": "domain_alignment",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "runtime_authority",
+              "detail": "Se mantiene ai_dictionary como autoridad estructural y QueryExecutionPlanner como autoridad unica de SQL seguro."
+            },
+            {
+              "step": "semantic_guardrails",
+              "detail": "Dominio propuesto: inventario_logistica. Intent: inventory_stock_by_mobile. Capability: inventory_serial_stock_by_family_grouped_dimension. Ruta recomendada: sql_assisted. Filtros gobernados: grouping_dimension, material_family. Dominio candidato inicial: inventario_logistica."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "recommended_tools",
+              "tool_ids": [
+                "query_execution_planner.sql_assisted",
+                "inventory_stock_balance_by_mobile"
+              ],
+              "message_excerpt": "saldo en moviles de Deco"
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile"
+          },
+          "handoff_origin": "manager_agent"
+        }
+      ],
+      "handoffs": [
+        {
+          "handoff_id": "handoff_1a0311502ba84ebd",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "inventory_agent",
+          "requested_by_agent": "manager_agent",
+          "target_tool": "query_execution_planner.sql_assisted",
+          "reason": "domain_aligned_specialist_selection",
+          "status": "completed",
+          "evidence": {
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "agent_tool_name": "agent.delegate.inventory_agent"
+          },
+          "created_at": "2026-05-17T05:16:19.008643+00:00",
+          "run_id": "run_85c628771f234a76",
+          "trace_id": "trace_148869f3d19d4ead",
+          "event": "handoff_recorded",
+          "service_version": "handoff_trace.v1"
+        }
+      ],
+      "handoff_trace": [
+        {
+          "handoff_id": "handoff_1a0311502ba84ebd",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "inventory_agent",
+          "requested_by_agent": "manager_agent",
+          "target_tool": "query_execution_planner.sql_assisted",
+          "reason": "domain_aligned_specialist_selection",
+          "status": "completed",
+          "evidence": {
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "agent_tool_name": "agent.delegate.inventory_agent"
+          },
+          "created_at": "2026-05-17T05:16:19.008643+00:00",
+          "run_id": "run_85c628771f234a76",
+          "trace_id": "trace_148869f3d19d4ead",
+          "event": "handoff_recorded",
+          "service_version": "handoff_trace.v1"
+        }
+      ],
+      "agent_trace": [
+        {
+          "agent_name": "manager_agent",
+          "handoff_origin": "",
+          "handoff_target": "inventory_agent",
+          "reasoning_steps": [
+            {
+              "step": "intake",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "delegation_policy",
+              "detail": "El manager coordina y delega; el runtime deterministico conserva la autoridad de ejecucion."
+            },
+            {
+              "step": "selected_specialist",
+              "detail": "Delegacion preparada hacia inventory_agent."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "specialist_selection",
+              "selected_specialist": "inventory_agent",
+              "llm_used": false
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "selected_specialist": "inventory_agent",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "implementation": "gateway_function_loop"
+          },
+          "handoff_id": "handoff_1a0311502ba84ebd"
+        },
+        {
+          "agent_name": "inventory_agent",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "",
+          "reasoning_steps": [
+            {
+              "step": "domain_alignment",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "runtime_authority",
+              "detail": "Se mantiene ai_dictionary como autoridad estructural y QueryExecutionPlanner como autoridad unica de SQL seguro."
+            },
+            {
+              "step": "semantic_guardrails",
+              "detail": "Dominio propuesto: inventario_logistica. Intent: inventory_stock_by_mobile. Capability: inventory_serial_stock_by_family_grouped_dimension. Ruta recomendada: sql_assisted. Filtros gobernados: grouping_dimension, material_family. Dominio candidato inicial: inventario_logistica."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "recommended_tools",
+              "tool_ids": [
+                "query_execution_planner.sql_assisted",
+                "inventory_stock_balance_by_mobile"
+              ],
+              "message_excerpt": "saldo en moviles de Deco"
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile"
+          },
+          "handoff_id": "handoff_1a0311502ba84ebd"
+        }
+      ],
+      "approvals": [],
+      "approval_trace": []
+    }
+  },
+  "trace": [
+    {
+      "phase": "query_intelligence_execution",
+      "status": "ok",
+      "at": "2026-05-17T05:16:22.785687+00:00",
+      "detail": {
+        "execution_plan": {
+          "strategy": "sql_assisted",
+          "reason": "inventory_serial_stock_by_family_grouped_dimension",
+          "domain_code": "inventario_logistica",
+          "capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+          "sql_query": "SELECT COALESCE(emp.movil, '') AS dimension, '' AS cedula, COALESCE(MAX(emp.nombre), '') AS nombre, '' AS empleado, COALESCE(emp.movil, '') AS movil, '' AS bodega, s.codigo AS codigo, COALESCE(MAX(cat.descripcion), '') AS descripcion, COALESCE(MAX(cat.familia), '') AS familia, COUNT(DISTINCT s.numero_serial) AS seriales_total, GROUP_CONCAT(DISTINCT CAST(s.cedula AS CHAR) ORDER BY s.cedula SEPARATOR '; ') AS cedulas_asociadas, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END) AS en_movil, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END) AS en_base, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS cobros, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END + CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END - CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS saldo FROM logistica_cinco.logistica_base_seriales AS s LEFT JOIN (SELECT p.cedula AS cedula, COALESCE(MAX(p.movil), '') AS movil, COALESCE(MAX(p.nombre), '') AS nombre, COALESCE(MAX(p.apellido), '') AS apellido, COALESCE(MAX(p.estado), '') AS estado_empleado FROM bd_c3nc4s1s.cinco_base_de_personal AS p GROUP BY p.cedula) AS emp ON emp.cedula = s.cedula LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo WHERE UPPER(TRIM(COALESCE(cat.familia, ''))) = 'DECO' GROUP BY COALESCE(emp.movil, ''), s.codigo, cat.descripcion, cat.familia ORDER BY dimension ASC, saldo DESC, codigo ASC LIMIT 500",
+          "requires_context": false,
+          "missing_context": [],
+          "constraints": {
+            "entity_scope": {
+              "entity_type": "",
+              "entity_id": "",
+              "has_entity_filter": false
+            },
+            "filters": {
+              "material_family": "DECO",
+              "grouping_dimension": "movil",
+              "categoria": "Deco"
+            },
+            "period_scope": {
+              "label": "hoy",
+              "start_date": "2026-05-17",
+              "end_date": "2026-05-17"
+            },
+            "temporal_scope": {},
+            "group_by": [
+              "movil"
+            ],
+            "metrics": [
+              "count"
+            ],
+            "result_shape": "table",
+            "joins": [],
+            "chart_requested": true,
+            "operation": "aggregate",
+            "template_id": "inventory_serial_stock_by_family_grouped_dimension"
+          },
+          "policy": {
+            "allowed": true,
+            "reason": "sql_validated",
+            "metadata": {
+              "declared_tables": [
+                "logistica_cinco.logistica_base_seriales",
+                "bd_c3nc4s1s.cinco_base_de_personal",
+                "logistica_cinco.base_codigo_seriales"
+              ],
+              "declared_columns_count": 14,
+              "declared_relations_count": 0,
+              "limit": 500
+            }
+          },
+          "metadata": {
+            "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+            "operation": "aggregate",
+            "capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+            "semantic_trace": {
+              "original_query": "saldo en moviles de Deco",
+              "semantic_plan": {
+                "query": "saldo en moviles de Deco",
+                "domain": "inventario_logistica",
+                "intent": "stock_balance",
+                "entity": {
+                  "type": "",
+                  "identifier": "",
+                  "field": "",
+                  "physical_field": "",
+                  "resolution_source": "deterministic"
+                },
+                "governed_physical_field": "",
+                "grouping_dimension": [
+                  "movil"
+                ],
+                "inventory_family": "serializados",
+                "scope": {
+                  "families": [
+                    "serializados"
+                  ],
+                  "include_serialized": true,
+                  "stock_scope": "",
+                  "group_dimensions": [
+                    "movil"
+                  ],
+                  "coverage": "operativo_general"
+                },
+                "output": {
+                  "expected_output": "inventario_serializado",
+                  "grain": "saldo_serializado_por_dimension_y_codigo",
+                  "columns": [
+                    "dimension",
+                    "cedula",
+                    "empleado",
+                    "movil",
+                    "bodega",
+                    "codigo",
+                    "descripcion",
+                    "familia",
+                    "seriales_total",
+                    "cedulas_asociadas",
+                    "en_movil",
+                    "en_base",
+                    "cobros",
+                    "saldo"
+                  ]
+                },
+                "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                "normalized_filters": {
+                  "material_family": "DECO",
+                  "grouping_dimension": "movil"
+                },
+                "requires_enrichment": true,
+                "applicable_business_rules": [
+                  "gpt_semantiza_planner_ejecuta",
+                  "saldo_incluye_positivos_cero_y_negativos",
+                  "inventario_generico_incluye_serializados_cuando_aplica",
+                  "serializados_usan_conteo_no_cantidad"
+                ],
+                "possible_alerts": [
+                  "explicar_saldos_cero_y_negativos",
+                  "resaltar_movimientos_atipicos",
+                  "explicar_bloque_serializado_por_estado"
+                ],
+                "known_limitations": [],
+                "execution": {
+                  "capability": "inventory_serial_stock_by_family_grouped_dimension",
+                  "requires_sql_planner": true,
+                  "planner_authority": "QueryExecutionPlanner",
+                  "execute_authority": "planner_only"
+                },
+                "ambiguity_notes": [],
+                "consulted_sources": [
+                  "ai_dictionary.dd_reglas",
+                  "ai_dictionary.dd_sinonimos",
+                  "ai_dictionary.dd_relaciones",
+                  "ai_dictionary.dd_campos",
+                  "ai_dictionary.dd_tablas",
+                  "ai_dictionary.dd_capacidades_campo",
+                  "ai_dictionary.ia_dev_capacidades_columna",
+                  "ai_dictionary.ia_dev_business_memory"
+                ],
+                "memory_keys_used": [
+                  "inventory.semantic.rule.kardex",
+                  "inventory.semantic.rule.kardex_empleado",
+                  "inventory.semantic.rule.gpt_semantiza_planner_ejecuta",
+                  "inventory.semantic.rule.serializados",
+                  "inventory.semantic.rule.enrichment_historico",
+                  "inventory.semantic.rule.inventario_generico",
+                  "inventory.semantic.rule.movil_cuadrilla",
+                  "inventory.semantic.rule.saldo_inventario",
+                  "inventory.semantic.rule.ferretero",
+                  "inventory.semantic.rule.material_claro",
+                  "inventory.semantic.rule.material_generico"
+                ],
+                "llm_policy": {
+                  "eligible": false,
+                  "allowed_tasks": [
+                    "interpret_intent",
+                    "detect_ambiguity",
+                    "organize_filters",
+                    "suggest_capability",
+                    "draft_business_summary"
+                  ],
+                  "forbidden_tasks": [
+                    "generate_free_sql",
+                    "invent_columns",
+                    "invent_tables",
+                    "decide_execute_true"
+                  ],
+                  "authority": "deterministic_and_dictionary_first",
+                  "semantic_binding": {
+                    "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                    "planner_route_hint": "inventory.serial_stock.family_dimension",
+                    "response_profile": "inventory.serial.stock.dimension.detail",
+                    "tool_id": "query_execution_planner.sql_assisted",
+                    "source": "semantic_inventory_registry_metadata",
+                    "matched_rules": [
+                      "inventario.route.serial_stock_family_grouped_dimension",
+                      "candidate_capability_bound_from_registry",
+                      "tool_id_resolved_via_tool_registry"
+                    ],
+                    "confidence": 0.91,
+                    "fallback_used": false,
+                    "legacy_mapping_used": false
+                  }
+                }
+              },
+              "semantic_binding": {
+                "domain": "inventario_logistica",
+                "intent": "stock_balance",
+                "entity": {
+                  "type": "",
+                  "identifier": "",
+                  "field": "",
+                  "physical_field": ""
+                },
+                "normalized_filters": {
+                  "material_family": "DECO",
+                  "grouping_dimension": "movil",
+                  "categoria": "Deco"
+                },
+                "output_profile": {
+                  "expected_output": "inventario_serializado",
+                  "grain": "saldo_serializado_por_dimension_y_codigo",
+                  "columns": [
+                    "dimension",
+                    "cedula",
+                    "empleado",
+                    "movil",
+                    "bodega",
+                    "codigo",
+                    "descripcion",
+                    "familia",
+                    "seriales_total",
+                    "cedulas_asociadas",
+                    "en_movil",
+                    "en_base",
+                    "cobros",
+                    "saldo"
+                  ]
+                },
+                "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                "planner_route_hint": "inventory.serial_stock.family_dimension",
+                "response_profile": "inventory.serial.stock.dimension.detail",
+                "tool_id": "query_execution_planner.sql_assisted",
+                "source": "semantic_inventory_registry_metadata",
+                "matched_rules": [
+                  "inventario.route.serial_stock_family_grouped_dimension",
+                  "candidate_capability_bound_from_registry",
+                  "tool_id_resolved_via_tool_registry"
+                ],
+                "consulted_metadata": [
+                  "ai_dictionary.dd_tablas",
+                  "ai_dictionary.dd_campos",
+                  "ai_dictionary.dd_relaciones",
+                  "ai_dictionary.dd_sinonimos",
+                  "ai_dictionary.dd_reglas",
+                  "ai_dictionary.ia_dev_capacidades_columna",
+                  "ToolRegistryService",
+                  "BusinessQuerySemanticPlan",
+                  "semantic_context"
+                ],
+                "confidence": 0.91,
+                "fallback_used": false,
+                "unresolved_reason": "",
+                "legacy_mapping_used": false,
+                "legacy_reason": "",
+                "migration_target": "",
+                "regla_metadata_usada": [
+                  "inventario.route.serial_stock_family_grouped_dimension"
+                ],
+                "fuente_dd": [
+                  "ai_dictionary.dd_sinonimos",
+                  "ai_dictionary.dd_reglas",
+                  "ai_dictionary.ia_dev_capacidades_columna"
+                ],
+                "fallback_sombreado_usado": false,
+                "regla_legacy_detectada": false,
+                "regla_migrada": true,
+                "paquete_capacidad_usado": "inventario_logistica",
+                "version_paquete": "1.0.0",
+                "capacidades_declaradas": [
+                  "inventory_document_generation_pending",
+                  "inventory_kardex_by_employee",
+                  "inventory_kardex_consolidated",
+                  "inventory_serial_by_operational_holder",
+                  "inventory_serial_stock_by_family_grouped_dimension",
+                  "inventory_stock_balance",
+                  "inventory_stock_balance_by_material_dimension",
+                  "inventory_stock_balance_by_mobile",
+                  "inventory_stock_balance_by_warehouse",
+                  "inventory_traceability_by_serial",
+                  "inventory_transfer_destination_not_available",
+                  "inventory_transfer_other_ally",
+                  "inventory_transfer_warehouse"
+                ],
+                "reglas_declaradas": [
+                  "inventario.kardex.signos_operativos",
+                  "inventario.limit.document_generation_pending",
+                  "inventario.limit.transfer_destination_missing_metadata",
+                  "inventario.metric.serial_count_only",
+                  "inventario.metric.stock_include_zero_negative",
+                  "inventario.route.kardex_codigo",
+                  "inventario.route.kardex_employee",
+                  "inventario.route.serial_holder",
+                  "inventario.route.serial_stock_family_grouped_dimension",
+                  "inventario.route.stock_balance_holder",
+                  "inventario.route.stock_balance_material_grouped_dimension",
+                  "inventario.route.transfer_other_ally",
+                  "inventario.route.transfer_warehouse",
+                  "inventario.scope.dual_block_unspecified_family"
+                ],
+                "perfiles_respuesta": [
+                  "inventory.document_generation.pending",
+                  "inventory.kardex.consolidated.detail",
+                  "inventory.kardex.employee.detail",
+                  "inventory.serial.holder.detail",
+                  "inventory.serial.stock.dimension.detail",
+                  "inventory.serial.stock.dimension.summary",
+                  "inventory.stock.balance.summary",
+                  "inventory.stock.dimension.summary",
+                  "inventory.stock.mobile.detail",
+                  "inventory.stock.mobile.dual_block",
+                  "inventory.stock.warehouse.detail",
+                  "inventory.traceability.serial.detail",
+                  "inventory.transfer.destination.blocked",
+                  "inventory.transfer.other_ally.detail",
+                  "inventory.transfer.warehouse.detail"
+                ],
+                "evaluaciones_asociadas": [
+                  "inventario_runtime_eval_v1"
+                ]
+              },
+              "rules_applied": [
+                "gpt_semantiza_planner_ejecuta",
+                "saldo_incluye_positivos_cero_y_negativos",
+                "inventario_generico_incluye_serializados_cuando_aplica",
+                "serializados_usan_conteo_no_cantidad"
+              ],
+              "consulted_sources": [
+                "ai_dictionary.dd_reglas",
+                "ai_dictionary.dd_sinonimos",
+                "ai_dictionary.dd_relaciones",
+                "ai_dictionary.dd_campos",
+                "ai_dictionary.dd_tablas",
+                "ai_dictionary.dd_capacidades_campo",
+                "ai_dictionary.ia_dev_capacidades_columna",
+                "ai_dictionary.ia_dev_business_memory",
+                "ToolRegistryService",
+                "BusinessQuerySemanticPlan",
+                "semantic_context"
+              ],
+              "memory_keys_used": [
+                "inventory.semantic.rule.kardex",
+                "inventory.semantic.rule.kardex_empleado",
+                "inventory.semantic.rule.gpt_semantiza_planner_ejecuta",
+                "inventory.semantic.rule.serializados",
+                "inventory.semantic.rule.enrichment_historico",
+                "inventory.semantic.rule.inventario_generico",
+                "inventory.semantic.rule.movil_cuadrilla",
+                "inventory.semantic.rule.saldo_inventario",
+                "inventory.semantic.rule.ferretero",
+                "inventory.semantic.rule.material_claro",
+                "inventory.semantic.rule.material_generico"
+              ],
+              "final_filters": {
+                "material_family": "DECO",
+                "grouping_dimension": "movil",
+                "categoria": "Deco"
+              },
+              "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+              "blocked_reasons": []
+            },
+            "compiler": "inventory_semantic_sql",
+            "compiler_used": "inventory_semantic_sql",
+            "tables_detected": [
+              "base_codigo_seriales",
+              "cinco_base_de_personal",
+              "logistica_base_seriales"
+            ],
+            "columns_detected": [
+              "apellido",
+              "area",
+              "bodega",
+              "cargo",
+              "carpeta",
+              "cedula",
+              "codigo",
+              "descripcion",
+              "estado",
+              "familia",
+              "movil",
+              "nombre",
+              "numero_serial",
+              "tipo_labor"
+            ],
+            "physical_columns_used": [
+              "apellido",
+              "area",
+              "bodega",
+              "cargo",
+              "carpeta",
+              "cedula",
+              "codigo",
+              "descripcion",
+              "estado",
+              "familia",
+              "movil",
+              "nombre",
+              "numero_serial",
+              "tipo_labor"
+            ],
+            "relations_used": [],
+            "metric_used": "saldo_serializado",
+            "aggregation_used": "serial_family_balance_by_dimension_and_code",
+            "dimensions_used": [
+              "movil",
+              "codigo",
+              "familia"
+            ],
+            "concept_field": "stock_serializado_familia_dimension",
+            "declared_metric_source": "ai_dictionary.dd_campos",
+            "declared_dimensions_source": "ai_dictionary.dd_campos",
+            "insights": [
+              "La consulta de inventario se resolvio con SQL asistido validado contra ai_dictionary."
+            ],
+            "db_alias": "logistica_cinco",
+            "formula_used": "saldo = en_movil + en_base - cobros",
+            "balance_filter_policy": "include_positive_zero_negative",
+            "serial_rules": {
+              "en_movil": "estado contiene MOVIL",
+              "en_base": "estado contiene BASE o BODEGA",
+              "cobros": "estado contiene COBRO"
+            },
+            "filters_applied": {
+              "material_family": "DECO",
+              "grouping_dimension": "movil"
+            },
+            "grouping_dimension": "movil",
+            "catalog_family_exists": true,
+            "catalog_family_column": "base_codigo_seriales.familia",
+            "joins_used": [
+              "employee_detail_by_cedula",
+              "serial_catalog_by_codigo"
+            ],
+            "raw_query_fallback_used": false,
+            "raw_query_fallback_reason": "",
+            "analytics_router_decision": "join_aware_sql",
+            "legacy_analytics_isolated": false,
+            "heuristic_intent": "inventario_logistica_query",
+            "llm_intent": "aggregate",
+            "arbitrated_intent": "analytics_query",
+            "arbitration_confidence": 0.94,
+            "arbitration_reason": "La solicitud es una consulta analítica de inventario/logística sobre saldo por móviles para la familia DECO. No implica cambio de conocimiento ni acción operativa. Por ontología y diccionario, 'móviles' se trata como dimensión de agrupación válida; la consulta requiere apoyo SQL ",
+            "kpro_blocked_by_arbitration": true,
+            "sql_assisted_selected_by_arbitration": true
+          }
+        },
+        "duration_ms": 911,
+        "rowcount": 0,
+        "result_set": {
+          "total_records": 0,
+          "returned_records": 0,
+          "truncated": false,
+          "limit": 500
+        }
+      },
+      "active_nodes": [
+        "q",
+        "gpt",
+        "route",
+        "sql",
+        "result"
+      ]
+    }
+  ],
+  "memory": {
+    "used_messages": 0,
+    "capacity_messages": 20,
+    "usage_ratio": 0.0,
+    "trim_events": 0,
+    "saturated": false
+  },
+  "observability": {
+    "enabled": true,
+    "duration_ms": 911,
+    "tool_latencies_ms": {
+      "query_sql_assisted_executor": 911
+    },
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "estimated_cost_usd": 0.0
+  },
+  "active_nodes": [
+    "q",
+    "gpt",
+    "route",
+    "sql",
+    "result"
+  ],
+  "task": {
+    "task_id": "task_runtime:run_85c628771f234a76",
+    "current_run": {
+      "run_id": "run_85c628771f234a76",
+      "status": "completed",
+      "domain": "inventario_logistica",
+      "intent": "analytics_query",
+      "plan": {
+        "planned_capability": {
+          "capability_id": "query_execution_planner.sql_assisted",
+          "reason": "runtime_execution_plan_capability",
+          "authoritative": false
+        },
+        "route": {
+          "routing_mode": "capability",
+          "selected_capability_id": "query_execution_planner.sql_assisted",
+          "execute_capability": false,
+          "use_legacy": false,
+          "shadow_enabled": true,
+          "selected_capability_authoritative": false,
+          "runtime_authority": "query_execution_planner",
+          "planner_was_authority": true,
+          "planner_selected_strategy": "sql_assisted",
+          "legacy_capability_path_used": false,
+          "reason": "query_intelligence_active_precomputed_response",
+          "policy_action": "allow",
+          "policy_allowed": true,
+          "capability_exists": false,
+          "rollout_enabled": false
+        },
+        "query_intelligence": {
+          "mode": "active",
+          "execution_plan": {
+            "strategy": "sql_assisted",
+            "reason": "inventory_serial_stock_by_family_grouped_dimension",
+            "domain_code": "inventario_logistica",
+            "capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+            "sql_query": "SELECT COALESCE(emp.movil, '') AS dimension, '' AS cedula, COALESCE(MAX(emp.nombre), '') AS nombre, '' AS empleado, COALESCE(emp.movil, '') AS movil, '' AS bodega, s.codigo AS codigo, COALESCE(MAX(cat.descripcion), '') AS descripcion, COALESCE(MAX(cat.familia), '') AS familia, COUNT(DISTINCT s.numero_serial) AS seriales_total, GROUP_CONCAT(DISTINCT CAST(s.cedula AS CHAR) ORDER BY s.cedula SEPARATOR '; ') AS cedulas_asociadas, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END) AS en_movil, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END) AS en_base, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS cobros, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END + CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END - CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS saldo FROM logistica_cinco.logistica_base_seriales AS s LEFT JOIN (SELECT p.cedula AS cedula, COALESCE(MAX(p.movil), '') AS movil, COALESCE(MAX(p.nombre), '') AS nombre, COALESCE(MAX(p.apellido), '') AS apellido, COALESCE(MAX(p.estado), '') AS estado_empleado FROM bd_c3nc4s1s.cinco_base_de_personal AS p GROUP BY p.cedula) AS emp ON emp.cedula = s.cedula LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo WHERE UPPER(TRIM(COALESCE(cat.familia, ''))) = 'DECO' GROUP BY COALESCE(emp.movil, ''), s.codigo, cat.descripcion, cat.familia ORDER BY dimension ASC, saldo DESC, codigo ASC LIMIT 500",
+            "requires_context": false,
+            "missing_context": [],
+            "constraints": {
+              "entity_scope": {
+                "entity_type": "",
+                "entity_id": "",
+                "has_entity_filter": false
+              },
+              "filters": {
+                "material_family": "DECO",
+                "grouping_dimension": "movil",
+                "categoria": "Deco"
+              },
+              "period_scope": {
+                "label": "hoy",
+                "start_date": "2026-05-17",
+                "end_date": "2026-05-17"
+              },
+              "temporal_scope": {},
+              "group_by": [
+                "movil"
+              ],
+              "metrics": [
+                "count"
+              ],
+              "result_shape": "table",
+              "joins": [],
+              "chart_requested": true,
+              "operation": "aggregate",
+              "template_id": "inventory_serial_stock_by_family_grouped_dimension"
+            },
+            "policy": {
+              "allowed": true,
+              "reason": "sql_validated",
+              "metadata": {
+                "declared_tables": [
+                  "logistica_cinco.logistica_base_seriales",
+                  "bd_c3nc4s1s.cinco_base_de_personal",
+                  "logistica_cinco.base_codigo_seriales"
+                ],
+                "declared_columns_count": 14,
+                "declared_relations_count": 0,
+                "limit": 500
+              }
+            },
+            "metadata": {
+              "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+              "operation": "aggregate",
+              "capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+              "semantic_trace": {
+                "original_query": "saldo en moviles de Deco",
+                "semantic_plan": {
+                  "query": "saldo en moviles de Deco",
+                  "domain": "inventario_logistica",
+                  "intent": "stock_balance",
+                  "entity": {
+                    "type": "",
+                    "identifier": "",
+                    "field": "",
+                    "physical_field": "",
+                    "resolution_source": "deterministic"
+                  },
+                  "governed_physical_field": "",
+                  "grouping_dimension": [
+                    "movil"
+                  ],
+                  "inventory_family": "serializados",
+                  "scope": {
+                    "families": [
+                      "serializados"
+                    ],
+                    "include_serialized": true,
+                    "stock_scope": "",
+                    "group_dimensions": [
+                      "movil"
+                    ],
+                    "coverage": "operativo_general"
+                  },
+                  "output": {
+                    "expected_output": "inventario_serializado",
+                    "grain": "saldo_serializado_por_dimension_y_codigo",
+                    "columns": [
+                      "dimension",
+                      "cedula",
+                      "empleado",
+                      "movil",
+                      "bodega",
+                      "codigo",
+                      "descripcion",
+                      "familia",
+                      "seriales_total",
+                      "cedulas_asociadas",
+                      "en_movil",
+                      "en_base",
+                      "cobros",
+                      "saldo"
+                    ]
+                  },
+                  "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                  "normalized_filters": {
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil"
+                  },
+                  "requires_enrichment": true,
+                  "applicable_business_rules": [
+                    "gpt_semantiza_planner_ejecuta",
+                    "saldo_incluye_positivos_cero_y_negativos",
+                    "inventario_generico_incluye_serializados_cuando_aplica",
+                    "serializados_usan_conteo_no_cantidad"
+                  ],
+                  "possible_alerts": [
+                    "explicar_saldos_cero_y_negativos",
+                    "resaltar_movimientos_atipicos",
+                    "explicar_bloque_serializado_por_estado"
+                  ],
+                  "known_limitations": [],
+                  "execution": {
+                    "capability": "inventory_serial_stock_by_family_grouped_dimension",
+                    "requires_sql_planner": true,
+                    "planner_authority": "QueryExecutionPlanner",
+                    "execute_authority": "planner_only"
+                  },
+                  "ambiguity_notes": [],
+                  "consulted_sources": [
+                    "ai_dictionary.dd_reglas",
+                    "ai_dictionary.dd_sinonimos",
+                    "ai_dictionary.dd_relaciones",
+                    "ai_dictionary.dd_campos",
+                    "ai_dictionary.dd_tablas",
+                    "ai_dictionary.dd_capacidades_campo",
+                    "ai_dictionary.ia_dev_capacidades_columna",
+                    "ai_dictionary.ia_dev_business_memory"
+                  ],
+                  "memory_keys_used": [
+                    "inventory.semantic.rule.kardex",
+                    "inventory.semantic.rule.kardex_empleado",
+                    "inventory.semantic.rule.gpt_semantiza_planner_ejecuta",
+                    "inventory.semantic.rule.serializados",
+                    "inventory.semantic.rule.enrichment_historico",
+                    "inventory.semantic.rule.inventario_generico",
+                    "inventory.semantic.rule.movil_cuadrilla",
+                    "inventory.semantic.rule.saldo_inventario",
+                    "inventory.semantic.rule.ferretero",
+                    "inventory.semantic.rule.material_claro",
+                    "inventory.semantic.rule.material_generico"
+                  ],
+                  "llm_policy": {
+                    "eligible": false,
+                    "allowed_tasks": [
+                      "interpret_intent",
+                      "detect_ambiguity",
+                      "organize_filters",
+                      "suggest_capability",
+                      "draft_business_summary"
+                    ],
+                    "forbidden_tasks": [
+                      "generate_free_sql",
+                      "invent_columns",
+                      "invent_tables",
+                      "decide_execute_true"
+                    ],
+                    "authority": "deterministic_and_dictionary_first",
+                    "semantic_binding": {
+                      "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                      "planner_route_hint": "inventory.serial_stock.family_dimension",
+                      "response_profile": "inventory.serial.stock.dimension.detail",
+                      "tool_id": "query_execution_planner.sql_assisted",
+                      "source": "semantic_inventory_registry_metadata",
+                      "matched_rules": [
+                        "inventario.route.serial_stock_family_grouped_dimension",
+                        "candidate_capability_bound_from_registry",
+                        "tool_id_resolved_via_tool_registry"
+                      ],
+                      "confidence": 0.91,
+                      "fallback_used": false,
+                      "legacy_mapping_used": false
+                    }
+                  }
+                },
+                "semantic_binding": {
+                  "domain": "inventario_logistica",
+                  "intent": "stock_balance",
+                  "entity": {
+                    "type": "",
+                    "identifier": "",
+                    "field": "",
+                    "physical_field": ""
+                  },
+                  "normalized_filters": {
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil",
+                    "categoria": "Deco"
+                  },
+                  "output_profile": {
+                    "expected_output": "inventario_serializado",
+                    "grain": "saldo_serializado_por_dimension_y_codigo",
+                    "columns": [
+                      "dimension",
+                      "cedula",
+                      "empleado",
+                      "movil",
+                      "bodega",
+                      "codigo",
+                      "descripcion",
+                      "familia",
+                      "seriales_total",
+                      "cedulas_asociadas",
+                      "en_movil",
+                      "en_base",
+                      "cobros",
+                      "saldo"
+                    ]
+                  },
+                  "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                  "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                  "planner_route_hint": "inventory.serial_stock.family_dimension",
+                  "response_profile": "inventory.serial.stock.dimension.detail",
+                  "tool_id": "query_execution_planner.sql_assisted",
+                  "source": "semantic_inventory_registry_metadata",
+                  "matched_rules": [
+                    "inventario.route.serial_stock_family_grouped_dimension",
+                    "candidate_capability_bound_from_registry",
+                    "tool_id_resolved_via_tool_registry"
+                  ],
+                  "consulted_metadata": [
+                    "ai_dictionary.dd_tablas",
+                    "ai_dictionary.dd_campos",
+                    "ai_dictionary.dd_relaciones",
+                    "ai_dictionary.dd_sinonimos",
+                    "ai_dictionary.dd_reglas",
+                    "ai_dictionary.ia_dev_capacidades_columna",
+                    "ToolRegistryService",
+                    "BusinessQuerySemanticPlan",
+                    "semantic_context"
+                  ],
+                  "confidence": 0.91,
+                  "fallback_used": false,
+                  "unresolved_reason": "",
+                  "legacy_mapping_used": false,
+                  "legacy_reason": "",
+                  "migration_target": "",
+                  "regla_metadata_usada": [
+                    "inventario.route.serial_stock_family_grouped_dimension"
+                  ],
+                  "fuente_dd": [
+                    "ai_dictionary.dd_sinonimos",
+                    "ai_dictionary.dd_reglas",
+                    "ai_dictionary.ia_dev_capacidades_columna"
+                  ],
+                  "fallback_sombreado_usado": false,
+                  "regla_legacy_detectada": false,
+                  "regla_migrada": true,
+                  "paquete_capacidad_usado": "inventario_logistica",
+                  "version_paquete": "1.0.0",
+                  "capacidades_declaradas": [
+                    "inventory_document_generation_pending",
+                    "inventory_kardex_by_employee",
+                    "inventory_kardex_consolidated",
+                    "inventory_serial_by_operational_holder",
+                    "inventory_serial_stock_by_family_grouped_dimension",
+                    "inventory_stock_balance",
+                    "inventory_stock_balance_by_material_dimension",
+                    "inventory_stock_balance_by_mobile",
+                    "inventory_stock_balance_by_warehouse",
+                    "inventory_traceability_by_serial",
+                    "inventory_transfer_destination_not_available",
+                    "inventory_transfer_other_ally",
+                    "inventory_transfer_warehouse"
+                  ],
+                  "reglas_declaradas": [
+                    "inventario.kardex.signos_operativos",
+                    "inventario.limit.document_generation_pending",
+                    "inventario.limit.transfer_destination_missing_metadata",
+                    "inventario.metric.serial_count_only",
+                    "inventario.metric.stock_include_zero_negative",
+                    "inventario.route.kardex_codigo",
+                    "inventario.route.kardex_employee",
+                    "inventario.route.serial_holder",
+                    "inventario.route.serial_stock_family_grouped_dimension",
+                    "inventario.route.stock_balance_holder",
+                    "inventario.route.stock_balance_material_grouped_dimension",
+                    "inventario.route.transfer_other_ally",
+                    "inventario.route.transfer_warehouse",
+                    "inventario.scope.dual_block_unspecified_family"
+                  ],
+                  "perfiles_respuesta": [
+                    "inventory.document_generation.pending",
+                    "inventory.kardex.consolidated.detail",
+                    "inventory.kardex.employee.detail",
+                    "inventory.serial.holder.detail",
+                    "inventory.serial.stock.dimension.detail",
+                    "inventory.serial.stock.dimension.summary",
+                    "inventory.stock.balance.summary",
+                    "inventory.stock.dimension.summary",
+                    "inventory.stock.mobile.detail",
+                    "inventory.stock.mobile.dual_block",
+                    "inventory.stock.warehouse.detail",
+                    "inventory.traceability.serial.detail",
+                    "inventory.transfer.destination.blocked",
+                    "inventory.transfer.other_ally.detail",
+                    "inventory.transfer.warehouse.detail"
+                  ],
+                  "evaluaciones_asociadas": [
+                    "inventario_runtime_eval_v1"
+                  ]
+                },
+                "rules_applied": [
+                  "gpt_semantiza_planner_ejecuta",
+                  "saldo_incluye_positivos_cero_y_negativos",
+                  "inventario_generico_incluye_serializados_cuando_aplica",
+                  "serializados_usan_conteo_no_cantidad"
+                ],
+                "consulted_sources": [
+                  "ai_dictionary.dd_reglas",
+                  "ai_dictionary.dd_sinonimos",
+                  "ai_dictionary.dd_relaciones",
+                  "ai_dictionary.dd_campos",
+                  "ai_dictionary.dd_tablas",
+                  "ai_dictionary.dd_capacidades_campo",
+                  "ai_dictionary.ia_dev_capacidades_columna",
+                  "ai_dictionary.ia_dev_business_memory",
+                  "ToolRegistryService",
+                  "BusinessQuerySemanticPlan",
+                  "semantic_context"
+                ],
+                "memory_keys_used": [
+                  "inventory.semantic.rule.kardex",
+                  "inventory.semantic.rule.kardex_empleado",
+                  "inventory.semantic.rule.gpt_semantiza_planner_ejecuta",
+                  "inventory.semantic.rule.serializados",
+                  "inventory.semantic.rule.enrichment_historico",
+                  "inventory.semantic.rule.inventario_generico",
+                  "inventory.semantic.rule.movil_cuadrilla",
+                  "inventory.semantic.rule.saldo_inventario",
+                  "inventory.semantic.rule.ferretero",
+                  "inventory.semantic.rule.material_claro",
+                  "inventory.semantic.rule.material_generico"
+                ],
+                "final_filters": {
+                  "material_family": "DECO",
+                  "grouping_dimension": "movil",
+                  "categoria": "Deco"
+                },
+                "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                "blocked_reasons": []
+              },
+              "compiler": "inventory_semantic_sql",
+              "compiler_used": "inventory_semantic_sql",
+              "tables_detected": [
+                "base_codigo_seriales",
+                "cinco_base_de_personal",
+                "logistica_base_seriales"
+              ],
+              "columns_detected": [
+                "apellido",
+                "area",
+                "bodega",
+                "cargo",
+                "carpeta",
+                "cedula",
+                "codigo",
+                "descripcion",
+                "estado",
+                "familia",
+                "movil",
+                "nombre",
+                "numero_serial",
+                "tipo_labor"
+              ],
+              "physical_columns_used": [
+                "apellido",
+                "area",
+                "bodega",
+                "cargo",
+                "carpeta",
+                "cedula",
+                "codigo",
+                "descripcion",
+                "estado",
+                "familia",
+                "movil",
+                "nombre",
+                "numero_serial",
+                "tipo_labor"
+              ],
+              "relations_used": [],
+              "metric_used": "saldo_serializado",
+              "aggregation_used": "serial_family_balance_by_dimension_and_code",
+              "dimensions_used": [
+                "movil",
+                "codigo",
+                "familia"
+              ],
+              "concept_field": "stock_serializado_familia_dimension",
+              "declared_metric_source": "ai_dictionary.dd_campos",
+              "declared_dimensions_source": "ai_dictionary.dd_campos",
+              "insights": [
+                "La consulta de inventario se resolvio con SQL asistido validado contra ai_dictionary."
+              ],
+              "db_alias": "logistica_cinco",
+              "formula_used": "saldo = en_movil + en_base - cobros",
+              "balance_filter_policy": "include_positive_zero_negative",
+              "serial_rules": {
+                "en_movil": "estado contiene MOVIL",
+                "en_base": "estado contiene BASE o BODEGA",
+                "cobros": "estado contiene COBRO"
+              },
+              "filters_applied": {
+                "material_family": "DECO",
+                "grouping_dimension": "movil"
+              },
+              "grouping_dimension": "movil",
+              "catalog_family_exists": true,
+              "catalog_family_column": "base_codigo_seriales.familia",
+              "joins_used": [
+                "employee_detail_by_cedula",
+                "serial_catalog_by_codigo"
+              ],
+              "raw_query_fallback_used": false,
+              "raw_query_fallback_reason": "",
+              "analytics_router_decision": "join_aware_sql",
+              "legacy_analytics_isolated": false,
+              "heuristic_intent": "inventario_logistica_query",
+              "llm_intent": "aggregate",
+              "arbitrated_intent": "analytics_query",
+              "arbitration_confidence": 0.94,
+              "arbitration_reason": "La solicitud es una consulta analítica de inventario/logística sobre saldo por móviles para la familia DECO. No implica cambio de conocimiento ni acción operativa. Por ontología y diccionario, 'móviles' se trata como dimensión de agrupación válida; la consulta requiere apoyo SQL ",
+              "kpro_blocked_by_arbitration": true,
+              "sql_assisted_selected_by_arbitration": true
+            }
+          },
+          "result_set": {
+            "total_records": 0,
+            "returned_records": 0,
+            "truncated": false,
+            "limit": 500
+          }
+        }
+      },
+      "semantic_explanation": {
+        "user_question": "saldo en moviles de Deco",
+        "understood_as": "inventario_logistica | analytics_query",
+        "domain": "inventario_logistica",
+        "intent": "analytics_query",
+        "entity": {
+          "type": "",
+          "identifier": "",
+          "field": "",
+          "physical_field": "",
+          "resolution_source": "deterministic"
+        },
+        "normalized_filters": {
+          "material_family": "DECO",
+          "grouping_dimension": "movil",
+          "categoria": "Deco"
+        },
+        "selected_capability": "inventory_serial_stock_by_family_grouped_dimension",
+        "selected_tool": "query_execution_planner.sql_assisted",
+        "planner_route_hint": "inventory.serial_stock.family_dimension",
+        "validation_status": {
+          "status": "passed",
+          "satisfied": true,
+          "reason": "empty_inventory_result_is_actionable",
+          "needs_clarification": false
+        },
+        "evidence_summary": {
+          "rowcount": 0,
+          "extra_table_count": 0,
+          "response_profile": "inventory.serial.stock.dimension.detail",
+          "sources": [
+            "semantic_context",
+            "business_query_semantic_plan",
+            "semantic_capability_registry",
+            "ai_dictionary.dd_sinonimos",
+            "ai_dictionary.dd_reglas",
+            "ai_dictionary.ia_dev_capacidades_columna",
+            "inventario.route.serial_stock_family_grouped_dimension",
+            "ai_dictionary.dd_relaciones",
+            "ai_dictionary.dd_campos",
+            "ai_dictionary.dd_tablas",
+            "ai_dictionary.dd_capacidades_campo",
+            "ai_dictionary.ia_dev_business_memory",
+            "ToolRegistryService",
+            "BusinessQuerySemanticPlan"
+          ],
+          "output_profile": {
+            "id": "inventory.serial.stock.dimension.detail",
+            "expected_output": "inventario_serializado",
+            "grain": "saldo_serializado_por_dimension_y_codigo",
+            "columns": [
+              "dimension",
+              "cedula",
+              "empleado",
+              "movil",
+              "bodega",
+              "codigo",
+              "descripcion",
+              "familia",
+              "seriales_total",
+              "cedulas_asociadas",
+              "en_movil",
+              "en_base",
+              "cobros",
+              "saldo"
+            ]
+          },
+          "result_empty": true
+        },
+        "limitations": [
+          "result_set_empty"
+        ],
+        "clarification_needed": {
+          "required": false,
+          "question": ""
+        },
+        "metadata_used": {
+          "governed_used": true,
+          "sources": [
+            "Sinónimos de negocio",
+            "Reglas de negocio",
+            "Capacidades disponibles",
+            "inventario.route.serial_stock_family_grouped_dimension"
+          ]
+        },
+        "capability_pack": {
+          "paquete_capacidad_usado": "inventario_logistica",
+          "version_paquete": "1.0.0",
+          "capacidades_declaradas": [
+            "inventory_document_generation_pending",
+            "inventory_kardex_by_employee",
+            "inventory_kardex_consolidated",
+            "inventory_serial_by_operational_holder",
+            "inventory_serial_stock_by_family_grouped_dimension",
+            "inventory_stock_balance",
+            "inventory_stock_balance_by_material_dimension",
+            "inventory_stock_balance_by_mobile",
+            "inventory_stock_balance_by_warehouse",
+            "inventory_traceability_by_serial",
+            "inventory_transfer_destination_not_available",
+            "inventory_transfer_other_ally",
+            "inventory_transfer_warehouse"
+          ],
+          "reglas_declaradas": [
+            "inventario.kardex.signos_operativos",
+            "inventario.limit.document_generation_pending",
+            "inventario.limit.transfer_destination_missing_metadata",
+            "inventario.metric.serial_count_only",
+            "inventario.metric.stock_include_zero_negative",
+            "inventario.route.kardex_codigo",
+            "inventario.route.kardex_employee",
+            "inventario.route.serial_holder",
+            "inventario.route.serial_stock_family_grouped_dimension",
+            "inventario.route.stock_balance_holder",
+            "inventario.route.stock_balance_material_grouped_dimension",
+            "inventario.route.transfer_other_ally",
+            "inventario.route.transfer_warehouse",
+            "inventario.scope.dual_block_unspecified_family"
+          ],
+          "perfiles_respuesta": [
+            "inventory.document_generation.pending",
+            "inventory.kardex.consolidated.detail",
+            "inventory.kardex.employee.detail",
+            "inventory.serial.holder.detail",
+            "inventory.serial.stock.dimension.detail",
+            "inventory.serial.stock.dimension.summary",
+            "inventory.stock.balance.summary",
+            "inventory.stock.dimension.summary",
+            "inventory.stock.mobile.detail",
+            "inventory.stock.mobile.dual_block",
+            "inventory.stock.warehouse.detail",
+            "inventory.traceability.serial.detail",
+            "inventory.transfer.destination.blocked",
+            "inventory.transfer.other_ally.detail",
+            "inventory.transfer.warehouse.detail"
+          ],
+          "evaluaciones_asociadas": [
+            "inventario_runtime_eval_v1"
+          ]
+        },
+        "fallback_used": {
+          "used": false,
+          "reason": "query_intelligence_active_precomputed_response",
+          "flow": "",
+          "shadow_fallback_used": false,
+          "legacy_rule_detected": false
+        },
+        "agents_involved": [
+          "manager_agent",
+          "inventory_agent"
+        ],
+        "route_participants": {
+          "agents": [
+            "manager_agent",
+            "inventory_agent"
+          ],
+          "handoff_count": 1,
+          "selected_agent": ""
+        },
+        "approvals_status": {
+          "status": "approved",
+          "pending_count": 0
+        },
+        "background_status": {
+          "status": "",
+          "background_run_id": "",
+          "resume_token_available": false
+        },
+        "final_state": {
+          "task_status": "completed",
+          "response_status": "empty_result"
+        },
+        "timeline": [
+          {
+            "step": "received",
+            "state": "completed"
+          },
+          {
+            "step": "semantic_plan_created",
+            "state": "completed"
+          },
+          {
+            "step": "capability_selected",
+            "state": "completed"
+          },
+          {
+            "step": "tool_selected",
+            "state": "completed"
+          },
+          {
+            "step": "validation_passed",
+            "state": "completed",
+            "detail": "empty_inventory_result_is_actionable"
+          },
+          {
+            "step": "executing",
+            "state": "completed",
+            "detail": "completed"
+          },
+          {
+            "step": "evidence_ready",
+            "state": "completed"
+          },
+          {
+            "step": "awaiting_approval",
+            "state": "pending"
+          },
+          {
+            "step": "blocked",
+            "state": "pending"
+          },
+          {
+            "step": "completed",
+            "state": "current"
+          },
+          {
+            "step": "failed",
+            "state": "pending"
+          }
+        ]
+      },
+      "background": {},
+      "agents": [
+        {
+          "agent_name": "manager_agent",
+          "role": "manager",
+          "status": "completed",
+          "reasoning_steps": [
+            {
+              "step": "intake",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "delegation_policy",
+              "detail": "El manager coordina y delega; el runtime deterministico conserva la autoridad de ejecucion."
+            },
+            {
+              "step": "selected_specialist",
+              "detail": "Delegacion preparada hacia inventory_agent."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "specialist_selection",
+              "selected_specialist": "inventory_agent",
+              "llm_used": false
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "selected_specialist": "inventory_agent",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "implementation": "gateway_function_loop"
+          }
+        },
+        {
+          "agent_name": "inventory_agent",
+          "role": "specialist",
+          "domain_scope": "inventario_logistica",
+          "status": "completed",
+          "reasoning_steps": [
+            {
+              "step": "domain_alignment",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "runtime_authority",
+              "detail": "Se mantiene ai_dictionary como autoridad estructural y QueryExecutionPlanner como autoridad unica de SQL seguro."
+            },
+            {
+              "step": "semantic_guardrails",
+              "detail": "Dominio propuesto: inventario_logistica. Intent: inventory_stock_by_mobile. Capability: inventory_serial_stock_by_family_grouped_dimension. Ruta recomendada: sql_assisted. Filtros gobernados: grouping_dimension, material_family. Dominio candidato inicial: inventario_logistica."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "recommended_tools",
+              "tool_ids": [
+                "query_execution_planner.sql_assisted",
+                "inventory_stock_balance_by_mobile"
+              ],
+              "message_excerpt": "saldo en moviles de Deco"
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile"
+          },
+          "handoff_origin": "manager_agent"
+        }
+      ],
+      "handoffs": [
+        {
+          "handoff_id": "handoff_1a0311502ba84ebd",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "inventory_agent",
+          "requested_by_agent": "manager_agent",
+          "target_tool": "query_execution_planner.sql_assisted",
+          "reason": "domain_aligned_specialist_selection",
+          "status": "completed",
+          "evidence": {
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "agent_tool_name": "agent.delegate.inventory_agent"
+          },
+          "created_at": "2026-05-17T05:16:19.008643+00:00",
+          "run_id": "run_85c628771f234a76",
+          "trace_id": "trace_148869f3d19d4ead",
+          "event": "handoff_recorded",
+          "service_version": "handoff_trace.v1"
+        }
+      ],
+      "approvals": [],
+      "required_tools": [
+        "query_sql_assisted_executor",
+        "query_execution_planner.sql_assisted"
+      ],
+      "tool_execution": {
+        "selected_tool_id": "query_execution_planner.sql_assisted",
+        "selected_capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+        "registry_version": "tool_registry.v1",
+        "tool_definition": {
+          "tool_id": "query_execution_planner.sql_assisted",
+          "capability_id": "query_execution_planner.sql_assisted",
+          "domain": "shared",
+          "handler_key": "query_execution_planner",
+          "title": "SQL Assisted Planner Execution",
+          "description": "Ejecuta una consulta segura validada por QueryExecutionPlanner.",
+          "execution_policy": {
+            "mode": "sql_assisted",
+            "runtime_authority": "query_execution_planner",
+            "planner_authority": "QueryExecutionPlanner",
+            "supports_background": false,
+            "idempotent": true
+          },
+          "approval_policy": {
+            "mode": "auto",
+            "approval_required": false,
+            "reason": "",
+            "approval_type": "none",
+            "required_role": "",
+            "risk_level": "low"
+          },
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "constraints": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "message"
+            ]
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "reply": {
+                "type": "string"
+              },
+              "table": {
+                "type": "object"
+              },
+              "trace": {
+                "type": "array"
+              }
+            }
+          },
+          "audit_metadata": {
+            "owner": "QueryExecutionPlanner",
+            "tool_kind": "planner",
+            "sensitivity": "governed_read_only",
+            "approval_role_matrix": {
+              "approve": [],
+              "reject": []
+            },
+            "source": "runtime_registry"
+          },
+          "enabled": true,
+          "model_visible": true
+        },
+        "native_tool_calls_count": 0,
+        "response_tool_loop": {},
+        "trace": [
+          {
+            "tool_id": "query_execution_planner.sql_assisted",
+            "capability_id": "query_execution_planner.sql_assisted",
+            "status": "completed",
+            "run_id": "run_85c628771f234a76",
+            "trace_id": "trace_148869f3d19d4ead",
+            "started_at": "2026-05-17T05:16:11.719979+00:00",
+            "finished_at": "2026-05-17T05:16:23.519150+00:00",
+            "duration_ms": 911,
+            "tool_call_id": "",
+            "tool_name": "query_execution_planner.sql_assisted",
+            "arguments": {},
+            "execution_status": "completed",
+            "validation_status": "validated",
+            "evidence_metadata": {
+              "reply_present": true,
+              "table_rowcount": 0,
+              "fallback_used": false
+            },
+            "model_response_id": "",
+            "loop_iteration": 0,
+            "tool_definition": {
+              "tool_id": "query_execution_planner.sql_assisted",
+              "capability_id": "query_execution_planner.sql_assisted",
+              "domain": "shared",
+              "handler_key": "query_execution_planner",
+              "title": "SQL Assisted Planner Execution",
+              "description": "Ejecuta una consulta segura validada por QueryExecutionPlanner.",
+              "execution_policy": {
+                "mode": "sql_assisted",
+                "runtime_authority": "query_execution_planner",
+                "planner_authority": "QueryExecutionPlanner",
+                "supports_background": false,
+                "idempotent": true
+              },
+              "approval_policy": {
+                "mode": "auto",
+                "approval_required": false,
+                "reason": "",
+                "approval_type": "none",
+                "required_role": "",
+                "risk_level": "low"
+              },
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  },
+                  "constraints": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              },
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "reply": {
+                    "type": "string"
+                  },
+                  "table": {
+                    "type": "object"
+                  },
+                  "trace": {
+                    "type": "array"
+                  }
+                }
+              },
+              "audit_metadata": {
+                "owner": "QueryExecutionPlanner",
+                "tool_kind": "planner",
+                "sensitivity": "governed_read_only",
+                "approval_role_matrix": {
+                  "approve": [],
+                  "reject": []
+                },
+                "source": "runtime_registry"
+              },
+              "enabled": true,
+              "model_visible": true
+            },
+            "input_payload": {
+              "message": "saldo en moviles de Deco",
+              "session_id": "debug-deco-fixed-20260517",
+              "response_flow": "sql_assisted",
+              "route": {
+                "routing_mode": "capability",
+                "selected_capability_id": "query_execution_planner.sql_assisted",
+                "execute_capability": false,
+                "use_legacy": false,
+                "shadow_enabled": true,
+                "selected_capability_authoritative": false,
+                "runtime_authority": "query_execution_planner",
+                "planner_was_authority": true,
+                "planner_selected_strategy": "sql_assisted",
+                "legacy_capability_path_used": false,
+                "reason": "query_intelligence_active_precomputed_response",
+                "policy_action": "allow",
+                "policy_allowed": true,
+                "capability_exists": false,
+                "rollout_enabled": false
+              },
+              "execution_plan": {
+                "strategy": "sql_assisted",
+                "constraints": {
+                  "entity_scope": {
+                    "entity_type": "",
+                    "entity_id": "",
+                    "has_entity_filter": false
+                  },
+                  "filters": {
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil",
+                    "categoria": "Deco"
+                  },
+                  "period_scope": {
+                    "label": "hoy",
+                    "start_date": "2026-05-17",
+                    "end_date": "2026-05-17"
+                  },
+                  "temporal_scope": {},
+                  "group_by": [
+                    "movil"
+                  ],
+                  "metrics": [
+                    "count"
+                  ],
+                  "result_shape": "table",
+                  "joins": [],
+                  "chart_requested": true,
+                  "operation": "aggregate",
+                  "template_id": "inventory_serial_stock_by_family_grouped_dimension"
+                }
+              }
+            },
+            "output_payload": {
+              "reply_present": true,
+              "table_rowcount": 0,
+              "used_tools": [
+                "query_sql_assisted_executor"
+              ],
+              "fallback_used": {
+                "used": false,
+                "reason": "query_intelligence_active_precomputed_response",
+                "flow": "",
+                "legacy_analytics_fallback_disabled": false,
+                "blocked_legacy_fallback": false,
+                "analytics_router_decision": "sql_assisted",
+                "legacy_analytics_isolated": false,
+                "blocked_tool_ausentismo_service": false,
+                "blocked_run_legacy_for_analytics": false,
+                "runtime_only_fallback_reason": "",
+                "cleanup_phase": ""
+              },
+              "validation": {
+                "satisfied": true,
+                "reason": "empty_inventory_result_is_actionable",
+                "gate_approved": true,
+                "gate_score": 0.0
+              }
+            },
+            "execution_policy": {
+              "mode": "sql_assisted",
+              "runtime_authority": "query_execution_planner",
+              "planner_authority": "QueryExecutionPlanner",
+              "supports_background": false,
+              "idempotent": true
+            },
+            "approval_policy": {
+              "mode": "auto",
+              "approval_required": false,
+              "reason": "",
+              "approval_type": "none",
+              "required_role": "",
+              "risk_level": "low"
+            },
+            "audit_metadata": {
+              "owner": "QueryExecutionPlanner",
+              "tool_kind": "planner",
+              "sensitivity": "governed_read_only",
+              "approval_role_matrix": {
+                "approve": [],
+                "reject": []
+              },
+              "source": "runtime_registry",
+              "registry_version": "tool_registry.v1"
+            }
+          }
+        ]
+      },
+      "validation": {
+        "satisfied": true,
+        "reason": "empty_inventory_result_is_actionable",
+        "gate_approved": true,
+        "gate_score": 0.0,
+        "needs_clarification": false
+      },
+      "evidence": {
+        "executed_query": "SELECT COALESCE(emp.movil, '') AS dimension, '' AS cedula, COALESCE(MAX(emp.nombre), '') AS nombre, '' AS empleado, COALESCE(emp.movil, '') AS movil, '' AS bodega, s.codigo AS codigo, COALESCE(MAX(cat.descripcion), '') AS descripcion, COALESCE(MAX(cat.familia), '') AS familia, COUNT(DISTINCT s.numero_serial) AS seriales_total, GROUP_CONCAT(DISTINCT CAST(s.cedula AS CHAR) ORDER BY s.cedula SEPARATOR '; ') AS cedulas_asociadas, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END) AS en_movil, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END) AS en_base, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS cobros, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END + CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END - CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS saldo FROM logistica_cinco.logistica_base_seriales AS s LEFT JOIN (SELECT p.cedula AS cedula, COALESCE(MAX(p.movil), '') AS movil, COALESCE(MAX(p.nombre), '') AS nombre, COALESCE(MAX(p.apellido), '') AS apellido, COALESCE(MAX(p.estado), '') AS estado_empleado FROM bd_c3nc4s1s.cinco_base_de_personal AS p GROUP BY p.cedula) AS emp ON emp.cedula = s.cedula LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo WHERE UPPER(TRIM(COALESCE(cat.familia, ''))) = 'DECO' GROUP BY COALESCE(emp.movil, ''), s.codigo, cat.descripcion, cat.familia ORDER BY dimension ASC, saldo DESC, codigo ASC LIMIT 500",
+        "table_rowcount": 0,
+        "extra_table_count": 0,
+        "trace_count": 1,
+        "source_used": {
+          "response_flow": "sql_assisted",
+          "query_intelligence_mode": "active",
+          "route_reason": "query_intelligence_active_precomputed_response",
+          "runtime_authority": "query_execution_planner",
+          "planner_selected_strategy": "sql_assisted",
+          "legacy_capability_path_used": false,
+          "used_ai_dictionary": true,
+          "used_yaml": true,
+          "structural_source": "ai_dictionary",
+          "narrative_source": "yaml_domain_context",
+          "structural_authority": "dictionary_first",
+          "yaml_role": "narrative_only",
+          "yaml_structural_ignored": false,
+          "runtime_structural_context": {
+            "tables": true,
+            "columns": true,
+            "relationships": true,
+            "status": "dictionary_runtime_context"
+          },
+          "legacy_analytics_fallback_disabled": false,
+          "blocked_legacy_fallback": false,
+          "analytics_router_decision": "sql_assisted",
+          "legacy_analytics_isolated": false,
+          "blocked_tool_ausentismo_service": false,
+          "blocked_run_legacy_for_analytics": false,
+          "runtime_only_fallback_reason": "",
+          "fallback_reason": "",
+          "cleanup_phase": ""
+        },
+        "tool_trace_count": 1,
+        "background_trace_count": 0,
+        "checkpoint_count": 0,
+        "background_run_id": "",
+        "agent_count": 2,
+        "handoff_count": 1,
+        "approval_count": 0,
+        "partial_evidence": {},
+        "final_evidence": {},
+        "response_profile_usado": "inventory.serial.stock.dimension.detail",
+        "evidence_sources_used": [
+          "semantic_context",
+          "business_query_semantic_plan",
+          "semantic_capability_registry",
+          "ai_dictionary.dd_sinonimos",
+          "ai_dictionary.dd_reglas",
+          "ai_dictionary.ia_dev_capacidades_columna",
+          "inventario.route.serial_stock_family_grouped_dimension",
+          "ai_dictionary.dd_relaciones",
+          "ai_dictionary.dd_campos",
+          "ai_dictionary.dd_tablas",
+          "ai_dictionary.dd_capacidades_campo",
+          "ai_dictionary.ia_dev_business_memory",
+          "ToolRegistryService",
+          "BusinessQuerySemanticPlan"
+        ],
+        "semantic_context_used": true,
+        "fallback_narrativo_usado": false,
+        "missing_evidence_reason": "result_set_empty",
+        "paquete_capacidad_usado": "inventario_logistica",
+        "version_paquete": "1.0.0",
+        "capacidades_declaradas": [
+          "inventory_document_generation_pending",
+          "inventory_kardex_by_employee",
+          "inventory_kardex_consolidated",
+          "inventory_serial_by_operational_holder",
+          "inventory_serial_stock_by_family_grouped_dimension",
+          "inventory_stock_balance",
+          "inventory_stock_balance_by_material_dimension",
+          "inventory_stock_balance_by_mobile",
+          "inventory_stock_balance_by_warehouse",
+          "inventory_traceability_by_serial",
+          "inventory_transfer_destination_not_available",
+          "inventory_transfer_other_ally",
+          "inventory_transfer_warehouse"
+        ],
+        "reglas_declaradas": [
+          "inventario.kardex.signos_operativos",
+          "inventario.limit.document_generation_pending",
+          "inventario.limit.transfer_destination_missing_metadata",
+          "inventario.metric.serial_count_only",
+          "inventario.metric.stock_include_zero_negative",
+          "inventario.route.kardex_codigo",
+          "inventario.route.kardex_employee",
+          "inventario.route.serial_holder",
+          "inventario.route.serial_stock_family_grouped_dimension",
+          "inventario.route.stock_balance_holder",
+          "inventario.route.stock_balance_material_grouped_dimension",
+          "inventario.route.transfer_other_ally",
+          "inventario.route.transfer_warehouse",
+          "inventario.scope.dual_block_unspecified_family"
+        ],
+        "perfiles_respuesta": [
+          "inventory.document_generation.pending",
+          "inventory.kardex.consolidated.detail",
+          "inventory.kardex.employee.detail",
+          "inventory.serial.holder.detail",
+          "inventory.serial.stock.dimension.detail",
+          "inventory.serial.stock.dimension.summary",
+          "inventory.stock.balance.summary",
+          "inventory.stock.dimension.summary",
+          "inventory.stock.mobile.detail",
+          "inventory.stock.mobile.dual_block",
+          "inventory.stock.warehouse.detail",
+          "inventory.traceability.serial.detail",
+          "inventory.transfer.destination.blocked",
+          "inventory.transfer.other_ally.detail",
+          "inventory.transfer.warehouse.detail"
+        ],
+        "evaluaciones_asociadas": [
+          "inventario_runtime_eval_v1"
+        ]
+      },
+      "final_state": {
+        "response_flow": "sql_assisted",
+        "fallback_used": {
+          "used": false,
+          "reason": "query_intelligence_active_precomputed_response",
+          "flow": "",
+          "legacy_analytics_fallback_disabled": false,
+          "blocked_legacy_fallback": false,
+          "analytics_router_decision": "sql_assisted",
+          "legacy_analytics_isolated": false,
+          "blocked_tool_ausentismo_service": false,
+          "blocked_run_legacy_for_analytics": false,
+          "runtime_only_fallback_reason": "",
+          "cleanup_phase": ""
+        },
+        "needs_clarification": false,
+        "session_id": "debug-deco-fixed-20260517",
+        "workflow_key": "task_runtime:run_85c628771f234a76",
+        "agents_sdk": {
+          "enabled": true,
+          "sdk_available": false,
+          "implementation": "gateway_function_loop",
+          "registry_version": "agents_runtime.v1",
+          "agent_registry_version": "agents_registry.v1"
+        },
+        "background_run_id": "",
+        "resume_token": ""
+      },
+      "reply": "Encontre la familia DECO en el catalogo, pero no hay evidencia de seriales asociados para el alcance solicitado."
+    }
+  },
+  "response_envelope": {
+    "mode": "debug",
+    "progress_source": "backend",
+    "route": {
+      "selected_capability_id": "query_execution_planner.sql_assisted",
+      "reason": "query_intelligence_active_precomputed_response",
+      "execute_capability": false,
+      "use_legacy": false,
+      "runtime_authority": "query_execution_planner",
+      "planner_was_authority": true
+    },
+    "fallback_used": {
+      "used": false,
+      "reason": "query_intelligence_active_precomputed_response",
+      "flow": "sql_assisted"
+    },
+    "legacy_used": false,
+    "contract_policy_applied": {
+      "agent_id": "analista_agent",
+      "domain": "general",
+      "fallback_policy": true,
+      "memory_policy": true,
+      "response_policy": true,
+      "observability": true
+    },
+    "needs_clarification": false,
+    "block_reason": ""
+  },
+  "memory_candidates": [],
+  "pending_proposals": [],
+  "working_updates": [
+    {
+      "stage": "intake",
+      "stage_label": "Consulta",
+      "status": "completed",
+      "summary": "Consulta recibida y lista para analisis.",
+      "display_text": "Consulta recibida y lista para analisis.",
+      "next_step": "clasificar dominio e intencion base",
+      "confidence": 0.4,
+      "at": "2026-05-17T05:16:11.719979+00:00"
+    },
+    {
+      "stage": "bootstrap",
+      "stage_label": "Lectura",
+      "status": "completed",
+      "summary": "Clasificacion base y dominio inicial resueltos.",
+      "display_text": "Ubique la consulta en inventario_logistica y asigne inventario_logistica_agent.",
+      "next_step": "cargar memoria relevante antes de la resolucion semantica",
+      "confidence": 0.6,
+      "at": "2026-05-17T05:16:11.720979+00:00"
+    },
+    {
+      "stage": "memory",
+      "stage_label": "Memoria",
+      "status": "completed",
+      "summary": "Memorias utiles cargadas para orientar la consulta.",
+      "display_text": "Recupere 5 patrones de consulta, 4 aprendizajes previos para orientar la respuesta.",
+      "next_step": "resolver la consulta con señales semanticas y patrones previos",
+      "confidence": 0.7,
+      "at": "2026-05-17T05:16:11.920398+00:00"
+    },
+    {
+      "stage": "query_intelligence",
+      "stage_label": "Resolucion",
+      "status": "completed",
+      "summary": "La consulta fue resuelta a un plan estructurado.",
+      "display_text": "Resolvi inventario_logistica con estrategia sql_assisted y plantilla inventory_serial_stock_by_family_grouped_dimension.",
+      "next_step": "elegir la mejor capacidad y ejecutar la respuesta",
+      "confidence": 0.94,
+      "at": "2026-05-17T05:16:22.841381+00:00"
+    },
+    {
+      "stage": "planning",
+      "stage_label": "Ruta",
+      "status": "completed",
+      "summary": "Se generaron candidatos de capacidad para resolver la consulta.",
+      "display_text": "Elegi query_execution_planner.sql_assisted como mejor ruta de ejecucion.",
+      "next_step": "ejecutar la ruta principal y validar el resultado",
+      "confidence": 0.72,
+      "at": "2026-05-17T05:16:23.240691+00:00"
+    },
+    {
+      "stage": "response",
+      "stage_label": "Aprendizaje",
+      "status": "completed",
+      "summary": "La respuesta final fue ensamblada con diagnosticos y memoria de aprendizaje.",
+      "display_text": "La respuesta final fue ensamblada con diagnosticos y memoria de aprendizaje.",
+      "next_step": "respuesta lista",
+      "confidence": 0.85,
+      "at": "2026-05-17T05:16:23.519150+00:00"
+    }
+  ],
+  "reasoning": {
+    "enabled": true,
+    "version": "ia_dev.reasoning.v1",
+    "status": "completed",
+    "working_goal": "Resolver la consulta \"saldo en moviles de Deco\" con la mejor evidencia disponible.",
+    "current_next_step": "respuesta lista",
+    "hypotheses": [],
+    "diagnostics": [],
+    "memory_summary": {
+      "user_key": "session:debug-deco-fixed-20260517",
+      "session_context": {
+        "last_domain": "",
+        "last_intent": "",
+        "last_output_mode": ""
+      },
+      "pre_query": {
+        "query_patterns": 5,
+        "reasoning_patterns": 4,
+        "output_mode": "",
+        "personal_status": ""
+      },
+      "execution": {
+        "query_patterns": 1,
+        "reasoning_patterns": 4,
+        "output_mode": "",
+        "personal_status": ""
+      },
+      "resolved": {
+        "query_patterns": 1,
+        "reasoning_patterns": 4,
+        "output_mode": "",
+        "personal_status": ""
+      }
+    },
+    "duration_ms": 11923
+  },
+  "task_state": {
+    "id": 2172,
+    "workflow_type": "task_runtime",
+    "workflow_key": "task_runtime:run_85c628771f234a76",
+    "status": "completed",
+    "state": {
+      "run_id": "run_85c628771f234a76",
+      "task_id": "task_runtime:run_85c628771f234a76",
+      "task_status": "completed",
+      "status": "completed",
+      "original_question": "saldo en moviles de Deco",
+      "detected_domain": "inventario_logistica",
+      "plan": {
+        "planned_capability": {
+          "capability_id": "query_execution_planner.sql_assisted",
+          "reason": "runtime_execution_plan_capability",
+          "authoritative": false
+        },
+        "route": {
+          "routing_mode": "capability",
+          "selected_capability_id": "query_execution_planner.sql_assisted",
+          "execute_capability": false,
+          "use_legacy": false,
+          "shadow_enabled": true,
+          "selected_capability_authoritative": false,
+          "runtime_authority": "query_execution_planner",
+          "planner_was_authority": true,
+          "planner_selected_strategy": "sql_assisted",
+          "legacy_capability_path_used": false,
+          "reason": "query_intelligence_active_precomputed_response",
+          "policy_action": "allow",
+          "policy_allowed": true,
+          "capability_exists": false,
+          "rollout_enabled": false
+        },
+        "query_intelligence": {
+          "mode": "active",
+          "execution_plan": {
+            "strategy": "sql_assisted",
+            "reason": "inventory_serial_stock_by_family_grouped_dimension",
+            "domain_code": "inventario_logistica",
+            "capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+            "sql_query": "SELECT COALESCE(emp.movil, '') AS dimension, '' AS cedula, COALESCE(MAX(emp.nombre), '') AS nombre, '' AS empleado, COALESCE(emp.movil, '') AS movil, '' AS bodega, s.codigo AS codigo, COALESCE(MAX(cat.descripcion), '') AS descripcion, COALESCE(MAX(cat.familia), '') AS familia, COUNT(DISTINCT s.numero_serial) AS seriales_total, GROUP_CONCAT(DISTINCT CAST(s.cedula AS CHAR) ORDER BY s.cedula SEPARATOR '; ') AS cedulas_asociadas, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END) AS en_movil, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END) AS en_base, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS cobros, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END + CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END - CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS saldo FROM logistica_cinco.logistica_base_seriales AS s LEFT JOIN (SELECT p.cedula AS cedula, COALESCE(MAX(p.movil), '') AS movil, COALESCE(MAX(p.nombre), '') AS nombre, COALESCE(MAX(p.apellido), '') AS apellido, COALESCE(MAX(p.estado), '') AS estado_empleado FROM bd_c3nc4s1s.cinco_base_de_personal AS p GROUP BY p.cedula) AS emp ON emp.cedula = s.cedula LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo WHERE UPPER(TRIM(COALESCE(cat.familia, ''))) = 'DECO' GROUP BY COALESCE(emp.movil, ''), s.codigo, cat.descripcion, cat.familia ORDER BY dimension ASC, saldo DESC, codigo ASC LIMIT 500",
+            "requires_context": false,
+            "missing_context": [],
+            "constraints": {
+              "entity_scope": {
+                "entity_type": "",
+                "entity_id": "",
+                "has_entity_filter": false
+              },
+              "filters": {
+                "material_family": "DECO",
+                "grouping_dimension": "movil",
+                "categoria": "Deco"
+              },
+              "period_scope": {
+                "label": "hoy",
+                "start_date": "2026-05-17",
+                "end_date": "2026-05-17"
+              },
+              "temporal_scope": {},
+              "group_by": [
+                "movil"
+              ],
+              "metrics": [
+                "count"
+              ],
+              "result_shape": "table",
+              "joins": [],
+              "chart_requested": true,
+              "operation": "aggregate",
+              "template_id": "inventory_serial_stock_by_family_grouped_dimension"
+            },
+            "policy": {
+              "allowed": true,
+              "reason": "sql_validated",
+              "metadata": {
+                "declared_tables": [
+                  "logistica_cinco.logistica_base_seriales",
+                  "bd_c3nc4s1s.cinco_base_de_personal",
+                  "logistica_cinco.base_codigo_seriales"
+                ],
+                "declared_columns_count": 14,
+                "declared_relations_count": 0,
+                "limit": 500
+              }
+            },
+            "metadata": {
+              "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+              "operation": "aggregate",
+              "capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+              "semantic_trace": {
+                "original_query": "saldo en moviles de Deco",
+                "semantic_plan": {
+                  "query": "saldo en moviles de Deco",
+                  "domain": "inventario_logistica",
+                  "intent": "stock_balance",
+                  "entity": {
+                    "type": "",
+                    "identifier": "",
+                    "field": "",
+                    "physical_field": "",
+                    "resolution_source": "deterministic"
+                  },
+                  "governed_physical_field": "",
+                  "grouping_dimension": [
+                    "movil"
+                  ],
+                  "inventory_family": "serializados",
+                  "scope": {
+                    "families": [
+                      "serializados"
+                    ],
+                    "include_serialized": true,
+                    "stock_scope": "",
+                    "group_dimensions": [
+                      "movil"
+                    ],
+                    "coverage": "operativo_general"
+                  },
+                  "output": {
+                    "expected_output": "inventario_serializado",
+                    "grain": "saldo_serializado_por_dimension_y_codigo",
+                    "columns": [
+                      "dimension",
+                      "cedula",
+                      "empleado",
+                      "movil",
+                      "bodega",
+                      "codigo",
+                      "descripcion",
+                      "familia",
+                      "seriales_total",
+                      "cedulas_asociadas",
+                      "en_movil",
+                      "en_base",
+                      "cobros",
+                      "saldo"
+                    ]
+                  },
+                  "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                  "normalized_filters": {
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil"
+                  },
+                  "requires_enrichment": true,
+                  "applicable_business_rules": [
+                    "gpt_semantiza_planner_ejecuta",
+                    "saldo_incluye_positivos_cero_y_negativos",
+                    "inventario_generico_incluye_serializados_cuando_aplica",
+                    "serializados_usan_conteo_no_cantidad"
+                  ],
+                  "possible_alerts": [
+                    "explicar_saldos_cero_y_negativos",
+                    "resaltar_movimientos_atipicos",
+                    "explicar_bloque_serializado_por_estado"
+                  ],
+                  "known_limitations": [],
+                  "execution": {
+                    "capability": "inventory_serial_stock_by_family_grouped_dimension",
+                    "requires_sql_planner": true,
+                    "planner_authority": "QueryExecutionPlanner",
+                    "execute_authority": "planner_only"
+                  },
+                  "ambiguity_notes": [],
+                  "consulted_sources": [
+                    "ai_dictionary.dd_reglas",
+                    "ai_dictionary.dd_sinonimos",
+                    "ai_dictionary.dd_relaciones",
+                    "ai_dictionary.dd_campos",
+                    "ai_dictionary.dd_tablas",
+                    "ai_dictionary.dd_capacidades_campo",
+                    "ai_dictionary.ia_dev_capacidades_columna",
+                    "ai_dictionary.ia_dev_business_memory"
+                  ],
+                  "memory_keys_used": [
+                    "inventory.semantic.rule.kardex",
+                    "inventory.semantic.rule.kardex_empleado",
+                    "inventory.semantic.rule.gpt_semantiza_planner_ejecuta",
+                    "inventory.semantic.rule.serializados",
+                    "inventory.semantic.rule.enrichment_historico",
+                    "inventory.semantic.rule.inventario_generico",
+                    "inventory.semantic.rule.movil_cuadrilla",
+                    "inventory.semantic.rule.saldo_inventario",
+                    "inventory.semantic.rule.ferretero",
+                    "inventory.semantic.rule.material_claro",
+                    "inventory.semantic.rule.material_generico"
+                  ],
+                  "llm_policy": {
+                    "eligible": false,
+                    "allowed_tasks": [
+                      "interpret_intent",
+                      "detect_ambiguity",
+                      "organize_filters",
+                      "suggest_capability",
+                      "draft_business_summary"
+                    ],
+                    "forbidden_tasks": [
+                      "generate_free_sql",
+                      "invent_columns",
+                      "invent_tables",
+                      "decide_execute_true"
+                    ],
+                    "authority": "deterministic_and_dictionary_first",
+                    "semantic_binding": {
+                      "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                      "planner_route_hint": "inventory.serial_stock.family_dimension",
+                      "response_profile": "inventory.serial.stock.dimension.detail",
+                      "tool_id": "query_execution_planner.sql_assisted",
+                      "source": "semantic_inventory_registry_metadata",
+                      "matched_rules": [
+                        "inventario.route.serial_stock_family_grouped_dimension",
+                        "candidate_capability_bound_from_registry",
+                        "tool_id_resolved_via_tool_registry"
+                      ],
+                      "confidence": 0.91,
+                      "fallback_used": false,
+                      "legacy_mapping_used": false
+                    }
+                  }
+                },
+                "semantic_binding": {
+                  "domain": "inventario_logistica",
+                  "intent": "stock_balance",
+                  "entity": {
+                    "type": "",
+                    "identifier": "",
+                    "field": "",
+                    "physical_field": ""
+                  },
+                  "normalized_filters": {
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil",
+                    "categoria": "Deco"
+                  },
+                  "output_profile": {
+                    "expected_output": "inventario_serializado",
+                    "grain": "saldo_serializado_por_dimension_y_codigo",
+                    "columns": [
+                      "dimension",
+                      "cedula",
+                      "empleado",
+                      "movil",
+                      "bodega",
+                      "codigo",
+                      "descripcion",
+                      "familia",
+                      "seriales_total",
+                      "cedulas_asociadas",
+                      "en_movil",
+                      "en_base",
+                      "cobros",
+                      "saldo"
+                    ]
+                  },
+                  "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                  "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                  "planner_route_hint": "inventory.serial_stock.family_dimension",
+                  "response_profile": "inventory.serial.stock.dimension.detail",
+                  "tool_id": "query_execution_planner.sql_assisted",
+                  "source": "semantic_inventory_registry_metadata",
+                  "matched_rules": [
+                    "inventario.route.serial_stock_family_grouped_dimension",
+                    "candidate_capability_bound_from_registry",
+                    "tool_id_resolved_via_tool_registry"
+                  ],
+                  "consulted_metadata": [
+                    "ai_dictionary.dd_tablas",
+                    "ai_dictionary.dd_campos",
+                    "ai_dictionary.dd_relaciones",
+                    "ai_dictionary.dd_sinonimos",
+                    "ai_dictionary.dd_reglas",
+                    "ai_dictionary.ia_dev_capacidades_columna",
+                    "ToolRegistryService",
+                    "BusinessQuerySemanticPlan",
+                    "semantic_context"
+                  ],
+                  "confidence": 0.91,
+                  "fallback_used": false,
+                  "unresolved_reason": "",
+                  "legacy_mapping_used": false,
+                  "legacy_reason": "",
+                  "migration_target": "",
+                  "regla_metadata_usada": [
+                    "inventario.route.serial_stock_family_grouped_dimension"
+                  ],
+                  "fuente_dd": [
+                    "ai_dictionary.dd_sinonimos",
+                    "ai_dictionary.dd_reglas",
+                    "ai_dictionary.ia_dev_capacidades_columna"
+                  ],
+                  "fallback_sombreado_usado": false,
+                  "regla_legacy_detectada": false,
+                  "regla_migrada": true,
+                  "paquete_capacidad_usado": "inventario_logistica",
+                  "version_paquete": "1.0.0",
+                  "capacidades_declaradas": [
+                    "inventory_document_generation_pending",
+                    "inventory_kardex_by_employee",
+                    "inventory_kardex_consolidated",
+                    "inventory_serial_by_operational_holder",
+                    "inventory_serial_stock_by_family_grouped_dimension",
+                    "inventory_stock_balance",
+                    "inventory_stock_balance_by_material_dimension",
+                    "inventory_stock_balance_by_mobile",
+                    "inventory_stock_balance_by_warehouse",
+                    "inventory_traceability_by_serial",
+                    "inventory_transfer_destination_not_available",
+                    "inventory_transfer_other_ally",
+                    "inventory_transfer_warehouse"
+                  ],
+                  "reglas_declaradas": [
+                    "inventario.kardex.signos_operativos",
+                    "inventario.limit.document_generation_pending",
+                    "inventario.limit.transfer_destination_missing_metadata",
+                    "inventario.metric.serial_count_only",
+                    "inventario.metric.stock_include_zero_negative",
+                    "inventario.route.kardex_codigo",
+                    "inventario.route.kardex_employee",
+                    "inventario.route.serial_holder",
+                    "inventario.route.serial_stock_family_grouped_dimension",
+                    "inventario.route.stock_balance_holder",
+                    "inventario.route.stock_balance_material_grouped_dimension",
+                    "inventario.route.transfer_other_ally",
+                    "inventario.route.transfer_warehouse",
+                    "inventario.scope.dual_block_unspecified_family"
+                  ],
+                  "perfiles_respuesta": [
+                    "inventory.document_generation.pending",
+                    "inventory.kardex.consolidated.detail",
+                    "inventory.kardex.employee.detail",
+                    "inventory.serial.holder.detail",
+                    "inventory.serial.stock.dimension.detail",
+                    "inventory.serial.stock.dimension.summary",
+                    "inventory.stock.balance.summary",
+                    "inventory.stock.dimension.summary",
+                    "inventory.stock.mobile.detail",
+                    "inventory.stock.mobile.dual_block",
+                    "inventory.stock.warehouse.detail",
+                    "inventory.traceability.serial.detail",
+                    "inventory.transfer.destination.blocked",
+                    "inventory.transfer.other_ally.detail",
+                    "inventory.transfer.warehouse.detail"
+                  ],
+                  "evaluaciones_asociadas": [
+                    "inventario_runtime_eval_v1"
+                  ]
+                },
+                "rules_applied": [
+                  "gpt_semantiza_planner_ejecuta",
+                  "saldo_incluye_positivos_cero_y_negativos",
+                  "inventario_generico_incluye_serializados_cuando_aplica",
+                  "serializados_usan_conteo_no_cantidad"
+                ],
+                "consulted_sources": [
+                  "ai_dictionary.dd_reglas",
+                  "ai_dictionary.dd_sinonimos",
+                  "ai_dictionary.dd_relaciones",
+                  "ai_dictionary.dd_campos",
+                  "ai_dictionary.dd_tablas",
+                  "ai_dictionary.dd_capacidades_campo",
+                  "ai_dictionary.ia_dev_capacidades_columna",
+                  "ai_dictionary.ia_dev_business_memory",
+                  "ToolRegistryService",
+                  "BusinessQuerySemanticPlan",
+                  "semantic_context"
+                ],
+                "memory_keys_used": [
+                  "inventory.semantic.rule.kardex",
+                  "inventory.semantic.rule.kardex_empleado",
+                  "inventory.semantic.rule.gpt_semantiza_planner_ejecuta",
+                  "inventory.semantic.rule.serializados",
+                  "inventory.semantic.rule.enrichment_historico",
+                  "inventory.semantic.rule.inventario_generico",
+                  "inventory.semantic.rule.movil_cuadrilla",
+                  "inventory.semantic.rule.saldo_inventario",
+                  "inventory.semantic.rule.ferretero",
+                  "inventory.semantic.rule.material_claro",
+                  "inventory.semantic.rule.material_generico"
+                ],
+                "final_filters": {
+                  "material_family": "DECO",
+                  "grouping_dimension": "movil",
+                  "categoria": "Deco"
+                },
+                "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                "blocked_reasons": []
+              },
+              "compiler": "inventory_semantic_sql",
+              "compiler_used": "inventory_semantic_sql",
+              "tables_detected": [
+                "base_codigo_seriales",
+                "cinco_base_de_personal",
+                "logistica_base_seriales"
+              ],
+              "columns_detected": [
+                "apellido",
+                "area",
+                "bodega",
+                "cargo",
+                "carpeta",
+                "cedula",
+                "codigo",
+                "descripcion",
+                "estado",
+                "familia",
+                "movil",
+                "nombre",
+                "numero_serial",
+                "tipo_labor"
+              ],
+              "physical_columns_used": [
+                "apellido",
+                "area",
+                "bodega",
+                "cargo",
+                "carpeta",
+                "cedula",
+                "codigo",
+                "descripcion",
+                "estado",
+                "familia",
+                "movil",
+                "nombre",
+                "numero_serial",
+                "tipo_labor"
+              ],
+              "relations_used": [],
+              "metric_used": "saldo_serializado",
+              "aggregation_used": "serial_family_balance_by_dimension_and_code",
+              "dimensions_used": [
+                "movil",
+                "codigo",
+                "familia"
+              ],
+              "concept_field": "stock_serializado_familia_dimension",
+              "declared_metric_source": "ai_dictionary.dd_campos",
+              "declared_dimensions_source": "ai_dictionary.dd_campos",
+              "insights": [
+                "La consulta de inventario se resolvio con SQL asistido validado contra ai_dictionary."
+              ],
+              "db_alias": "logistica_cinco",
+              "formula_used": "saldo = en_movil + en_base - cobros",
+              "balance_filter_policy": "include_positive_zero_negative",
+              "serial_rules": {
+                "en_movil": "estado contiene MOVIL",
+                "en_base": "estado contiene BASE o BODEGA",
+                "cobros": "estado contiene COBRO"
+              },
+              "filters_applied": {
+                "material_family": "DECO",
+                "grouping_dimension": "movil"
+              },
+              "grouping_dimension": "movil",
+              "catalog_family_exists": true,
+              "catalog_family_column": "base_codigo_seriales.familia",
+              "joins_used": [
+                "employee_detail_by_cedula",
+                "serial_catalog_by_codigo"
+              ],
+              "raw_query_fallback_used": false,
+              "raw_query_fallback_reason": "",
+              "analytics_router_decision": "join_aware_sql",
+              "legacy_analytics_isolated": false,
+              "heuristic_intent": "inventario_logistica_query",
+              "llm_intent": "aggregate",
+              "arbitrated_intent": "analytics_query",
+              "arbitration_confidence": 0.94,
+              "arbitration_reason": "La solicitud es una consulta analítica de inventario/logística sobre saldo por móviles para la familia DECO. No implica cambio de conocimiento ni acción operativa. Por ontología y diccionario, 'móviles' se trata como dimensión de agrupación válida; la consulta requiere apoyo SQL ",
+              "kpro_blocked_by_arbitration": true,
+              "sql_assisted_selected_by_arbitration": true
+            }
+          },
+          "result_set": {
+            "total_records": 0,
+            "returned_records": 0,
+            "truncated": false,
+            "limit": 500
+          }
+        }
+      },
+      "source_used": {
+        "response_flow": "sql_assisted",
+        "query_intelligence_mode": "active",
+        "route_reason": "query_intelligence_active_precomputed_response",
+        "runtime_authority": "query_execution_planner",
+        "planner_selected_strategy": "sql_assisted",
+        "legacy_capability_path_used": false,
+        "used_ai_dictionary": true,
+        "used_yaml": true,
+        "structural_source": "ai_dictionary",
+        "narrative_source": "yaml_domain_context",
+        "structural_authority": "dictionary_first",
+        "yaml_role": "narrative_only",
+        "yaml_structural_ignored": false,
+        "runtime_structural_context": {
+          "tables": true,
+          "columns": true,
+          "relationships": true,
+          "status": "dictionary_runtime_context"
+        },
+        "legacy_analytics_fallback_disabled": false,
+        "blocked_legacy_fallback": false,
+        "analytics_router_decision": "sql_assisted",
+        "legacy_analytics_isolated": false,
+        "blocked_tool_ausentismo_service": false,
+        "blocked_run_legacy_for_analytics": false,
+        "runtime_only_fallback_reason": "",
+        "fallback_reason": "",
+        "cleanup_phase": ""
+      },
+      "executed_query": "SELECT COALESCE(emp.movil, '') AS dimension, '' AS cedula, COALESCE(MAX(emp.nombre), '') AS nombre, '' AS empleado, COALESCE(emp.movil, '') AS movil, '' AS bodega, s.codigo AS codigo, COALESCE(MAX(cat.descripcion), '') AS descripcion, COALESCE(MAX(cat.familia), '') AS familia, COUNT(DISTINCT s.numero_serial) AS seriales_total, GROUP_CONCAT(DISTINCT CAST(s.cedula AS CHAR) ORDER BY s.cedula SEPARATOR '; ') AS cedulas_asociadas, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END) AS en_movil, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END) AS en_base, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS cobros, SUM(CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%MOVIL%' THEN 1 ELSE 0 END + CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%BASE%' OR UPPER(COALESCE(s.estado, '')) LIKE '%BODEGA%' THEN 1 ELSE 0 END - CASE WHEN UPPER(COALESCE(s.estado, '')) LIKE '%COBRO%' THEN 1 ELSE 0 END) AS saldo FROM logistica_cinco.logistica_base_seriales AS s LEFT JOIN (SELECT p.cedula AS cedula, COALESCE(MAX(p.movil), '') AS movil, COALESCE(MAX(p.nombre), '') AS nombre, COALESCE(MAX(p.apellido), '') AS apellido, COALESCE(MAX(p.estado), '') AS estado_empleado FROM bd_c3nc4s1s.cinco_base_de_personal AS p GROUP BY p.cedula) AS emp ON emp.cedula = s.cedula LEFT JOIN logistica_cinco.base_codigo_seriales AS cat ON cat.codigo = s.codigo WHERE UPPER(TRIM(COALESCE(cat.familia, ''))) = 'DECO' GROUP BY COALESCE(emp.movil, ''), s.codigo, cat.descripcion, cat.familia ORDER BY dimension ASC, saldo DESC, codigo ASC LIMIT 500",
+      "validation_result": {
+        "satisfied": true,
+        "reason": "empty_inventory_result_is_actionable",
+        "gate_approved": true,
+        "gate_score": 0.0
+      },
+      "fallback_used": {
+        "used": false,
+        "reason": "query_intelligence_active_precomputed_response",
+        "flow": "",
+        "legacy_analytics_fallback_disabled": false,
+        "blocked_legacy_fallback": false,
+        "analytics_router_decision": "sql_assisted",
+        "legacy_analytics_isolated": false,
+        "blocked_tool_ausentismo_service": false,
+        "blocked_run_legacy_for_analytics": false,
+        "runtime_only_fallback_reason": "",
+        "cleanup_phase": ""
+      },
+      "recommendations": [
+        "Explorar el mismo analisis por sede, area, cargo o fecha.",
+        "La validacion se hizo contra el catalogo gobernado de serializados y la ejecucion no devolvio filas operativas.",
+        "La familia existe como catalogo de equipos, pero no hay conteos disponibles para la dimension consultada."
+      ],
+      "updated_at": 1778994983,
+      "tool_execution": {
+        "selected_tool_id": "query_execution_planner.sql_assisted",
+        "selected_capability_id": "inventory_serial_stock_by_family_grouped_dimension",
+        "registry_version": "tool_registry.v1",
+        "tool_definition": {
+          "tool_id": "query_execution_planner.sql_assisted",
+          "capability_id": "query_execution_planner.sql_assisted",
+          "domain": "shared",
+          "handler_key": "query_execution_planner",
+          "title": "SQL Assisted Planner Execution",
+          "description": "Ejecuta una consulta segura validada por QueryExecutionPlanner.",
+          "execution_policy": {
+            "mode": "sql_assisted",
+            "runtime_authority": "query_execution_planner",
+            "planner_authority": "QueryExecutionPlanner",
+            "supports_background": false,
+            "idempotent": true
+          },
+          "approval_policy": {
+            "mode": "auto",
+            "approval_required": false,
+            "reason": "",
+            "approval_type": "none",
+            "required_role": "",
+            "risk_level": "low"
+          },
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "constraints": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "message"
+            ]
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "reply": {
+                "type": "string"
+              },
+              "table": {
+                "type": "object"
+              },
+              "trace": {
+                "type": "array"
+              }
+            }
+          },
+          "audit_metadata": {
+            "owner": "QueryExecutionPlanner",
+            "tool_kind": "planner",
+            "sensitivity": "governed_read_only",
+            "approval_role_matrix": {
+              "approve": [],
+              "reject": []
+            },
+            "source": "runtime_registry"
+          },
+          "enabled": true,
+          "model_visible": true
+        },
+        "native_tool_calls_count": 0,
+        "response_tool_loop": {}
+      },
+      "tool_execution_trace": [
+        {
+          "tool_id": "query_execution_planner.sql_assisted",
+          "capability_id": "query_execution_planner.sql_assisted",
+          "status": "completed",
+          "run_id": "run_85c628771f234a76",
+          "trace_id": "trace_148869f3d19d4ead",
+          "started_at": "2026-05-17T05:16:11.719979+00:00",
+          "finished_at": "2026-05-17T05:16:23.519150+00:00",
+          "duration_ms": 911,
+          "tool_call_id": "",
+          "tool_name": "query_execution_planner.sql_assisted",
+          "arguments": {},
+          "execution_status": "completed",
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "reply_present": true,
+            "table_rowcount": 0,
+            "fallback_used": false
+          },
+          "model_response_id": "",
+          "loop_iteration": 0,
+          "tool_definition": {
+            "tool_id": "query_execution_planner.sql_assisted",
+            "capability_id": "query_execution_planner.sql_assisted",
+            "domain": "shared",
+            "handler_key": "query_execution_planner",
+            "title": "SQL Assisted Planner Execution",
+            "description": "Ejecuta una consulta segura validada por QueryExecutionPlanner.",
+            "execution_policy": {
+              "mode": "sql_assisted",
+              "runtime_authority": "query_execution_planner",
+              "planner_authority": "QueryExecutionPlanner",
+              "supports_background": false,
+              "idempotent": true
+            },
+            "approval_policy": {
+              "mode": "auto",
+              "approval_required": false,
+              "reason": "",
+              "approval_type": "none",
+              "required_role": "",
+              "risk_level": "low"
+            },
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "constraints": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "message"
+              ]
+            },
+            "output_schema": {
+              "type": "object",
+              "properties": {
+                "reply": {
+                  "type": "string"
+                },
+                "table": {
+                  "type": "object"
+                },
+                "trace": {
+                  "type": "array"
+                }
+              }
+            },
+            "audit_metadata": {
+              "owner": "QueryExecutionPlanner",
+              "tool_kind": "planner",
+              "sensitivity": "governed_read_only",
+              "approval_role_matrix": {
+                "approve": [],
+                "reject": []
+              },
+              "source": "runtime_registry"
+            },
+            "enabled": true,
+            "model_visible": true
+          },
+          "input_payload": {
+            "message": "saldo en moviles de Deco",
+            "session_id": "debug-deco-fixed-20260517",
+            "response_flow": "sql_assisted",
+            "route": {
+              "routing_mode": "capability",
+              "selected_capability_id": "query_execution_planner.sql_assisted",
+              "execute_capability": false,
+              "use_legacy": false,
+              "shadow_enabled": true,
+              "selected_capability_authoritative": false,
+              "runtime_authority": "query_execution_planner",
+              "planner_was_authority": true,
+              "planner_selected_strategy": "sql_assisted",
+              "legacy_capability_path_used": false,
+              "reason": "query_intelligence_active_precomputed_response",
+              "policy_action": "allow",
+              "policy_allowed": true,
+              "capability_exists": false,
+              "rollout_enabled": false
+            },
+            "execution_plan": {
+              "strategy": "sql_assisted",
+              "constraints": {
+                "entity_scope": {
+                  "entity_type": "",
+                  "entity_id": "",
+                  "has_entity_filter": false
+                },
+                "filters": {
+                  "material_family": "DECO",
+                  "grouping_dimension": "movil",
+                  "categoria": "Deco"
+                },
+                "period_scope": {
+                  "label": "hoy",
+                  "start_date": "2026-05-17",
+                  "end_date": "2026-05-17"
+                },
+                "temporal_scope": {},
+                "group_by": [
+                  "movil"
+                ],
+                "metrics": [
+                  "count"
+                ],
+                "result_shape": "table",
+                "joins": [],
+                "chart_requested": true,
+                "operation": "aggregate",
+                "template_id": "inventory_serial_stock_by_family_grouped_dimension"
+              }
+            }
+          },
+          "output_payload": {
+            "reply_present": true,
+            "table_rowcount": 0,
+            "used_tools": [
+              "query_sql_assisted_executor"
+            ],
+            "fallback_used": {
+              "used": false,
+              "reason": "query_intelligence_active_precomputed_response",
+              "flow": "",
+              "legacy_analytics_fallback_disabled": false,
+              "blocked_legacy_fallback": false,
+              "analytics_router_decision": "sql_assisted",
+              "legacy_analytics_isolated": false,
+              "blocked_tool_ausentismo_service": false,
+              "blocked_run_legacy_for_analytics": false,
+              "runtime_only_fallback_reason": "",
+              "cleanup_phase": ""
+            },
+            "validation": {
+              "satisfied": true,
+              "reason": "empty_inventory_result_is_actionable",
+              "gate_approved": true,
+              "gate_score": 0.0
+            }
+          },
+          "execution_policy": {
+            "mode": "sql_assisted",
+            "runtime_authority": "query_execution_planner",
+            "planner_authority": "QueryExecutionPlanner",
+            "supports_background": false,
+            "idempotent": true
+          },
+          "approval_policy": {
+            "mode": "auto",
+            "approval_required": false,
+            "reason": "",
+            "approval_type": "none",
+            "required_role": "",
+            "risk_level": "low"
+          },
+          "audit_metadata": {
+            "owner": "QueryExecutionPlanner",
+            "tool_kind": "planner",
+            "sensitivity": "governed_read_only",
+            "approval_role_matrix": {
+              "approve": [],
+              "reject": []
+            },
+            "source": "runtime_registry",
+            "registry_version": "tool_registry.v1"
+          }
+        }
+      ],
+      "agents": [
+        {
+          "agent_name": "manager_agent",
+          "role": "manager",
+          "status": "completed",
+          "reasoning_steps": [
+            {
+              "step": "intake",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "delegation_policy",
+              "detail": "El manager coordina y delega; el runtime deterministico conserva la autoridad de ejecucion."
+            },
+            {
+              "step": "selected_specialist",
+              "detail": "Delegacion preparada hacia inventory_agent."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "specialist_selection",
+              "selected_specialist": "inventory_agent",
+              "llm_used": false
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "selected_specialist": "inventory_agent",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "implementation": "gateway_function_loop"
+          }
+        },
+        {
+          "agent_name": "inventory_agent",
+          "role": "specialist",
+          "domain_scope": "inventario_logistica",
+          "status": "completed",
+          "reasoning_steps": [
+            {
+              "step": "domain_alignment",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "runtime_authority",
+              "detail": "Se mantiene ai_dictionary como autoridad estructural y QueryExecutionPlanner como autoridad unica de SQL seguro."
+            },
+            {
+              "step": "semantic_guardrails",
+              "detail": "Dominio propuesto: inventario_logistica. Intent: inventory_stock_by_mobile. Capability: inventory_serial_stock_by_family_grouped_dimension. Ruta recomendada: sql_assisted. Filtros gobernados: grouping_dimension, material_family. Dominio candidato inicial: inventario_logistica."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "recommended_tools",
+              "tool_ids": [
+                "query_execution_planner.sql_assisted",
+                "inventory_stock_balance_by_mobile"
+              ],
+              "message_excerpt": "saldo en moviles de Deco"
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile"
+          },
+          "handoff_origin": "manager_agent"
+        }
+      ],
+      "handoffs": [
+        {
+          "handoff_id": "handoff_1a0311502ba84ebd",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "inventory_agent",
+          "requested_by_agent": "manager_agent",
+          "target_tool": "query_execution_planner.sql_assisted",
+          "reason": "domain_aligned_specialist_selection",
+          "status": "completed",
+          "evidence": {
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "agent_tool_name": "agent.delegate.inventory_agent"
+          },
+          "created_at": "2026-05-17T05:16:19.008643+00:00",
+          "run_id": "run_85c628771f234a76",
+          "trace_id": "trace_148869f3d19d4ead",
+          "event": "handoff_recorded",
+          "service_version": "handoff_trace.v1"
+        }
+      ],
+      "handoff_trace": [
+        {
+          "handoff_id": "handoff_1a0311502ba84ebd",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "inventory_agent",
+          "requested_by_agent": "manager_agent",
+          "target_tool": "query_execution_planner.sql_assisted",
+          "reason": "domain_aligned_specialist_selection",
+          "status": "completed",
+          "evidence": {
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "agent_tool_name": "agent.delegate.inventory_agent"
+          },
+          "created_at": "2026-05-17T05:16:19.008643+00:00",
+          "run_id": "run_85c628771f234a76",
+          "trace_id": "trace_148869f3d19d4ead",
+          "event": "handoff_recorded",
+          "service_version": "handoff_trace.v1"
+        }
+      ],
+      "agent_trace": [
+        {
+          "agent_name": "manager_agent",
+          "handoff_origin": "",
+          "handoff_target": "inventory_agent",
+          "reasoning_steps": [
+            {
+              "step": "intake",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "delegation_policy",
+              "detail": "El manager coordina y delega; el runtime deterministico conserva la autoridad de ejecucion."
+            },
+            {
+              "step": "selected_specialist",
+              "detail": "Delegacion preparada hacia inventory_agent."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "specialist_selection",
+              "selected_specialist": "inventory_agent",
+              "llm_used": false
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "selected_specialist": "inventory_agent",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile",
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "implementation": "gateway_function_loop"
+          },
+          "handoff_id": "handoff_1a0311502ba84ebd"
+        },
+        {
+          "agent_name": "inventory_agent",
+          "handoff_origin": "manager_agent",
+          "handoff_target": "",
+          "reasoning_steps": [
+            {
+              "step": "domain_alignment",
+              "detail": "domain=inventario_logistica intent=inventory_stock_by_mobile capability=inventory_stock_balance_by_mobile"
+            },
+            {
+              "step": "runtime_authority",
+              "detail": "Se mantiene ai_dictionary como autoridad estructural y QueryExecutionPlanner como autoridad unica de SQL seguro."
+            },
+            {
+              "step": "semantic_guardrails",
+              "detail": "Dominio propuesto: inventario_logistica. Intent: inventory_stock_by_mobile. Capability: inventory_serial_stock_by_family_grouped_dimension. Ruta recomendada: sql_assisted. Filtros gobernados: grouping_dimension, material_family. Dominio candidato inicial: inventario_logistica."
+            }
+          ],
+          "tool_calls": [],
+          "tool_outputs": [
+            {
+              "type": "recommended_tools",
+              "tool_ids": [
+                "query_execution_planner.sql_assisted",
+                "inventory_stock_balance_by_mobile"
+              ],
+              "message_excerpt": "saldo en moviles de Deco"
+            }
+          ],
+          "validation_status": "validated",
+          "evidence_metadata": {
+            "recommended_tool_ids": [
+              "query_execution_planner.sql_assisted",
+              "inventory_stock_balance_by_mobile"
+            ],
+            "candidate_capability": "inventory_stock_balance_by_mobile",
+            "candidate_domain": "inventario_logistica",
+            "candidate_intent": "inventory_stock_by_mobile"
+          },
+          "handoff_id": "handoff_1a0311502ba84ebd"
+        }
+      ],
+      "approvals": [],
+      "approval_trace": [],
+      "background": {},
+      "background_trace": [],
+      "checkpoints": [],
+      "correlation": {
+        "run_id": "run_85c628771f234a76",
+        "task_id": "task_runtime:run_85c628771f234a76"
+      },
+      "governance": {
+        "policy_version": "runtime_hardening.v1",
+        "limits": {
+          "max_tool_loop_rounds": 4,
+          "max_tool_calls_per_run": 12,
+          "max_background_retries": 2,
+          "max_background_duration_seconds": 1800,
+          "max_approval_wait_seconds": 3600
+        }
+      },
+      "runtime_metrics": {
+        "tool_call_count": 1,
+        "approval_count": 0,
+        "approval_pending_count": 0,
+        "handoff_count": 1,
+        "agent_count": 2,
+        "background_retry_count": 0,
+        "background_status": "",
+        "checkpoint_count": 0,
+        "dead_lettered": false,
+        "limits": {
+          "max_tool_loop_rounds": 4,
+          "max_tool_calls_per_run": 12,
+          "max_background_retries": 2,
+          "max_background_duration_seconds": 1800,
+          "max_approval_wait_seconds": 3600
+        },
+        "service_version": "runtime_hardening.v1"
+      },
+      "dead_letter": {},
+      "created_at": 1778994982,
+      "history": [
+        {
+          "at": 1778994982,
+          "task_id": "task_runtime:run_85c628771f234a76",
+          "run_id": "run_85c628771f234a76",
+          "status": "planned",
+          "domain": "inventario_logistica",
+          "has_query": false,
+          "fallback": {},
+          "selected_tool_id": "",
+          "tool_trace_count": 0,
+          "agent_count": 0,
+          "handoff_count": 0,
+          "approval_count": 0,
+          "background_status": "",
+          "background_run_id": "",
+          "checkpoint_count": 0,
+          "dead_lettered": false
+        },
+        {
+          "at": 1778994983,
+          "task_id": "task_runtime:run_85c628771f234a76",
+          "run_id": "run_85c628771f234a76",
+          "status": "planned",
+          "domain": "inventario_logistica",
+          "has_query": false,
+          "fallback": {},
+          "selected_tool_id": "",
+          "tool_trace_count": 0,
+          "agent_count": 0,
+          "handoff_count": 0,
+          "approval_count": 0,
+          "background_status": "",
+          "background_run_id": "",
+          "checkpoint_count": 0,
+          "dead_lettered": false
+        },
+        {
+          "at": 1778994983,
+          "task_id": "task_runtime:run_85c628771f234a76",
+          "run_id": "run_85c628771f234a76",
+          "status": "executing",
+          "domain": "inventario_logistica",
+          "has_query": true,
+          "fallback": {},
+          "selected_tool_id": "",
+          "tool_trace_count": 0,
+          "agent_count": 0,
+          "handoff_count": 0,
+          "approval_count": 0,
+          "background_status": "",
+          "background_run_id": "",
+          "checkpoint_count": 0,
+          "dead_lettered": false
+        },
+        {
+          "at": 1778994983,
+          "task_id": "task_runtime:run_85c628771f234a76",
+          "run_id": "run_85c628771f234a76",
+          "status": "completed",
+          "domain": "inventario_logistica",
+          "has_query": true,
+          "fallback": {
+            "used": false,
+            "reason": "query_intelligence_active_precomputed_response",
+            "flow": "",
+            "legacy_analytics_fallback_disabled": false,
+            "blocked_legacy_fallback": false,
+            "analytics_router_decision": "sql_assisted",
+            "legacy_analytics_isolated": false,
+            "blocked_tool_ausentismo_service": false,
+            "blocked_run_legacy_for_analytics": false,
+            "runtime_only_fallback_reason": "",
+            "cleanup_phase": ""
+          },
+          "selected_tool_id": "query_execution_planner.sql_assisted",
+          "tool_trace_count": 1,
+          "agent_count": 2,
+          "handoff_count": 1,
+          "approval_count": 0,
+          "background_status": "",
+          "background_run_id": "",
+          "checkpoint_count": 0,
+          "dead_lettered": false
+        }
+      ],
+      "agents_runtime_bootstrap": {
+        "enabled": true,
+        "sdk_available": false,
+        "implementation": "gateway_function_loop",
+        "registry_version": "agents_runtime.v1",
+        "agent_registry_version": "agents_registry.v1"
+      }
+    },
+    "retry_count": 0,
+    "lock_version": 1,
+    "next_retry_at": null,
+    "last_error": null,
+    "created_at": 1778994982,
+    "updated_at": 1778994983
+  }
+}

@@ -15,6 +15,21 @@ const toLabel = (value: string) =>
     .replace(/\s+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
+const humanizeValidationReason = (
+  validation: Record<string, unknown>,
+  validationReason: string,
+) => {
+  const normalized = validationReason.trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "ok") {
+    return "La consulta pasó las validaciones principales.";
+  }
+  if (Boolean(validation.needs_clarification)) {
+    return "Hace falta una precisión para completar la consulta con seguridad.";
+  }
+  return "La consulta no pudo completarse por una validación interna.";
+};
+
 const pillClass = (active: boolean, tone: "emerald" | "amber" | "gray") => {
   if (!active) {
     return "border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400";
@@ -41,6 +56,7 @@ const ValidationStatusPanel = ({
   const approvalState = String(approvalsStatus.status || "").trim();
   const backgroundState = String(backgroundStatus.status || "").trim();
   const validationReason = String(validation.reason || "").trim();
+  const validationDetail = humanizeValidationReason(validation, validationReason);
 
   return (
     <div className="space-y-3 rounded-[24px] border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
@@ -51,12 +67,16 @@ const ValidationStatusPanel = ({
         <span
           className={`rounded-full border px-3 py-1 text-xs font-medium ${pillClass(Boolean(metadataUsed.governed_used), "emerald")}`}
         >
-          Metadata gobernada {Boolean(metadataUsed.governed_used) ? "usada" : "no usada"}
+          {Boolean(metadataUsed.governed_used)
+            ? "Gobierno semántico validado"
+            : "Gobierno semántico en revisión"}
         </span>
         <span
           className={`rounded-full border px-3 py-1 text-xs font-medium ${pillClass(Boolean(fallbackUsed.shadow_fallback_used), "amber")}`}
         >
-          Fallback sombreado {Boolean(fallbackUsed.shadow_fallback_used) ? "detectado" : "no"}
+          {Boolean(fallbackUsed.shadow_fallback_used)
+            ? "Compatibilidad semántica temporal"
+            : "Ruta validada"}
         </span>
         <span
           className={`rounded-full border px-3 py-1 text-xs font-medium ${pillClass(approvalState === "awaiting_approval", "amber")}`}
@@ -73,7 +93,7 @@ const ValidationStatusPanel = ({
         <div className="font-medium text-gray-950 dark:text-white">
           Validacion: {toLabel(String(validation.status || "pending"))}
         </div>
-        {validationReason ? <div className="mt-1">{validationReason}</div> : null}
+        {validationDetail ? <div className="mt-1">{validationDetail}</div> : null}
       </div>
     </div>
   );

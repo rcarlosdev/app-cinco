@@ -509,6 +509,35 @@ Regla sobre serializados:
 - si no existe trazabilidad cronologica confiable por cedula para serializados, responder materiales/ferretero y aclarar esa limitacion concreta
 - no bloquear toda la consulta por la ausencia de esa trazabilidad serializada
 
+## Regla Semantica Persistida 2026-05-17: familia serializada por coincidencia parcial gobernada
+
+Cuando el usuario consulte una familia serializada por texto parcial, la resolucion correcta no es exigir igualdad exacta sobre `base_codigo_seriales.familia`.
+
+Regla estable:
+
+1. validar la familia contra `logistica_cinco.base_codigo_seriales.familia`
+2. usar coincidencia parcial gobernada
+   - `match_mode: contains`
+   - normalizacion: `upper/trim`
+3. si hay coincidencia de catalogo, mantener el filtro semantico como familia serializada
+4. luego dejar que el planner seguro resuelva:
+   - catalogo -> codigos
+   - seriales -> estado operativo
+   - enrichment de personal cuando aplique
+
+Ejemplos validos:
+
+- `Deco` puede cubrir `DECO`, `DECO HD`, `CPE DECO`, `TARJETA DECO`
+- `ONT` puede cubrir variantes catalogadas como `ONT GPON`
+- `Router` puede cubrir variantes catalogadas como `ROUTER WIFI`
+- `CPE residencial` puede cubrir variantes catalogadas equivalentes del catalogo serializado
+
+Regla critica:
+
+- no hardcodear una familia concreta como excepcion
+- no degradar la familia serializada a descripcion de materiales solo por no existir igualdad exacta
+- la metadata debe gobernar la coincidencia parcial; el planner sigue siendo autoridad unica de SQL seguro
+
 ## Regla De Diagnostico Persistida Para Fallbacks Falsos En Empleados
 
 Cuando una consulta de `empleados`, `rrhh` o un rescate hacia `inventario_logistica`:
@@ -1555,3 +1584,36 @@ Regla critica:
   - que decidio
   - que referencia se creo
   - que prueba o eval valido la resolucion
+
+
+## Regla Semantica Persistida 2026-05-16: familia serializada catalogada por dimension operativa
+
+Cuando una consulta de `inventario_logistica` pida `saldo`, `inventario`, `existencia` o equivalentes y ademas:
+
+- mencione una familia gobernada del catalogo `logistica_cinco.base_codigo_seriales.familia`
+- o un alias gobernado de esa familia dentro de serializados/equipos/CPE
+- y pida agrupacion por `movil`, `cuadrilla`, `tecnico`, `empleado` o `bodega`
+
+la resolucion correcta es:
+
+1. validar primero la familia contra el catalogo gobernado de serializados
+2. si existe, clasificar `inventory_family = serializados`
+3. normalizar filtro `material_family = <familia_catalogada>`
+4. resolver capability `inventory_serial_stock_by_family_grouped_dimension`
+5. dejar al planner seguro construir SQL sobre:
+   - `logistica_base_seriales`
+   - `base_codigo_seriales`
+   - `cinco_base_de_personal` cuando aplique enrichment por portador
+6. responder sobre evidencia y conteo, no sobre cantidad
+
+Reglas estables:
+
+- una familia catalogada de `base_codigo_seriales.familia` no debe degradarse automaticamente a descripcion de `base_codigos`
+- `en moviles` significa agrupacion por movil, no solicitud de un movil especifico faltante
+- serializados usan conteo:
+  - `en_movil = estado contiene MOVIL`
+  - `en_base = estado contiene BASE o BODEGA`
+  - `cobros = estado contiene COBRO`
+  - `saldo = en_movil + en_base - cobros`
+- si la familia existe en catalogo pero no hay seriales asociados al alcance, responder vacio con evidencia de catalogo
+- si la familia no existe en catalogo y no hay sinonimia gobernada suficiente, responder limitacion o aclaracion; no inventar familia ni reinterpretar por texto libre como autoridad

@@ -5868,6 +5868,24 @@ class ChatApplicationService:
         orchestrator: dict[str, Any],
         intent_arbitration: dict[str, Any],
     ) -> dict[str, Any]:
+        def _friendly_metadata_source(value: str) -> str:
+            normalized = str(value or "").strip().lower()
+            mapping = {
+                "ai_dictionary.dd_sinonimos": "Sinónimos de negocio",
+                "ai_dictionary.dd_reglas": "Reglas de negocio",
+                "ai_dictionary.dd_campos": "Catálogo de campos",
+                "ai_dictionary.dd_tablas": "Catálogo de tablas",
+                "ai_dictionary.dd_relaciones": "Relaciones gobernadas",
+                "ai_dictionary.ia_dev_capacidades_columna": "Capacidades disponibles",
+            }
+            return mapping.get(normalized, str(value or "").strip())
+
+        def _friendly_limitation(value: str) -> str:
+            normalized = str(value or "").strip().lower()
+            if normalized == "legacy_semantic_binding_shadowed":
+                return "Se usó compatibilidad semántica temporal; el resultado fue validado con evidencia."
+            return str(value or "").strip()
+
         data = dict(payload.get("data") or {})
         business_response = dict(data.get("business_response") or {})
         metadata = dict(business_response.get("metadata") or {})
@@ -5917,7 +5935,7 @@ class ChatApplicationService:
             or (payload.get("response_envelope") or {}).get("needs_clarification")
         )
         limitation_texts = [
-            str(item or "").strip()
+            _friendly_limitation(item)
             for item in list(metadata.get("limitations") or [])
             if str(item or "").strip()
         ]
@@ -5932,12 +5950,12 @@ class ChatApplicationService:
         metadata_sources = list(
             dict.fromkeys(
                 [
-                    str(item or "").strip()
+                    _friendly_metadata_source(item)
                     for item in list(semantic_trace.get("fuente_dd") or [])
                     if str(item or "").strip()
                 ]
                 + [
-                    str(item or "").strip()
+                    _friendly_metadata_source(item)
                     for item in list(semantic_trace.get("regla_metadata_usada") or [])
                     if str(item or "").strip()
                 ]
@@ -6053,7 +6071,11 @@ class ChatApplicationService:
             "capability_pack": capability_pack,
             "fallback_used": {
                 "used": bool(fallback_used.get("used")),
-                "reason": str(fallback_used.get("reason") or "").strip(),
+                "reason": (
+                    "Se usó compatibilidad semántica temporal; el resultado fue validado con evidencia."
+                    if bool(semantic_trace.get("fallback_sombreado_usado"))
+                    else str(fallback_used.get("reason") or "").strip()
+                ),
                 "flow": str(fallback_used.get("flow") or "").strip(),
                 "shadow_fallback_used": bool(semantic_trace.get("fallback_sombreado_usado")),
                 "legacy_rule_detected": bool(semantic_trace.get("regla_legacy_detectada")),

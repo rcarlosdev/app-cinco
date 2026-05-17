@@ -181,6 +181,7 @@ class SemanticOrchestratorService:
             contract_payload=contract,
             filters=filters,
             entities=entities,
+            dimensions=dimensions,
         )
         if match_gobernado.get("coincidencia_gobernada") and domain == "inventario_logistica":
             intent_id = self._mapear_intencion_inventario(match_gobernado=match_gobernado, intent_id_actual=intent_id)
@@ -496,8 +497,15 @@ class SemanticOrchestratorService:
         contract_payload: dict[str, Any],
         filters: dict[str, Any],
         entities: dict[str, Any],
+        dimensions: list[str] | None = None,
     ) -> tuple[str, str, float]:
         filters = dict(filters or {})
+        dimensions = [str(item or "").strip().lower() for item in list(dimensions or []) if str(item or "").strip()]
+        if not str(filters.get("grouping_dimension") or "").strip():
+            for candidate in ("movil", "cedula", "bodega"):
+                if candidate in dimensions:
+                    filters["grouping_dimension"] = candidate
+                    break
         confidence = 0.72
         if domain == "inventario_logistica":
             entity_payload = {}
@@ -526,6 +534,7 @@ class SemanticOrchestratorService:
                     intent=intent_hint,
                     entity=entity_payload or None,
                     normalized_filters=filters,
+                    group_by=dimensions,
                     source_hints={
                         "governed_match": dict(
                             self.matcher_gobernado_inventario.resolver(
@@ -594,6 +603,8 @@ class SemanticOrchestratorService:
         capability = str(capability_id or "").strip().lower()
         if capability in {"inventory_stock_balance_by_mobile", "inventory_stock_balance_by_warehouse", "inventory_stock_balance"}:
             return "inventory_stock_by_mobile"
+        if capability == "inventory_stock_balance_by_material_dimension":
+            return "inventory_stock_by_dimension"
         if capability in {"inventory_kardex_by_employee", "inventory_kardex_consolidated"}:
             return "inventory_kardex"
         if capability == "inventory_serial_by_operational_holder":
@@ -611,6 +622,9 @@ class SemanticOrchestratorService:
             filters["stock_scope"] = "movil"
         if re.search(r"\boperacion[_\s-]?hfc\b", normalized):
             filters["bodega"] = "operacion_hfc"
+        explicit_code_match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([a-z0-9_-]+)\b", raw_message, re.IGNORECASE)
+        if explicit_code_match:
+            filters["codigo"] = str(explicit_code_match.group(1) or "").strip().upper()
         code_match = re.search(r"\bkardex\s+del?\s+c[oó]digo\s+([a-z0-9_-]+)\b", normalized)
         if code_match:
             filters["codigo"] = str(code_match.group(1) or "").strip().upper()
@@ -621,7 +635,7 @@ class SemanticOrchestratorService:
         if ot_match:
             filters["orden_trabajo"] = str(ot_match.group(1) or "").strip().upper()
         numeric_id = re.search(r"\b([0-9]{5,15})\b", raw_message)
-        if numeric_id:
+        if numeric_id and "codigo" not in filters:
             filters.setdefault("cedula", str(numeric_id.group(1) or "").strip())
         return filters
 
@@ -629,9 +643,12 @@ class SemanticOrchestratorService:
     def _extract_entities(*, normalized: str, raw_message: str) -> dict[str, Any]:
         entities: dict[str, Any] = {}
         guarded_cedula = SemanticOrchestratorService._match_inventory_employee_stock_query(normalized)
+        explicit_code_match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([a-z0-9_-]+)\b", raw_message, re.IGNORECASE)
         numeric_id = re.search(r"\b([0-9]{5,15})\b", raw_message)
         if guarded_cedula:
             entities["cedula"] = guarded_cedula
+        elif explicit_code_match:
+            entities["codigo"] = str(explicit_code_match.group(1) or "").strip().upper()
         elif numeric_id:
             entities["cedula"] = str(numeric_id.group(1) or "").strip()
         movil_match = re.search(r"\b([A-Z]{2,}[A-Z0-9_-]*\d{2,})\b", raw_message)
@@ -650,9 +667,16 @@ class SemanticOrchestratorService:
         dimensions: list[str] = []
         for token, dimension in (
             ("bodega", "bodega"),
+            ("almacen", "bodega"),
+            ("movil", "movil"),
+            ("móvil", "movil"),
             ("cuadrilla", "movil"),
-            ("tecnico", "responsable"),
-            ("técnico", "responsable"),
+            ("brigada", "movil"),
+            ("tecnico", "cedula"),
+            ("técnico", "cedula"),
+            ("empleado", "cedula"),
+            ("cedula", "cedula"),
+            ("cédula", "cedula"),
             ("area", "area"),
             ("cargo", "cargo"),
             ("supervisor", "supervisor"),

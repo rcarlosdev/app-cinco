@@ -52,6 +52,28 @@ INVENTORY_TEMPLATE_BINDINGS: dict[str, dict[str, Any]] = {
             "saldo",
         ],
     },
+    "inventory_material_stock_grouped_dimension": {
+        "candidate_capability": "inventory_stock_balance_by_material_dimension",
+        "planner_route_hint": "inventory.material_stock.dimension",
+        "response_profile": "inventory.stock.dimension.summary",
+        "expected_output": "saldo_inventario",
+        "grain": "saldo_por_dimension_y_codigo",
+        "columns": [
+            "dimension",
+            "cedula",
+            "empleado",
+            "movil",
+            "bodega",
+            "codigo",
+            "descripcion",
+            "tipo",
+            "entregas",
+            "devoluciones",
+            "consumos",
+            "cobros",
+            "saldo",
+        ],
+    },
     "inventory_material_stock_by_warehouse": {
         "candidate_capability": "inventory_stock_balance_by_warehouse",
         "planner_route_hint": "inventory.material_stock.warehouse",
@@ -150,6 +172,29 @@ INVENTORY_TEMPLATE_BINDINGS: dict[str, dict[str, Any]] = {
         "expected_output": "inventario_serializado",
         "grain": "serial_por_codigo_y_estado",
         "columns": ["serial", "codigo", "descripcion", "familia", "estado", "cedula", "movil", "saldo"],
+    },
+    "inventory_serial_stock_by_family_grouped_dimension": {
+        "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+        "planner_route_hint": "inventory.serial_stock.family_dimension",
+        "response_profile": "inventory.serial.stock.dimension.detail",
+        "expected_output": "inventario_serializado",
+        "grain": "saldo_serializado_por_dimension_y_codigo",
+        "columns": [
+            "dimension",
+            "cedula",
+            "empleado",
+            "movil",
+            "bodega",
+            "codigo",
+            "descripcion",
+            "familia",
+            "seriales_total",
+            "cedulas_asociadas",
+            "en_movil",
+            "en_base",
+            "cobros",
+            "saldo",
+        ],
     },
     "inventory_serial_stock_by_dimension": {
         "candidate_capability": "inventory_serial_stock_by_dimension",
@@ -299,12 +344,14 @@ INVENTORY_TEMPLATE_BINDINGS: dict[str, dict[str, Any]] = {
 
 INVENTORY_INTENT_IDS_BY_TEMPLATE = {
     "inventory_material_stock_mobile": "inventory_stock_by_mobile",
+    "inventory_material_stock_grouped_dimension": "inventory_stock_by_dimension",
     "inventory_material_stock_by_warehouse": "inventory_stock_by_warehouse",
     "inventory_material_stock_balance": "inventory_stock_balance",
     "inventory_material_critical_by_employee": "inventory_stock_by_mobile",
     "inventory_kardex_by_employee": "inventory_kardex",
     "inventory_kardex_consolidated": "inventory_kardex",
     "inventory_serial_by_operational_holder": "inventory_serial_by_holder",
+    "inventory_serial_stock_by_family_grouped_dimension": "inventory_stock_by_dimension",
     "inventory_traceability_by_serial": "inventory_traceability_serial",
     "inventory_document_generation_pending": "inventory_document_generation",
 }
@@ -497,7 +544,13 @@ class SemanticCapabilityRegistry:
                 plan_payload.get("template_id"),
             ]
         )
-        if explicit_template:
+        if explicit_template and not self._should_ignore_explicit_inventory_template(
+            explicit_template=explicit_template,
+            filters=filters,
+            group_by=group_by,
+            inference=inference,
+            governed_match=governed_match,
+        ):
             template_id = explicit_template
             governed_binding_payload, metadata_rule_trace = self._binding_payload_from_template_or_rules(
                 template_id=template_id,
@@ -630,6 +683,9 @@ class SemanticCapabilityRegistry:
                 ],
             }
 
+        if template_id == "inventory_serial_stock_by_family_grouped_dimension" and str(filters.get("material_family") or "").strip():
+            filters.setdefault("material_family_match_mode", "contains")
+
         pack_capabilities = list(capability_pack_trace.get("capacidades_declaradas") or [])
         pack_rules = list(capability_pack_trace.get("reglas_declaradas") or [])
         pack_profiles = list(capability_pack_trace.get("perfiles_respuesta") or [])
@@ -666,6 +722,35 @@ class SemanticCapabilityRegistry:
             reglas_declaradas=pack_rules,
             perfiles_respuesta=pack_profiles,
             evaluaciones_asociadas=pack_evals,
+        )
+
+    @staticmethod
+    def _should_ignore_explicit_inventory_template(
+        *,
+        explicit_template: str,
+        filters: dict[str, Any],
+        group_by: list[str],
+        inference: dict[str, Any],
+        governed_match: dict[str, Any],
+    ) -> bool:
+        normalized_template = str(explicit_template or "").strip().lower()
+        if normalized_template != "inventory_material_stock_grouped_dimension":
+            return False
+        if str(inference.get("material_family") or "").strip().lower() != "serializados":
+            return False
+        if not str(filters.get("material_family") or "").strip():
+            return False
+        grouped_dimensions = {
+            str(item or "").strip().lower()
+            for item in list(group_by or [])
+            if str(item or "").strip()
+        }
+        if not (grouped_dimensions & {"movil", "cedula", "bodega"}):
+            return False
+        governed_capability = str(governed_match.get("capacidad_candidata") or "").strip().lower()
+        governed_template = str(governed_match.get("template_id") or "").strip().lower()
+        return governed_capability == "inventory_serial_stock_by_family_grouped_dimension" or (
+            governed_template == "inventory_serial_stock_by_family_grouped_dimension"
         )
 
     @staticmethod
@@ -761,12 +846,33 @@ class SemanticCapabilityRegistry:
         any_fields = {str(item or "").strip().lower() for item in list(condition.get("field_any_of") or []) if str(item or "").strip()}
         if any_fields and not any(entity_field == item or str(filters.get(item) or "").strip() for item in any_fields):
             return False
+        forbid_any_fields = {
+            str(item or "").strip().lower()
+            for item in list(condition.get("forbid_field_any_of") or [])
+            if str(item or "").strip()
+        }
+        if forbid_any_fields and any(str(filters.get(item) or "").strip() for item in forbid_any_fields):
+            return False
+        filter_any_of = {
+            str(item or "").strip().lower()
+            for item in list(condition.get("filter_any_of") or [])
+            if str(item or "").strip()
+        }
+        if filter_any_of and not any(str(filters.get(item) or "").strip() for item in filter_any_of):
+            return False
         if bool(condition.get("holder_scope_required")) and not any(str(filters.get(item) or "").strip() for item in ("cedula", "movil")):
             return False
         if bool(condition.get("tipo_absent")) and filters.get("tipo"):
             return False
         group_by_contains = str(condition.get("group_by_contains") or "").strip().lower()
         if group_by_contains and group_by_contains not in {str(item or "").strip().lower() for item in group_by}:
+            return False
+        group_by_any_of = {
+            str(item or "").strip().lower()
+            for item in list(condition.get("group_by_any_of") or [])
+            if str(item or "").strip()
+        }
+        if group_by_any_of and not ({str(item or "").strip().lower() for item in group_by} & group_by_any_of):
             return False
         if "bodega_destino" in set(group_by) and str(condition.get("field") or "").strip().lower() == "cedula":
             return False
@@ -914,12 +1020,30 @@ class SemanticCapabilityRegistry:
             matched_rules.append("external_reconciliation_pending_template")
             return "inventory_external_reconciliation_pending"
         if intent in {"stock_balance", "stock_query"}:
+            tipo_filter = filters.get("tipo")
+            if material_family == "serializados" and set(group_by) & {"movil", "cedula", "bodega"} and str(filters.get("material_family") or "").strip():
+                matched_rules.append("serial_stock_family_grouped_dimension_template")
+                return "inventory_serial_stock_by_family_grouped_dimension"
             if material_family == "serializados" and group_by and set(group_by).issubset({"estado", "bodega", "ubicacion", "codigo"}):
                 matched_rules.append("serial_stock_dimension_template")
                 return "inventory_serial_stock_by_dimension"
             if business_concept == "materiales_criticos_por_empleado":
                 matched_rules.append("critical_materials_template")
                 return "inventory_material_critical_by_employee"
+            if (
+                set(group_by) & {"movil", "cedula", "bodega"}
+                and any(str(filters.get(key) or "").strip() for key in ("codigo", "descripcion"))
+                and not any(str(filters.get(key) or "").strip() for key in ("cedula", "movil"))
+            ):
+                matched_rules.append("stock_balance_grouped_dimension_template")
+                return "inventory_material_stock_grouped_dimension"
+            if (
+                set(group_by) & {"movil", "cedula"}
+                and isinstance(tipo_filter, str)
+                and not any(str(filters.get(key) or "").strip() for key in ("cedula", "movil"))
+            ):
+                matched_rules.append("stock_balance_family_grouped_dimension_template")
+                return "inventory_material_stock_grouped_dimension"
             if stock_scope == "movil" or entity_field in {"cedula", "movil"}:
                 matched_rules.append("stock_scope_movil_template")
                 return "inventory_material_stock_mobile"
@@ -955,10 +1079,25 @@ class SemanticCapabilityRegistry:
         if intent == "movement_history":
             return "inventory_kardex_by_employee" if entity_field == "cedula" else "inventory_kardex_consolidated"
         if intent in {"stock_balance", "stock_query"}:
+            tipo_filter = filters.get("tipo")
+            if material_family == "serializados" and set(group_by) & {"movil", "cedula", "bodega"} and str(filters.get("material_family") or "").strip():
+                return "inventory_serial_stock_by_family_grouped_dimension"
             if material_family == "serializados" and group_by:
                 return "inventory_serial_stock_by_dimension"
             if business_concept == "materiales_criticos_por_empleado":
                 return "inventory_material_critical_by_employee"
+            if (
+                set(group_by) & {"movil", "cedula", "bodega"}
+                and any(str(filters.get(key) or "").strip() for key in ("codigo", "descripcion"))
+                and not any(str(filters.get(key) or "").strip() for key in ("cedula", "movil"))
+            ):
+                return "inventory_material_stock_grouped_dimension"
+            if (
+                set(group_by) & {"movil", "cedula"}
+                and isinstance(tipo_filter, str)
+                and not any(str(filters.get(key) or "").strip() for key in ("cedula", "movil"))
+            ):
+                return "inventory_material_stock_grouped_dimension"
             if stock_scope == "movil":
                 return "inventory_material_stock_mobile"
             if stock_scope == "bodega" or "bodega" in set(group_by):

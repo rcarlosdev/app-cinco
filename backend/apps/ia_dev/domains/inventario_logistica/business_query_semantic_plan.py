@@ -387,11 +387,13 @@ class InventoryBusinessQueryPlanner:
         if explicit:
             mapping = {
                 "inventory_material_stock_mobile": "inventory_stock_balance_by_mobile",
+                "inventory_material_stock_grouped_dimension": "inventory_stock_balance_by_material_dimension",
                 "inventory_material_stock_by_warehouse": "inventory_material_stock_by_warehouse",
                 "inventory_material_stock_balance": "inventory_stock_balance",
                 "inventory_kardex_by_employee": "inventory_kardex_by_employee",
                 "inventory_kardex_consolidated": "inventory_kardex_consolidated",
                 "inventory_serial_by_operational_holder": "inventory_serial_by_operational_holder",
+                "inventory_serial_stock_by_family_grouped_dimension": "inventory_serial_stock_by_family_grouped_dimension",
                 "inventory_traceability_by_serial": "inventory_traceability_by_serial",
                 "inventory_material_critical_by_employee": "inventory_stock_balance_by_mobile",
                 "inventory_serial_stock_by_dimension": "inventory_serial_stock_by_dimension",
@@ -503,6 +505,26 @@ class InventoryBusinessQueryPlanner:
             return (
                 ["fecha", "tipo_movimiento", "codigo", "cantidad", "origen", "destino"],
                 "movimiento_por_fecha_y_codigo",
+            )
+        if capability == "inventory_serial_stock_by_family_grouped_dimension":
+            return (
+                [
+                    "dimension",
+                    "cedula",
+                    "empleado",
+                    "movil",
+                    "bodega",
+                    "codigo",
+                    "descripcion",
+                    "familia",
+                    "seriales_total",
+                    "cedulas_asociadas",
+                    "en_movil",
+                    "en_base",
+                    "cobros",
+                    "saldo",
+                ],
+                "saldo_serializado_por_dimension_y_codigo",
             )
         if capability in {"inventory_serial_by_operational_holder", "inventory_serial_stock_by_dimension", "inventory_traceability_by_serial"}:
             return (
