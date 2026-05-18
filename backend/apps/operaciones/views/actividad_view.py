@@ -6,7 +6,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.operaciones.serializers.actividad_serializer import (
     ActividadSerializer,
-    ActividadCreateSerializer
+    ActividadWriteSerializer
 )
 from apps.operaciones.services.actividad_service import ActividadService
 
@@ -56,8 +56,8 @@ class ActividadViewSet(ModelViewSet):
         )
 
     def get_serializer_class(self):
-        if self.action == 'create':
-            return ActividadCreateSerializer
+        if self.action in ('create', 'update', 'partial_update'):
+            return ActividadWriteSerializer
         return ActividadSerializer
 
     @extend_schema(
@@ -70,7 +70,7 @@ class ActividadViewSet(ModelViewSet):
           O donde es el responsable (responsable_snapshot.empleado_id)
         
         **Parámetros de filtrado disponibles:**
-        - `ot`: Filtra por Orden de Trabajo (búsqueda parcial)
+        - `ot`: Filtra por alguna OT relacionada (búsqueda parcial)
         - `estado`: Filtra por estado (pendiente, en_progreso, completada, cancelada, pausada, reprogramada)
         - `area`: Filtra por área del responsable (búsqueda parcial)
         - `carpeta`: Filtra por carpeta del responsable (búsqueda parcial)
@@ -85,7 +85,7 @@ class ActividadViewSet(ModelViewSet):
         parameters=[
             OpenApiParameter(
                 name='ot',
-                description='Filtra por Orden de Trabajo (búsqueda parcial). Ej: OT-2024-001',
+                description='Filtra por alguna OT relacionada (búsqueda parcial). Ej: OT-2024-001',
                 required=False,
                 type=OpenApiTypes.STR
             ),
@@ -159,7 +159,7 @@ class ActividadViewSet(ModelViewSet):
         El responsable debe ser un empleado válido existente en la base de datos de empleados.
         
         **Campos requeridos:**
-        - `ot`: Orden de Trabajo (única)
+        - `ots`: Lista de OTs relacionadas. Debe incluir al menos una.
         - `responsable_id`: ID del empleado responsable
         - `detalle`: Objeto con descripción y tipo de trabajo
         - `ubicacion`: Objeto con datos de ubicación
@@ -170,7 +170,7 @@ class ActividadViewSet(ModelViewSet):
         - `fecha_fin_real`: Fecha fin real (YYYY-MM-DD)
         """,
         tags=["operaciones"],
-        request=ActividadCreateSerializer,
+        request=ActividadWriteSerializer,
         responses={201: ActividadSerializer}
     )
     def create(self, request, *args, **kwargs):
@@ -203,23 +203,34 @@ class ActividadViewSet(ModelViewSet):
         summary="Actualizar una actividad completamente",
         description="Actualiza todos los campos de una actividad. Se requieren todos los campos requeridos.",
         tags=["operaciones"],
-        request=ActividadSerializer,
+        request=ActividadWriteSerializer,
         responses={200: ActividadSerializer}
     )
     def update(self, request, *args, **kwargs):
         """Actualizar una actividad completamente"""
-        return super().update(request, *args, **kwargs)
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance,
+            data=request.data,
+            partial=partial,
+            context={**self.get_serializer_context(), 'actor_user_id': self._get_authenticated_user_id(request.user)},
+        )
+        serializer.is_valid(raise_exception=True)
+        actividad = serializer.save()
+        return Response(ActividadSerializer(actividad).data)
 
     @extend_schema(
         summary="Actualizar parcialmente una actividad",
         description="Actualiza solo los campos proporcionados de una actividad.",
         tags=["operaciones"],
-        request=ActividadSerializer,
+        request=ActividadWriteSerializer,
         responses={200: ActividadSerializer}
     )
     def partial_update(self, request, *args, **kwargs):
         """Actualizar parcialmente una actividad"""
-        return super().partial_update(request, *args, **kwargs)
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
 
     @extend_schema(
         summary="Eliminar una actividad",

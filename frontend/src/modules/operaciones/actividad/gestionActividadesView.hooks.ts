@@ -7,7 +7,7 @@ import { ACTIVIDAD_TABLE_CONFIG } from "./actividadTable.utils";
 import { getActividadesColumns } from "./gestionActividadesView.utils";
 
 export const useGestionActividadesData = () => {
-  const { loadActividades, actividades } = useActividadStore();
+  const { loadActividades, actividades, loadError } = useActividadStore();
   const [showAlert, setShowAlert] = useState(false);
   const [visibleRows, setVisibleRows] = useState<ActividadFormData[]>([]);
 
@@ -26,7 +26,15 @@ export const useGestionActividadesData = () => {
   });
 
   useEffect(() => {
-    loadActividades();
+    const loadData = async () => {
+      try {
+        await loadActividades();
+      } catch (error) {
+        console.error("Error cargando actividades:", error);
+      }
+    };
+
+    void loadData();
   }, [loadActividades]);
 
   useEffect(() => {
@@ -59,5 +67,6 @@ export const useGestionActividadesData = () => {
     setVisibleRows,
     showAlert,
     setShowAlert,
+    loadError,
   };
 };

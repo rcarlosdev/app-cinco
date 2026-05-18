@@ -24,6 +24,7 @@ const GestionActividadesView = () => {
     visibleRows,
     setVisibleRows,
     showAlert,
+    loadError,
   } = useGestionActividadesData();
 
   // {
@@ -96,6 +97,16 @@ const GestionActividadesView = () => {
             title="Actividad Creada"
             message="La actividad ha sido creada exitosamente."
           />
+        )}
+
+        {loadError && (
+          <div className="mt-4">
+            <Alert
+              variant="error"
+              title="No fue posible cargar las actividades"
+              message={loadError.message}
+            />
+          </div>
         )}
 
         <div className="mt-8 h-112 min-w-0 overflow-x-hidden">

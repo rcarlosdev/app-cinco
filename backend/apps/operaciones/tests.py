@@ -1,10 +1,22 @@
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from django.test import TestCase as DjangoTestCase
+
+from apps.operaciones.models import (
+	Actividad,
+	ActividadOT,
+	normalize_ot_values,
+)
 from apps.operaciones.services.actividad_service import ActividadService
 
 
 class ActividadServiceTests(TestCase):
+	def test_ot_helpers_normalize_and_serialize_values(self):
+		values = normalize_ot_values([" OT-1 ", "OT-2", "OT-1", "", None])
+
+		self.assertEqual(values, ["OT-1", "OT-2"])
+
 	def test_eliminar_hard_delete_requires_superuser(self):
 		instance = MagicMock()
 		actor = MagicMock(is_authenticated=True, is_superuser=False)
@@ -52,6 +64,7 @@ class ActividadServiceTests(TestCase):
 	def test_listar_applies_default_base_filter(self, actividad_objects):
 		queryset = MagicMock()
 		queryset.select_related.return_value = queryset
+		queryset.prefetch_related.return_value = queryset
 		actividad_objects.filter.return_value = queryset
 
 		ActividadService.listar(usuario_id=None, filtros={})
@@ -62,3 +75,38 @@ class ActividadServiceTests(TestCase):
 			'ubicacion',
 			'responsable_snapshot'
 		)
+		queryset.prefetch_related.assert_called_once_with('ot_relaciones')
+
+
+class ActividadOTRulesTests(DjangoTestCase):
+	def test_validar_ots_unicas_detecta_ot_en_otra_actividad(self):
+		actividad = Actividad.objects.create(
+			ot='OT-100',
+			responsable_id=1,
+		)
+		ActividadOT.objects.create(
+			actividad=actividad,
+			ot='OT-100',
+			created_by=1,
+			updated_by=1,
+		)
+
+		with self.assertRaisesMessage(
+			ValueError,
+			'Las siguientes OTs ya están asociadas a otra actividad: OT-100',
+		):
+			ActividadService.validar_ots_unicas(['OT-100'], actividad_id=2)
+
+	def test_validar_ots_unicas_permita_ot_de_la_misma_actividad(self):
+		actividad = Actividad.objects.create(
+			ot='OT-100',
+			responsable_id=1,
+		)
+		ActividadOT.objects.create(
+			actividad=actividad,
+			ot='OT-100',
+			created_by=1,
+			updated_by=1,
+		)
+
+		ActividadService.validar_ots_unicas(['OT-100'], actividad_id=actividad.id)

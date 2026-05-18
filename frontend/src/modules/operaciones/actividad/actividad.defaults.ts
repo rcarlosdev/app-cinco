@@ -3,7 +3,7 @@
 import { ActividadFormData } from "@/schemas/actividades.schema";
 
 export const actividadCreateDefaultValues: ActividadFormData = {
-  ot: "",
+  ots: [""],
   responsable_id: 0,
   fecha_inicio: new Date().toISOString().split("T")[0],
   fecha_fin_estimado: "",
@@ -45,6 +45,7 @@ export const actividadCreateDefaultValues: ActividadFormData = {
 //         "movil": "PROGRAM01"
 //     },
 //     "ot": "00003",
+//     "ots": ["00003", "00004"],
 //     "estado": "pendiente",
 //     "responsable_id": 2761,
 //     "fecha_inicio": "2026-02-17",
@@ -63,7 +64,7 @@ export const actividadEditDefaultValues = (
   actividad: ActividadFormData,
 ): ActividadFormData => ({
   id: actividad.id,
-  ot: actividad.ot,
+  ots: actividad.ots,
   estado: actividad.estado,
   responsable_id: actividad.responsable_id,
   responsable_snapshot: actividad.responsable_snapshot,

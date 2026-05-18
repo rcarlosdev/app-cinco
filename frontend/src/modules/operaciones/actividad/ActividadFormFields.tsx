@@ -30,22 +30,32 @@ export const ActividadFormFields = ({
 }: ActividadFormFieldsProps) => {
   return (
     <div className="grid max-h-96 grid-cols-1 gap-5 overflow-auto pr-2 sm:grid-cols-2">
-      <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="ot">
-          OT - ID <strong className="text-red-400">*</strong>
+      <div className="col-span-2">
+        <Label htmlFor="ots">
+          OTs Relacionadas <strong className="text-red-400">*</strong>
         </Label>
         <Controller
-          name="ot"
+          name="ots"
           control={control}
           render={({ field }) => (
-            <Input
-              {...field}
-              type="text"
-              id="ot"
-              placeholder="OT de la actividad"
-              error={!!errors.ot}
-              hint={errors.ot ? errors.ot.message : undefined}
-              disabled={mode === "edit"}
+            <TextArea
+              id="ots"
+              name="ots"
+              placeholder={"Ingresa una OT por línea\nOT-2026-001\nOT-2026-002"}
+              value={Array.isArray(field.value) ? field.value.join("\n") : ""}
+              onChange={(event) => {
+                const values = event.target.value
+                  .split(/\r?\n|,/)
+                  .map((value) => value.trim());
+                field.onChange(values);
+              }}
+              error={!!errors.ots}
+              hint={
+                errors.ots
+                  ? String(errors.ots.message)
+                  : "Puedes separar varias OTs por línea o por coma"
+              }
+              rows={3}
             />
           )}
         />
