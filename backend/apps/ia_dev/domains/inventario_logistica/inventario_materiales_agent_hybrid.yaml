@@ -769,6 +769,15 @@ tables:
         is_groupable: true
         is_filterable: true
 
+      movil:
+        data_type: string
+        semantic_role: mobile_unit
+        synonyms: [movil, móvil, cuadrilla, brigada]
+        allowed_operations: [select, filter, group_by]
+        is_groupable: true
+        is_filterable: true
+        missing_metadata_allowed: true
+
       devuelto_por:
         data_type: string
         semantic_role: responsible_person
@@ -1376,6 +1385,16 @@ tables:
         is_groupable: true
         is_filterable: true
         missing_metadata_allowed: true
+
+      edit:
+        data_type: string
+        semantic_role: employee_enrichment_fallback
+        business_concepts: [custody, employee_enrichment]
+        synonyms: [edit, cedula edit, editor, cedula respaldo]
+        allowed_operations: [select, filter, join]
+        is_filterable: true
+        missing_metadata_allowed: true
+        caveat: Se usa como fallback de enrichment hacia cinco_base_de_personal cuando cedula no produce cruce.
 
       validado:
         data_type: boolean

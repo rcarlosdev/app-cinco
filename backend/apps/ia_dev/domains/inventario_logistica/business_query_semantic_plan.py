@@ -10,6 +10,10 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     BusinessQuerySemanticScope,
 )
 from apps.ia_dev.application.memory.repositories import MemoryRepository
+from apps.ia_dev.application.semantic.semantic_capability_registry import (
+    SemanticBindingRequest,
+    SemanticCapabilityRegistry,
+)
 
 
 INVENTORY_SEMANTIC_MATRIX: list[dict[str, Any]] = [
@@ -243,6 +247,7 @@ class InventorySemanticMemoryService:
 class InventoryBusinessQueryPlanner:
     def __init__(self, *, memory_service: InventorySemanticMemoryService | None = None):
         self.memory_service = memory_service or InventorySemanticMemoryService()
+        self.semantic_capability_registry = SemanticCapabilityRegistry()
 
     def build_plan(
         self,
@@ -251,17 +256,14 @@ class InventoryBusinessQueryPlanner:
         inference: dict[str, Any],
         template_id: str,
         semantic_context: dict[str, Any],
+        binding_decision: dict[str, Any] | None = None,
     ) -> BusinessQuerySemanticPlan:
         filters = dict(inference.get("filters") or {})
         group_by = [str(item or "") for item in list(inference.get("group_by") or []) if str(item or "").strip()]
         entity = self._build_entity(filters=filters, semantic_context=semantic_context)
-        capability = self._resolve_capability(template_id=template_id, inference=inference)
         families = self._resolve_scope_families(filters=filters, inference=inference, message=message)
         include_serialized = self._should_include_serialized(filters=filters, inference=inference, message=message)
-        output_columns, grain = self._resolve_output_profile(capability=capability, inference=inference, include_serialized=include_serialized)
         known_limitations = [str(item or "") for item in list(inference.get("limitations") or []) if str(item or "").strip()]
-        if include_serialized and capability == "inventory_kardex_by_employee":
-            known_limitations.append("serializados_employee_kardex_not_available")
         consulted_sources = [
             "ai_dictionary.dd_reglas",
             "ai_dictionary.dd_sinonimos",
@@ -273,11 +275,46 @@ class InventoryBusinessQueryPlanner:
             "ai_dictionary.ia_dev_business_memory",
         ]
         memory_snapshot = self.memory_service.list_memory_snapshot()
+        semantic_context = dict(semantic_context or {})
+        semantic_context["semantic_memory_snapshot"] = list(memory_snapshot or [])
         memory_keys_used = [
             str(item.get("memory_key") or "")
             for item in memory_snapshot
             if isinstance(item, dict) and str(item.get("memory_key") or "").startswith("inventory.semantic.")
         ]
+        binding = dict(binding_decision or {})
+        if not binding:
+            binding = self.semantic_capability_registry.resolve(
+                SemanticBindingRequest(
+                    domain="inventario_logistica",
+                    message=message,
+                    intent=str(inference.get("intent") or ""),
+                    entity=entity,
+                    normalized_filters=filters,
+                    group_by=group_by,
+                    semantic_context=semantic_context,
+                    source_hints={
+                        "template_id": template_id,
+                        "inventory_inference": dict(inference or {}),
+                        "governed_match": dict(inference.get("governed_match") or {}),
+                        "memory_keys_used": memory_keys_used,
+                    },
+                )
+            ).as_dict()
+        capability = str(binding.get("candidate_capability") or self._resolve_capability(template_id=template_id, inference=inference) or "")
+        output_profile = dict(binding.get("output_profile") or {})
+        output_columns = [str(item or "") for item in list(output_profile.get("columns") or []) if str(item or "").strip()]
+        grain = str(output_profile.get("grain") or "").strip()
+        if not output_columns or not grain:
+            output_columns, grain = self._resolve_output_profile(
+                capability=capability,
+                inference=inference,
+                include_serialized=include_serialized,
+            )
+        if capability == "inventory_kardex_by_employee":
+            known_limitations.append("serializados_employee_kardex_not_available")
+        if bool(binding.get("legacy_mapping_used")):
+            known_limitations.append("legacy_semantic_binding_shadowed")
         return BusinessQuerySemanticPlan(
             query=str(message or ""),
             domain="inventario_logistica",
@@ -294,7 +331,10 @@ class InventoryBusinessQueryPlanner:
                 coverage=self._resolve_coverage(filters=filters, entity=entity),
             ),
             output=BusinessQuerySemanticOutput(
-                expected_output=self._expected_output_for_capability(capability=capability),
+                expected_output=str(
+                    output_profile.get("expected_output")
+                    or self._expected_output_for_capability(capability=capability)
+                ),
                 grain=grain,
                 columns=output_columns,
             ),
@@ -327,6 +367,17 @@ class InventoryBusinessQueryPlanner:
                     "decide_execute_true",
                 ],
                 "authority": "deterministic_and_dictionary_first",
+                "semantic_binding": {
+                    "template_id": str(binding.get("template_id") or template_id or ""),
+                    "planner_route_hint": str(binding.get("planner_route_hint") or ""),
+                    "response_profile": str(binding.get("response_profile") or ""),
+                    "tool_id": str(binding.get("tool_id") or ""),
+                    "source": str(binding.get("source") or ""),
+                    "matched_rules": list(binding.get("matched_rules") or []),
+                    "confidence": float(binding.get("confidence") or 0.0),
+                    "fallback_used": bool(binding.get("fallback_used")),
+                    "legacy_mapping_used": bool(binding.get("legacy_mapping_used")),
+                },
             },
         )
 
@@ -336,11 +387,13 @@ class InventoryBusinessQueryPlanner:
         if explicit:
             mapping = {
                 "inventory_material_stock_mobile": "inventory_stock_balance_by_mobile",
+                "inventory_material_stock_grouped_dimension": "inventory_stock_balance_by_material_dimension",
                 "inventory_material_stock_by_warehouse": "inventory_material_stock_by_warehouse",
                 "inventory_material_stock_balance": "inventory_stock_balance",
                 "inventory_kardex_by_employee": "inventory_kardex_by_employee",
                 "inventory_kardex_consolidated": "inventory_kardex_consolidated",
                 "inventory_serial_by_operational_holder": "inventory_serial_by_operational_holder",
+                "inventory_serial_stock_by_family_grouped_dimension": "inventory_serial_stock_by_family_grouped_dimension",
                 "inventory_traceability_by_serial": "inventory_traceability_by_serial",
                 "inventory_material_critical_by_employee": "inventory_stock_balance_by_mobile",
                 "inventory_serial_stock_by_dimension": "inventory_serial_stock_by_dimension",
@@ -385,6 +438,9 @@ class InventoryBusinessQueryPlanner:
 
     @staticmethod
     def _resolve_scope_families(*, filters: dict[str, Any], inference: dict[str, Any], message: str) -> list[str]:
+        governed_match = dict(inference.get("governed_match") or {})
+        if list(governed_match.get("familias") or []):
+            return [str(item) for item in list(governed_match.get("familias") or []) if str(item).strip()]
         tipo = filters.get("tipo")
         if isinstance(tipo, list):
             return ["material_claro" if str(item) == "material" else "ferretero" for item in tipo]
@@ -402,6 +458,9 @@ class InventoryBusinessQueryPlanner:
 
     @staticmethod
     def _should_include_serialized(*, filters: dict[str, Any], inference: dict[str, Any], message: str) -> bool:
+        governed_match = dict(inference.get("governed_match") or {})
+        if "incluye_serializados" in governed_match:
+            return bool(governed_match.get("incluye_serializados"))
         normalized_message = str(message or "").strip().lower()
         if str(inference.get("material_family") or "").strip().lower() == "serializados":
             return True
@@ -446,6 +505,26 @@ class InventoryBusinessQueryPlanner:
             return (
                 ["fecha", "tipo_movimiento", "codigo", "cantidad", "origen", "destino"],
                 "movimiento_por_fecha_y_codigo",
+            )
+        if capability == "inventory_serial_stock_by_family_grouped_dimension":
+            return (
+                [
+                    "dimension",
+                    "cedula",
+                    "empleado",
+                    "movil",
+                    "bodega",
+                    "codigo",
+                    "descripcion",
+                    "familia",
+                    "seriales_total",
+                    "cedulas_asociadas",
+                    "en_movil",
+                    "en_base",
+                    "cobros",
+                    "saldo",
+                ],
+                "saldo_serializado_por_dimension_y_codigo",
             )
         if capability in {"inventory_serial_by_operational_holder", "inventory_serial_stock_by_dimension", "inventory_traceability_by_serial"}:
             return (

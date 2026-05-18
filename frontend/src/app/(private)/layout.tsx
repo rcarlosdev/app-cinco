@@ -15,7 +15,10 @@ type RootLayoutProps = {
 export default function AdminLayout({ children }: RootLayoutProps) {
   const { isExpanded, isMobileOpen } = useSidebar();
   const pathname = usePathname();
-  const isIADevView = pathname?.startsWith("/programacion/ia-dev") ?? false;
+  const isWideWorkspaceView =
+    pathname?.startsWith("/programacion/ia-dev") ||
+    pathname?.startsWith("/agente-ia") ||
+    false;
 
   // Dynamic class for main content margin based on sidebar state
   const mainContentMargin = isMobileOpen
@@ -39,7 +42,7 @@ export default function AdminLayout({ children }: RootLayoutProps) {
           {/* Page Content */}
           <div
             className={
-              isIADevView
+              isWideWorkspaceView
                 ? "w-full min-w-0 max-w-none overflow-x-hidden p-0"
                 : "mx-auto w-full min-w-0 max-w-(--breakpoint-2xl) overflow-x-hidden p-4 md:p-6"
             }

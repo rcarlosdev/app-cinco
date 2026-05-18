@@ -14,6 +14,7 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 )
 from apps.ia_dev.application.orchestration.response_assembler import ResponseAssembler
 from apps.ia_dev.application.orchestration.chat_application_service import ChatApplicationService
+from apps.ia_dev.application.runtime.semantic_gap_registry_service import SemanticGapRegistryService
 
 
 class _ObservabilityStub:
@@ -22,6 +23,38 @@ class _ObservabilityStub:
 
     def record_event(self, *, event_type: str, source: str, meta: dict):
         self.events.append({"event_type": event_type, "source": source, "meta": dict(meta or {})})
+
+
+class _TaskStateUpdateStub:
+    def __init__(self):
+        self.updated = None
+
+    def update_state(self, *, run_id: str, extra_state: dict | None = None, **kwargs):
+        self.updated = {"run_id": run_id, "extra_state": dict(extra_state or {})}
+
+    def get(self, *, run_id: str):
+        return {
+            "workflow_key": f"task_runtime:{run_id}",
+            "state": dict((self.updated or {}).get("extra_state") or {}),
+        }
+
+
+class _GapRegistryStub(SemanticGapRegistryService):
+    def __init__(self):
+        pass
+
+    def register_from_runtime(self, *, response: dict, run_context):
+        return {
+            "registrada": True,
+            "idempotente": False,
+            "registro": {
+                "id": 41,
+                "categoria_brecha": "consulta_ambigua",
+                "prioridad": "media",
+                "estado_revision": "nueva",
+                "origen_registro": "runtime",
+            },
+        }
 
 
 class ChatRuntimeMetadataTests(SimpleTestCase):
@@ -217,6 +250,139 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             str(((payload.get("execution_plan") or {}).get("capability_id") or "")),
             "empleados.count.active.v1",
         )
+
+    def test_resolve_query_intelligence_routes_certificados_altura_proximos_a_vencer_without_fallback(self):
+        service = ChatApplicationService()
+        message = "certificados de altura proximos a vencer del personal activo operativo"
+        run_context = RunContext.create(message=message, session_id="sess-heights", reset_memory=False)
+        intent = StructuredQueryIntent(
+            raw_query=message,
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.91,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=StructuredQueryIntent(
+                raw_query=message,
+                domain_code="empleados",
+                operation="count",
+                template_id="count_entities_by_status",
+                filters={"estado_empleado": "ACTIVO", "tipo_labor": "OPERATIVO"},
+                period={},
+                group_by=[],
+                metrics=["count"],
+                confidence=0.94,
+                source="rules_arbitrated",
+            ),
+            semantic_context={
+                "tables": [{"table_name": "cinco_base_de_personal"}],
+                "allowed_tables": ["cinco_base_de_personal", "bd_c3nc4s1s.cinco_base_de_personal"],
+                "allowed_columns": ["datos", "calturas", "estado", "tipo_labor"],
+                "column_profiles": [
+                    {"table_name": "cinco_base_de_personal", "logical_name": "estado_empleado", "column_name": "estado"},
+                    {"table_name": "cinco_base_de_personal", "logical_name": "tipo_labor", "column_name": "tipo_labor"},
+                    {
+                        "table_name": "cinco_base_de_personal",
+                        "logical_name": "certificado_alturas_fecha_emision",
+                        "column_name": "datos",
+                        "supports_filter": True,
+                        "is_date": True,
+                        "definicion_negocio": "Fuente oficial. [json_path=$.certificados_alturas[*]][json_filter_tipo=alturas][json_date_key=fecha][fallback_column=calturas]",
+                    },
+                ],
+                "resolved_semantic": {
+                    "field_match": {
+                        "logical_name": "certificado_alturas_fecha_emision",
+                        "semantic_role": "heights_certificate_validity",
+                    }
+                },
+                "source_of_truth": {"pilot_sql_assisted_enabled": True},
+            },
+            normalized_filters={"estado_empleado": "ACTIVO", "tipo_labor": "OPERATIVO"},
+            normalized_period={},
+            mapped_columns={"estado_empleado": "estado", "tipo_labor": "tipo_labor"},
+        )
+        execution_plan = QueryExecutionPlan(
+            strategy="sql_assisted",
+            reason="employee_heights_certificate_summary_json",
+            domain_code="empleados",
+            sql_query="SELECT 1 AS certificados_proximos_vencer LIMIT 1",
+            constraints={"filters": {"estado_empleado": "ACTIVO", "tipo_labor": "OPERATIVO"}, "group_by": [], "result_shape": "kpi"},
+            policy={"allowed": True, "reason": "sql_validated"},
+            metadata={"compiler": "employee_semantic_sql", "metric_used": "certificado_alturas_vigencia"},
+        )
+
+        with patch.object(service.semantic_business_resolver, "build_semantic_context", return_value={}), patch.object(
+            service.capability_runtime,
+            "build_candidate_hints",
+            return_value=[{"capability_id": "empleados.count.active.v1", "reason": "bootstrap"}],
+        ), patch.object(service.query_intent_resolver, "match_query_pattern", return_value=None), patch.object(
+            service.query_intent_resolver,
+            "resolve",
+            return_value=intent,
+        ), patch.object(
+            service.intent_arbitration_service,
+            "arbitrate",
+            return_value={
+                "final_intent": "analytics_query",
+                "final_domain": "empleados",
+                "should_execute_query": True,
+                "should_use_handler": False,
+                "should_use_sql_assisted": True,
+                "should_fallback": False,
+                "confidence": 0.96,
+                "reasoning_summary": "Consulta de vigencia de certificados de alturas en empleados.",
+            },
+        ), patch.object(
+            service.semantic_business_resolver,
+            "resolve_query",
+            return_value=resolved_query,
+        ), patch.object(
+            service.query_execution_planner,
+            "plan",
+            return_value=execution_plan,
+        ):
+            payload = service._resolve_query_intelligence(
+                message=message,
+                base_classification={"domain": "empleados", "intent": "empleados_query", "needs_database": True},
+                session_context={},
+                run_context=run_context,
+                observability=_ObservabilityStub(),
+            )
+
+        self.assertEqual(str(payload.get("error") or ""), "")
+        self.assertEqual(str(((payload.get("resolved_query") or {}).get("intent") or {}).get("domain_code") or ""), "empleados")
+        self.assertEqual(str(((payload.get("execution_plan") or {}).get("strategy") or "")), "sql_assisted")
+        self.assertEqual(str(((payload.get("execution_plan") or {}).get("metadata") or {}).get("metric_used") or ""), "certificado_alturas_vigencia")
+
+    def test_resolve_query_intelligence_exposes_empleados_errors_in_metadata_and_observability(self):
+        service = ChatApplicationService()
+        observability = _ObservabilityStub()
+        run_context = RunContext.create(message="empleados activos", session_id="sess-qi-error", reset_memory=False)
+
+        with patch.object(
+            service.semantic_business_resolver,
+            "build_semantic_context",
+            side_effect=RuntimeError("boom empleados"),
+        ):
+            payload = service._resolve_query_intelligence(
+                message="empleados activos",
+                base_classification={"domain": "empleados", "intent": "empleados_query", "needs_database": True},
+                session_context={},
+                run_context=run_context,
+                observability=observability,
+            )
+
+        self.assertEqual(str(payload.get("mode") or ""), "active")
+        self.assertIn("boom empleados", str(payload.get("error") or ""))
+        self.assertIn("boom empleados", str((run_context.metadata.get("query_intelligence") or {}).get("error") or ""))
+        self.assertTrue(any(event.get("event_type") == "query_intelligence_error" for event in observability.events))
 
     def test_resolve_query_intelligence_realigns_semantic_context_to_employee_intent_domain(self):
         service = ChatApplicationService()
@@ -419,6 +585,19 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         self.assertEqual(str((response.get("orchestrator") or {}).get("analytics_router_decision") or ""), "sql_assisted")
         self.assertEqual(str((response.get("orchestrator") or {}).get("fallback_reason") or ""), "")
         self.assertEqual(str((response.get("task_state") or {}).get("workflow_key") or ""), "task_runtime:run-1")
+        self.assertEqual(str((response.get("task") or {}).get("task_id") or ""), "task_runtime:run-1")
+        self.assertEqual(str((((response.get("task") or {}).get("current_run") or {}).get("run_id") or "")), run_context.run_id)
+        self.assertEqual(str((((response.get("task") or {}).get("current_run") or {}).get("status") or "")), "completed")
+        self.assertEqual(str((((response.get("task") or {}).get("current_run") or {}).get("domain") or "")), "ausentismo")
+        self.assertEqual(str((((response.get("task") or {}).get("current_run") or {}).get("intent") or "")), "analytics_query")
+        self.assertEqual(
+            list((((response.get("task") or {}).get("current_run") or {}).get("required_tools") or [])),
+            ["query_execution_planner.sql_assisted"],
+        )
+        selected_tool_id = str(
+            ((((response.get("task") or {}).get("current_run") or {}).get("tool_execution") or {}).get("selected_tool_id") or "")
+        )
+        self.assertEqual(selected_tool_id, "")
         self.assertEqual(str(((response.get("data_sources") or {}).get("runtime") or {}).get("flow") or ""), "sql_assisted")
         self.assertEqual(
             str(((response.get("data_sources") or {}).get("runtime") or {}).get("runtime_authority") or ""),
@@ -435,6 +614,204 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             str(((response.get("data_sources") or {}).get("runtime") or {}).get("fallback_reason") or ""),
             "",
         )
+
+    def test_attach_runtime_metadata_exposes_tool_execution_trace_from_task_state(self):
+        run_context = RunContext.create(message="personal activo hoy", session_id="sess-tools", reset_memory=False)
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-tool",
+            "status": "completed",
+            "state": {
+                "task_status": "completed",
+                "agents": [
+                    {"agent_name": "manager_agent", "role": "manager"},
+                    {"agent_name": "empleados_agent", "role": "specialist"},
+                ],
+                "handoffs": [
+                    {
+                        "handoff_origin": "manager_agent",
+                        "handoff_target": "empleados_agent",
+                    }
+                ],
+                "handoff_trace": [
+                    {
+                        "handoff_id": "handoff-1",
+                        "handoff_origin": "manager_agent",
+                        "handoff_target": "empleados_agent",
+                    }
+                ],
+                "agent_trace": [
+                    {"agent_name": "manager_agent"},
+                    {"agent_name": "empleados_agent"},
+                ],
+                "approvals": [
+                    {
+                        "approval_request_id": "apr-1",
+                        "approval_status": "awaiting_approval",
+                        "resume_token": "resume-1",
+                    }
+                ],
+                "approval_trace": [
+                    {"approval_request_id": "apr-1", "status": "awaiting_approval"}
+                ],
+                "tool_execution": {
+                    "selected_tool_id": "empleados.count.active.v1",
+                    "registry_version": "tool_registry.v1",
+                },
+                "tool_execution_trace": [
+                    {
+                        "tool_id": "empleados.count.active.v1",
+                        "status": "completed",
+                    }
+                ],
+            },
+        }
+        run_context.metadata["intent_arbitration"] = {"final_intent": "empleados_query", "final_domain": "empleados"}
+        run_context.metadata["query_intelligence"] = {"execution_plan": {"strategy": "capability", "capability_id": "empleados.count.active.v1"}}
+
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={"orchestrator": {"domain": "empleados", "intent": "empleados_query"}, "data_sources": {}},
+            run_context=run_context,
+            response_flow="handler",
+        )
+
+        task_execution = dict((((response.get("task") or {}).get("current_run") or {}).get("tool_execution") or {}))
+        task_run = dict(((response.get("task") or {}).get("current_run") or {}))
+        runtime_execution = dict(((response.get("data_sources") or {}).get("runtime") or {}).get("tool_execution") or {})
+        runtime_payload = dict(((response.get("data_sources") or {}).get("runtime") or {}))
+        self.assertEqual(str(task_execution.get("selected_tool_id") or ""), "empleados.count.active.v1")
+        self.assertEqual(len(list(task_execution.get("trace") or [])), 1)
+        self.assertEqual(len(list(task_run.get("agents") or [])), 2)
+        self.assertEqual(len(list(task_run.get("handoffs") or [])), 1)
+        self.assertEqual(len(list(task_run.get("approvals") or [])), 1)
+        self.assertEqual(str(runtime_execution.get("selected_tool_id") or ""), "empleados.count.active.v1")
+        self.assertEqual(len(list(runtime_execution.get("trace") or [])), 1)
+        self.assertEqual(len(list(runtime_payload.get("agents") or [])), 2)
+        self.assertEqual(len(list(runtime_payload.get("handoffs") or [])), 1)
+        self.assertEqual(len(list(runtime_payload.get("handoff_trace") or [])), 1)
+        self.assertEqual(len(list(runtime_payload.get("approvals") or [])), 1)
+
+    def test_runtime_tool_execution_state_merges_native_tool_trace(self):
+        run_context = RunContext.create(message="inventario tiran224", session_id="sess-native", reset_memory=False)
+        run_context.metadata["response_native_tool_trace"] = [
+            {
+                "tool_call_id": "call_native_1",
+                "tool_name": "semantic_orchestrator.dictionary_summary.v1",
+                "tool_id": "semantic_orchestrator.dictionary_summary.v1",
+                "status": "completed",
+            }
+        ]
+        run_context.metadata["response_native_tool_loop"] = {
+            "component": "semantic_orchestrator_service",
+            "turns": 2,
+            "tool_trace_count": 1,
+        }
+
+        service = ChatApplicationService()
+        state = service._build_runtime_tool_execution_state(
+            run_context=run_context,
+            response_flow="sql_assisted",
+            route_payload={},
+            execution_plan={"capability_id": "inventory_stock_balance_by_mobile"},
+            response={"reply": "ok", "data": {"table": {"rowcount": 1}}, "observability": {"duration_ms": 1}},
+            fallback_used={"used": False},
+            validation_result={"satisfied": True},
+        )
+
+        execution = dict(state.get("tool_execution") or {})
+        trace = list(state.get("tool_execution_trace") or [])
+        self.assertEqual(int(execution.get("native_tool_calls_count") or 0), 1)
+        self.assertEqual(str((dict(execution.get("response_tool_loop") or {})).get("component") or ""), "semantic_orchestrator_service")
+        self.assertEqual(len(trace), 2)
+        self.assertEqual(str((trace[0] or {}).get("tool_call_id") or ""), "call_native_1")
+
+    def test_build_runtime_agent_execution_state_reads_agents_runtime_metadata(self):
+        run_context = RunContext.create(message="inventario tiran224", session_id="sess-agent-state", reset_memory=False)
+        run_context.metadata["agents_runtime"] = {
+            "agents": [
+                {"agent_name": "manager_agent"},
+                {"agent_name": "inventory_agent"},
+            ],
+            "handoffs": [
+                {"handoff_origin": "manager_agent", "handoff_target": "inventory_agent"},
+            ],
+            "handoff_trace": [
+                {"handoff_id": "handoff-1", "handoff_origin": "manager_agent", "handoff_target": "inventory_agent"},
+            ],
+            "agent_trace": [
+                {"agent_name": "manager_agent"},
+                {"agent_name": "inventory_agent"},
+            ],
+            "bootstrap": {"implementation": "gateway_function_loop"},
+        }
+        run_context.metadata["approval_runtime"] = {
+            "approvals": [{"approval_request_id": "apr-1", "approval_status": "awaiting_approval"}],
+            "approval_trace": [{"approval_request_id": "apr-1", "status": "awaiting_approval"}],
+        }
+
+        state = ChatApplicationService._build_runtime_agent_execution_state(run_context=run_context)
+        approval_state = ChatApplicationService._build_runtime_approval_execution_state(run_context=run_context)
+
+        self.assertEqual(len(list(state.get("agents") or [])), 2)
+        self.assertEqual(len(list(state.get("handoffs") or [])), 1)
+        self.assertEqual(len(list(state.get("handoff_trace") or [])), 1)
+        self.assertEqual(len(list(state.get("agent_trace") or [])), 2)
+        self.assertEqual(str((state.get("agents_runtime_bootstrap") or {}).get("implementation") or ""), "gateway_function_loop")
+        self.assertEqual(len(list(approval_state.get("approvals") or [])), 1)
+        self.assertEqual(len(list(approval_state.get("approval_trace") or [])), 1)
+
+    def test_build_runtime_background_execution_state_reads_background_runtime_metadata(self):
+        run_context = RunContext.create(message="proceso largo", session_id="sess-bg-state", reset_memory=False)
+        run_context.metadata["background_runtime"] = {
+            "background": {
+                "background_run_id": "bg-1",
+                "run_status": "queued",
+                "resume_token": "resume-1",
+            },
+            "background_trace": [{"event_type": "background_run_queued"}],
+            "checkpoints": [{"checkpoint_id": "chk-1"}],
+        }
+
+        state = ChatApplicationService._build_runtime_background_execution_state(run_context=run_context)
+
+        self.assertEqual(str((state.get("background") or {}).get("background_run_id") or ""), "bg-1")
+        self.assertEqual(len(list(state.get("background_trace") or [])), 1)
+        self.assertEqual(len(list(state.get("checkpoints") or [])), 1)
+
+    def test_attach_runtime_metadata_exposes_background_state(self):
+        run_context = RunContext.create(message="proceso largo", session_id="sess-bg-meta", reset_memory=False)
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-bg-meta",
+            "status": "queued",
+            "state": {
+                "task_id": "task_runtime:run-bg-meta",
+                "task_status": "queued",
+                "detected_domain": "empleados",
+                "plan": {},
+                "source_used": {"response_flow": "handler"},
+                "background": {
+                    "background_run_id": "bg-meta-1",
+                    "run_status": "queued",
+                    "resume_token": "resume-meta-1",
+                },
+                "background_trace": [{"event_type": "background_run_queued"}],
+                "checkpoints": [{"checkpoint_id": "chk-meta-1"}],
+                "tool_execution": {"selected_tool_id": "empleados.count.active.v1"},
+                "tool_execution_trace": [],
+            },
+        }
+
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={"orchestrator": {"domain": "empleados", "intent": "empleados_query"}, "data_sources": {}},
+            run_context=run_context,
+            response_flow="handler",
+        )
+
+        task_run = dict(((response.get("task") or {}).get("current_run") or {}))
+        runtime_payload = dict(((response.get("data_sources") or {}).get("runtime") or {}))
+        self.assertEqual(str((task_run.get("background") or {}).get("background_run_id") or ""), "bg-meta-1")
+        self.assertEqual(str((runtime_payload.get("background") or {}).get("resume_token") or ""), "resume-meta-1")
+        self.assertEqual(len(list(runtime_payload.get("background_trace") or [])), 1)
+        self.assertEqual(len(list(runtime_payload.get("checkpoints") or [])), 1)
 
     def test_attach_runtime_metadata_promotes_employee_sql_assisted_fallback_to_analytics_intent(self):
         run_context = RunContext.create(message="personal activo por area y carpeta", session_id="sess-emp", reset_memory=False)
@@ -474,6 +851,244 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             str(((response.get("data_sources") or {}).get("runtime") or {}).get("final_intent") or ""),
             "analytics_query",
         )
+
+    def test_attach_runtime_metadata_carries_business_response_evidence_trace(self):
+        run_context = RunContext.create(message="inventario tiran224", session_id="sess-p4", reset_memory=False)
+        run_context.metadata["semantic_orchestrator"] = {
+            "domain": "inventario_logistica",
+            "intent": "stock_balance",
+            "selected_agent": "inventory_agent",
+        }
+        run_context.metadata["query_intelligence"] = {
+            "execution_plan": {
+                "strategy": "sql_assisted",
+                "capability_id": "inventory_stock_balance_by_mobile",
+            }
+        }
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-p4",
+            "status": "completed",
+            "state": {
+                "task_id": "task_runtime:run-p4",
+                "task_status": "completed",
+                "detected_domain": "inventario_logistica",
+                "validation_result": {"satisfied": True, "reason": "ok"},
+                "tool_execution": {"selected_tool_id": "query_execution_planner.sql_assisted"},
+                "tool_execution_trace": [],
+                "agents": [{"agent_name": "inventory_agent"}],
+            },
+        }
+
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={
+                "reply": "ok",
+                "orchestrator": {"domain": "inventario_logistica", "intent": "stock_balance"},
+                "data_sources": {},
+                "data": {
+                    "business_response": {
+                        "metadata": {
+                            "response_profile_usado": "inventory.stock.mobile.detail",
+                            "evidence_sources_used": ["semantic_context", "result_set"],
+                            "semantic_context_used": True,
+                            "fallback_narrativo_usado": False,
+                            "missing_evidence_reason": "",
+                            "paquete_capacidad_usado": "inventario_logistica",
+                            "version_paquete": "1.0.0",
+                            "capacidades_declaradas": ["inventory_stock_balance_by_mobile"],
+                            "reglas_declaradas": ["inventario.filter.material_generico"],
+                            "perfiles_respuesta": ["inventory.stock.mobile.detail"],
+                            "evaluaciones_asociadas": ["inventario_runtime_eval_v1"],
+                            "candidate_capability": "inventory_stock_balance_by_mobile",
+                            "planner_route_hint": "inventory.material_stock.mobile",
+                            "tool_id": "query_execution_planner.sql_assisted",
+                            "filters": {"movil": "TIRAN224", "tipo": ["material", "ferretero"]},
+                            "semantic_trace": {
+                                "fuente_dd": ["dd_sinonimos", "dd_reglas"],
+                                "regla_metadata_usada": ["inventario.filter.material_generico"],
+                                "fallback_sombreado_usado": False,
+                                "regla_legacy_detectada": False,
+                                "paquete_capacidad_usado": "inventario_logistica",
+                                "version_paquete": "1.0.0",
+                                "capacidades_declaradas": ["inventory_stock_balance_by_mobile"],
+                                "reglas_declaradas": ["inventario.route.stock_balance_holder"],
+                                "perfiles_respuesta": ["inventory.stock.mobile.detail"],
+                                "evaluaciones_asociadas": ["inventario_runtime_eval_v1"],
+                            },
+                        },
+                        "evidence_summary": {
+                            "response_profile_usado": "inventory.stock.mobile.detail",
+                            "entity": {"field": "movil", "identifier": "TIRAN224"},
+                            "filters": {"movil": "TIRAN224", "tipo": ["material", "ferretero"]},
+                            "output_profile": {"grain": "saldo_por_codigo", "columns": ["codigo", "saldo"]},
+                            "capability_pack": {
+                                "paquete_capacidad_usado": "inventario_logistica",
+                                "version_paquete": "1.0.0",
+                                "capacidades_declaradas": ["inventory_stock_balance_by_mobile"],
+                                "reglas_declaradas": ["inventario.route.stock_balance_holder"],
+                                "perfiles_respuesta": ["inventory.stock.mobile.detail"],
+                                "evaluaciones_asociadas": ["inventario_runtime_eval_v1"],
+                            },
+                        },
+                    },
+                    "table": {
+                        "columns": ["codigo", "saldo"],
+                        "rows": [{"codigo": "MAT-1", "saldo": 2}],
+                        "rowcount": 1,
+                    },
+                },
+            },
+            run_context=run_context,
+            response_flow="sql_assisted",
+        )
+
+        evidence = dict((((response.get("task") or {}).get("current_run") or {}).get("evidence") or {}))
+        self.assertEqual(str(evidence.get("response_profile_usado") or ""), "inventory.stock.mobile.detail")
+        self.assertIn("semantic_context", list(evidence.get("evidence_sources_used") or []))
+        self.assertTrue(bool(evidence.get("semantic_context_used")))
+        self.assertFalse(bool(evidence.get("fallback_narrativo_usado")))
+        self.assertEqual(str(evidence.get("paquete_capacidad_usado") or ""), "inventario_logistica")
+        self.assertEqual(str(evidence.get("version_paquete") or ""), "1.0.0")
+        explanation = dict((((response.get("task") or {}).get("current_run") or {}).get("semantic_explanation") or {}))
+        self.assertEqual(str(explanation.get("domain") or ""), "inventario_logistica")
+        self.assertEqual(str(explanation.get("intent") or ""), "stock_balance")
+        self.assertEqual(str(explanation.get("selected_capability") or ""), "inventory_stock_balance_by_mobile")
+        self.assertEqual(str(explanation.get("selected_tool") or ""), "query_execution_planner.sql_assisted")
+        self.assertEqual(str((dict(explanation.get("entity") or {})).get("identifier") or ""), "TIRAN224")
+        self.assertTrue(bool((dict(explanation.get("metadata_used") or {})).get("governed_used")))
+        self.assertEqual(str((dict(explanation.get("capability_pack") or {}).get("paquete_capacidad_usado") or "")), "inventario_logistica")
+        self.assertEqual(str((dict(explanation.get("capability_pack") or {}).get("version_paquete") or "")), "1.0.0")
+        self.assertEqual(int((dict(explanation.get("evidence_summary") or {})).get("rowcount") or 0), 1)
+
+    def test_attach_runtime_metadata_marks_semantic_explanation_for_approval_and_clarification(self):
+        run_context = RunContext.create(message="que tiene Juan Perez", session_id="sess-clarify", reset_memory=False)
+        run_context.metadata["semantic_orchestrator"] = {
+            "domain": "inventario_logistica",
+            "intent": "needs_clarification",
+            "clarification_question": "Aclara si buscas por cedula, movil o codigo.",
+            "needs_clarification": True,
+            "selected_agent": "semantic_resolution_agent",
+        }
+        run_context.metadata["intent_arbitration"] = {
+            "final_intent": "needs_clarification",
+            "required_clarification": "Aclara si buscas por cedula, movil o codigo.",
+        }
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-clarify",
+            "status": "awaiting_approval",
+            "state": {
+                "task_id": "task_runtime:run-clarify",
+                "task_status": "awaiting_approval",
+                "detected_domain": "inventario_logistica",
+                "validation_result": {
+                    "satisfied": False,
+                    "reason": "missing_structural_context",
+                    "needs_clarification": True,
+                },
+                "approvals": [
+                    {"approval_request_id": "apr-1", "approval_status": "awaiting_approval"}
+                ],
+                "background": {
+                    "background_run_id": "bg-clarify-1",
+                    "run_status": "awaiting_approval",
+                    "resume_token": "resume-clarify-1",
+                },
+                "tool_execution": {"selected_tool_id": ""},
+                "tool_execution_trace": [],
+            },
+        }
+
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={
+                "reply": "Aclara si buscas por cedula, movil o codigo.",
+                "orchestrator": {"domain": "inventario_logistica", "intent": "needs_clarification"},
+                "data_sources": {},
+                "data": {
+                    "business_response": {
+                        "metadata": {
+                            "response_status": "clarification_required",
+                            "limitations": [],
+                        },
+                        "evidence_summary": {
+                            "response_profile_usado": "inventory.stock.mobile.detail",
+                        },
+                    }
+                },
+            },
+            run_context=run_context,
+            response_flow="sql_assisted",
+        )
+
+        explanation = dict((((response.get("task") or {}).get("current_run") or {}).get("semantic_explanation") or {}))
+        clarification = dict(explanation.get("clarification_needed") or {})
+        approvals = dict(explanation.get("approvals_status") or {})
+        background = dict(explanation.get("background_status") or {})
+        self.assertTrue(bool(clarification.get("required")))
+        self.assertIn("cedula", str(clarification.get("question") or "").lower())
+        self.assertEqual(str(approvals.get("status") or ""), "awaiting_approval")
+        self.assertEqual(int(approvals.get("pending_count") or 0), 1)
+        self.assertEqual(str(background.get("status") or ""), "awaiting_approval")
+        self.assertTrue(bool(background.get("resume_token_available")))
+
+    def test_attach_runtime_metadata_humanizes_inventory_shadow_fallback_for_semantic_explanation(self):
+        run_context = RunContext.create(message="saldo en moviles de CONECTOR RJ 45", session_id="sess-shadow", reset_memory=False)
+        run_context.metadata["semantic_orchestrator"] = {
+            "domain": "inventario_logistica",
+            "intent": "stock_balance",
+            "selected_agent": "inventory_agent",
+        }
+        run_context.metadata["query_intelligence"] = {
+            "execution_plan": {
+                "strategy": "sql_assisted",
+                "capability_id": "inventory_stock_balance_by_material_dimension",
+            }
+        }
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-shadow",
+            "status": "completed",
+            "state": {
+                "task_id": "task_runtime:run-shadow",
+                "task_status": "completed",
+                "detected_domain": "inventario_logistica",
+                "validation_result": {"satisfied": True, "reason": "ok"},
+                "fallback_used": {"used": False},
+                "tool_execution": {"selected_tool_id": "query_execution_planner.sql_assisted"},
+                "tool_execution_trace": [],
+            },
+        }
+
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={
+                "reply": "ok",
+                "orchestrator": {"domain": "inventario_logistica", "intent": "stock_balance"},
+                "data_sources": {},
+                "data": {
+                    "business_response": {
+                        "metadata": {
+                            "response_profile_usado": "inventory.stock.dimension.summary",
+                            "candidate_capability": "inventory_stock_balance_by_material_dimension",
+                            "tool_id": "query_execution_planner.sql_assisted",
+                            "semantic_trace": {
+                                "fallback_sombreado_usado": True,
+                                "regla_legacy_detectada": True,
+                                "fuente_dd": ["ai_dictionary.dd_sinonimos"],
+                            },
+                        },
+                        "evidence_summary": {
+                            "response_profile_usado": "inventory.stock.dimension.summary",
+                            "filters": {"descripcion": "CONECTOR RJ 45", "grouping_dimension": "movil"},
+                            "output_profile": {"grain": "saldo_por_dimension_y_codigo", "columns": ["movil", "codigo", "saldo"]},
+                        },
+                    }
+                },
+            },
+            run_context=run_context,
+            response_flow="sql_assisted",
+        )
+
+        explanation = dict((((response.get("task") or {}).get("current_run") or {}).get("semantic_explanation") or {}))
+        fallback = dict(explanation.get("fallback_used") or {})
+        self.assertIn("compatibilidad semántica temporal", str(fallback.get("reason") or "").lower())
+        self.assertNotIn("legacy_semantic_binding_shadowed", str(explanation))
 
     def test_build_runtime_compatibility_metadata_marks_legacy_path_usage(self):
         metadata = ChatApplicationService._build_runtime_compatibility_metadata(
@@ -707,3 +1322,53 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
         self.assertEqual(str(meta.get("analytics_router_decision") or ""), "sql_assisted")
         self.assertFalse(bool(meta.get("legacy_analytics_isolated")))
         self.assertEqual(str(meta.get("cleanup_phase") or ""), "")
+
+    def test_attach_semantic_gap_learning_enriches_response_and_task_state(self):
+        task_state_service = _TaskStateUpdateStub()
+        service = ChatApplicationService(
+            task_state_service=task_state_service,
+            semantic_gap_registry_service=_GapRegistryStub(),
+        )
+        run_context = RunContext.create(
+            message="que tiene Juan Perez",
+            session_id="sess-gap-meta",
+            reset_memory=False,
+        )
+        run_context.run_id = "run-gap-meta"
+        run_context.metadata["task_state"] = {
+            "workflow_key": "task_runtime:run-gap-meta",
+            "state": {"task_id": "task_runtime:run-gap-meta"},
+        }
+        response = {
+            "task_state": {
+                "workflow_key": "task_runtime:run-gap-meta",
+                "state": {"task_id": "task_runtime:run-gap-meta"},
+            },
+            "task": {
+                "current_run": {
+                    "evidence": {},
+                    "semantic_explanation": {},
+                }
+            },
+            "data_sources": {"runtime": {}},
+        }
+
+        enriched = service._attach_semantic_gap_learning(
+            response=response,
+            run_context=run_context,
+        )
+
+        trace = dict(
+            ((((enriched.get("task") or {}).get("current_run") or {}).get("semantic_explanation") or {}).get(
+                "continuous_runtime_learning"
+            )
+            or {}
+        )
+        )
+        self.assertEqual(int(trace.get("registro_id") or 0), 41)
+        self.assertEqual(str(trace.get("categoria_brecha") or ""), "consulta_ambigua")
+        self.assertEqual(
+            str((((enriched.get("data_sources") or {}).get("runtime") or {}).get("continuous_runtime_learning") or {}).get("estado_revision") or ""),
+            "nueva",
+        )
+        self.assertEqual(str((task_state_service.updated or {}).get("run_id") or ""), "run-gap-meta")

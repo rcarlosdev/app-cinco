@@ -35,6 +35,9 @@ from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
 from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
     get_groupable_dimensions as get_inventory_groupable_dimensions,
 )
+from apps.ia_dev.services.ai_dictionary_remediation_service import (
+    AIDictionaryRemediationService,
+)
 from apps.ia_dev.domains.inventario_logistica.yaml_agent_loader import (
     load_inventory_agent_yaml,
 )
@@ -395,7 +398,8 @@ class SemanticBusinessResolver:
                     if isinstance(item, dict)
                 ],
                 "synonyms": list(preview.get("dd_sinonimos") or []),
-                "rules": list((preview.get("semantic_metadata") or {}).get("business_rules") or []),
+                "rules": list(preview.get("dd_reglas") or []),
+                "ia_dev_capacidades_columna": list(preview.get("ia_dev_capacidades_columna") or []),
             }
             merged = dict(dictionary_context or {})
             for key, key_builder in (
@@ -428,6 +432,14 @@ class SemanticBusinessResolver:
                 (
                     "rules",
                     lambda row: str((row or {}).get("codigo") or (row or {}).get("nombre") or "").strip().lower(),
+                ),
+                (
+                    "ia_dev_capacidades_columna",
+                    lambda row: (
+                        str((row or {}).get("campo_logico") or "").strip().lower(),
+                        str((row or {}).get("table_name") or "").strip().lower(),
+                        str((row or {}).get("column_name") or "").strip().lower(),
+                    ),
                 ),
             ):
                 merged[key] = self._merge_dictionary_rows(

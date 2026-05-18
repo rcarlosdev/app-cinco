@@ -10,11 +10,16 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     ResolvedQuerySpec,
     StructuredQueryIntent,
 )
+from apps.ia_dev.application.semantic.semantic_capability_registry import (
+    SemanticBindingRequest,
+    SemanticCapabilityRegistry,
+)
 
 from .business_query_semantic_plan import (
     INVENTORY_SEMANTIC_MATRIX,
     InventoryBusinessQueryPlanner,
 )
+from .matcher_semantico_gobernado_inventario import MatcherSemanticoGobernadoInventario
 from .yaml_agent_loader import (
     get_business_concepts,
     get_business_rules,
@@ -65,6 +70,8 @@ class InventorySemanticResolver:
         self.business_concepts = get_business_concepts(self.config)
         self.business_rules = get_business_rules(self.config)
         self.semantic_plan_builder = InventoryBusinessQueryPlanner()
+        self.matcher_gobernado = MatcherSemanticoGobernadoInventario()
+        self.semantic_capability_registry = SemanticCapabilityRegistry()
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -118,7 +125,7 @@ class InventorySemanticResolver:
         return value if re.search(r"[A-Z]", value) and re.search(r"\d", value) else ""
 
     def _extract_code(self, message: str) -> str:
-        match = re.search(r"\bcod(?:igo)?\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
+        match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
         if match:
             return str(match.group(1) or "").strip()
         match = re.search(r"\bmaterial\s+([A-Za-z0-9_-]{2,})\b", str(message or ""), re.IGNORECASE)
@@ -145,6 +152,8 @@ class InventorySemanticResolver:
             match = re.search(r"\bcedula\s+([0-9]{5,15})\b", normalized)
         if not match:
             match = re.search(r"\b(?:empleado|tecnico|movil|mobile)\s+([0-9]{5,15})\b", normalized)
+        if not match and any(token in normalized for token in ("kardex", "historial", "movimientos", "entradas", "salidas")):
+            match = re.search(r"\bpara\s+([0-9]{5,15})\b", normalized)
         return str(match.group(1) or "").strip() if match else ""
 
     def _extract_project(self, message: str) -> str:
@@ -214,6 +223,76 @@ class InventorySemanticResolver:
         return list(dict.fromkeys(matched))
 
     def infer_for_arbitration(self, *, message: str, dictionary_context: dict[str, Any] | None = None) -> dict[str, Any]:
+        coincidencia_gobernada = self.matcher_gobernado.resolver(
+            mensaje=message,
+            contexto_semantico=dictionary_context or {},
+        )
+        if coincidencia_gobernada.get("coincidencia_gobernada"):
+            filtros = dict(coincidencia_gobernada.get("filtros") or {})
+            familias = list(coincidencia_gobernada.get("familias") or [])
+            material_family = "serializados" if familias == ["serializados"] else "materiales"
+            business_concept = ""
+            if coincidencia_gobernada.get("intencion") == "movement_history":
+                business_concept = "kardex_operativo_por_empleado" if filtros.get("cedula") else "kardex_consolidado"
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_document_generation_pending":
+                business_concept = "documentacion_no_habilitada"
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_serial_stock_by_family_grouped_dimension":
+                business_concept = "stock_serializado_por_dimension"
+            else:
+                business_concept = "stock_movil"
+            candidate_fields = ["cedula", "movil", "codigo", "tipo"]
+            candidate_tables = [
+                "logistica_movimientos_entrega",
+                "logistica_movimientos_devolucion",
+                "logistica_movimientos_consumo",
+                "logistica_movimientos_cobro",
+            ]
+            if coincidencia_gobernada.get("intencion") == "movement_history":
+                candidate_fields = ["fecha", "tipo_movimiento", "codigo", "cedula", "movil", "cantidad", "saldo_movimiento"]
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_serial_stock_by_family_grouped_dimension":
+                candidate_fields = [
+                    "familia",
+                    "codigo",
+                    "descripcion",
+                    "movil",
+                    "cedula",
+                    "bodega",
+                    "en_movil",
+                    "en_base",
+                    "cobros",
+                    "saldo",
+                    "seriales_total",
+                ]
+                candidate_tables = [
+                    "logistica_base_seriales",
+                    "base_codigo_seriales",
+                    "cinco_base_de_personal",
+                ]
+            return {
+                "domain": self.RUNTIME_DOMAIN_CODE,
+                "candidate_domain": self.RUNTIME_DOMAIN_CODE,
+                "intent": str(coincidencia_gobernada.get("intencion") or ""),
+                "material_family": material_family,
+                "business_concept": business_concept,
+                "operation": str(coincidencia_gobernada.get("operation") or "detail"),
+                "filters": filtros,
+                "group_by": [str(item or "") for item in list(coincidencia_gobernada.get("group_by") or []) if str(item or "").strip()],
+                "candidate_tables": candidate_tables,
+                "candidate_fields": candidate_fields,
+                "requires_db_validation": True,
+                "should_use_sql_assisted": not bool(coincidencia_gobernada.get("limitaciones")),
+                "requires_business_validation": False,
+                "requires_external_source": bool(coincidencia_gobernada.get("limitaciones")),
+                "requires_threshold_metadata": False,
+                "missing_metadata": [],
+                "implementation_status": "external_source_pending" if coincidencia_gobernada.get("limitaciones") else "ready_for_dictionary_validation",
+                "expected_runtime_flow": "external_source_pending" if coincidencia_gobernada.get("limitaciones") else "sql_assisted",
+                "confidence": 0.94 if not coincidencia_gobernada.get("requiere_aclaracion") else 0.58,
+                "explanation": "Consulta interpretada con matcher semantico gobernado de inventario apoyado en dd_sinonimos y dd_reglas.",
+                "limitations": list(coincidencia_gobernada.get("limitaciones") or []),
+                "governed_match": coincidencia_gobernada,
+            }
+
         normalized = self._normalize(message)
         material_family = self._resolve_material_family(normalized)
         group_by = self._resolve_group_by(normalized)
@@ -672,89 +751,42 @@ class InventorySemanticResolver:
         intent: StructuredQueryIntent,
         semantic_context: dict[str, Any],
     ) -> ResolvedQuerySpec:
-        inference = self.infer_for_arbitration(message=message, dictionary_context=(semantic_context.get("dictionary") or {}))
+        inference = self.infer_for_arbitration(message=message, dictionary_context=semantic_context)
         inferred_filters = dict(inference.get("filters") or {})
         inferred_group_by = list(inference.get("group_by") or [])
         normalized_filters = {**dict(intent.filters or {}), **inferred_filters}
         warnings = list(intent.warnings or [])
+        if isinstance(inference.get("governed_match"), dict) and bool((inference.get("governed_match") or {}).get("requiere_aclaracion")):
+            pregunta_aclaracion = str((inference.get("governed_match") or {}).get("pregunta_aclaracion") or "").strip()
+            if pregunta_aclaracion:
+                warnings.append(pregunta_aclaracion)
         limitations = list(inference.get("limitations") or [])
-
-        template_map = {
-            "traceability_query": "inventory_traceability_by_serial",
-            "risk_detection": "inventory_risk_consumo_movil_sin_validar",
-            "consumption_query": "inventory_consumption_top" if inference.get("operation") == "top" else "inventory_consumption_by_dimension",
-            "transfer_query": "inventory_transfer_destination_not_available"
-            if "bodega_destino" in inferred_group_by
-            else (
-                "inventory_transfer_other_ally"
-                if str(normalized_filters.get("movimiento") or "") == "TRASLADOS_OTRO_ALIADO"
-                else (
-                    "inventory_transfer_warehouse"
-                    if str(normalized_filters.get("movimiento") or "") == "TRASLADO_BODEGA"
-                    else "inventory_transfer_detail"
-                )
-            ),
-            "association_query": "inventory_serial_association_departures",
-            "serial_holder_query": "inventory_serial_by_operational_holder",
-            "stock_balance": "inventory_serial_stock_by_dimension"
-            if str(inference.get("material_family") or "") == "serializados"
-            and set(inferred_group_by or []) <= {"estado", "bodega", "ubicacion", "codigo"}
-            and bool(inferred_group_by)
-            else (
-                "inventory_material_critical_by_employee"
-                if str(inference.get("business_concept") or "") == "materiales_criticos_por_empleado"
-                else (
-                    "inventory_material_stock_mobile"
-                    if str(normalized_filters.get("stock_scope") or "") == "movil"
-                    else (
-                        "inventory_material_stock_by_warehouse"
-                        if str(normalized_filters.get("stock_scope") or "") == "bodega" or "bodega" in inferred_group_by
-                        else "inventory_material_stock_balance"
-                    )
-                )
-            ),
-            "stock_query": "inventory_serial_stock_by_dimension"
-            if str(inference.get("material_family") or "") == "serializados"
-            and set(inferred_group_by or []) <= {"estado", "bodega", "ubicacion", "codigo"}
-            and bool(inferred_group_by)
-            else (
-                "inventory_material_stock_mobile"
-                if str(normalized_filters.get("stock_scope") or "") == "movil"
-                else (
-                    "inventory_material_stock_by_warehouse"
-                    if str(normalized_filters.get("stock_scope") or "") == "bodega" or "bodega" in inferred_group_by
-                    else "inventory_material_stock_balance"
-                )
-            ),
-            "return_query": "inventory_returns_by_dimension",
-            "movement_query": "inventory_entries_by_month" if "mes" in inferred_group_by else "inventory_movement_detail",
-            "movement_history": "inventory_kardex_by_employee"
-            if str(inference.get("business_concept") or "") == "kardex_operativo_por_empleado"
-            else "inventory_kardex_consolidated",
-            "reconciliation_query": "inventory_consumption_billing_operacion_hfc"
-            if str(inference.get("business_concept") or "") == "consumo_vs_facturacion"
-            and str(normalized_filters.get("bodega") or "") == "operacion_hfc"
-            else "inventory_reconciliation_pending_validation",
-            "external_reconciliation_query": "inventory_external_reconciliation_pending",
-            "document_generation": "inventory_document_generation_pending",
-            "report_generation": "inventory_semantic_report",
-            "alert_query": "inventory_alert_semantic_report",
-            "notification_query": "inventory_notification_pending",
-            "assignment_distribution_query": "inventory_assignment_distribution_pending",
-        }
         explicit_template_id = str(intent.template_id or "").strip()
-        resolved_template_id = (
-            explicit_template_id
-            if explicit_template_id.startswith("inventory_")
-            else str(template_map.get(str(inference.get("intent") or ""), "inventory_movement_detail"))
-        )
+        binding_decision = self.semantic_capability_registry.resolve(
+            SemanticBindingRequest(
+                domain=self.RUNTIME_DOMAIN_CODE,
+                message=message,
+                intent=str(inference.get("intent") or intent.operation or ""),
+                normalized_filters=normalized_filters,
+                group_by=inferred_group_by,
+                semantic_context=dict(semantic_context or {}),
+                source_hints={
+                    "template_id": explicit_template_id,
+                    "inventory_inference": dict(inference or {}),
+                    "governed_match": dict(inference.get("governed_match") or {}),
+                },
+            )
+        ).as_dict()
+        resolved_template_id = str(binding_decision.get("template_id") or explicit_template_id or "inventory_movement_detail")
         memory_seed_status = self.semantic_plan_builder.memory_service.ensure_confirmed_rules()
         semantic_plan: BusinessQuerySemanticPlan = self.semantic_plan_builder.build_plan(
             message=message,
             inference=inference,
             template_id=resolved_template_id,
             semantic_context=semantic_context,
+            binding_decision=binding_decision,
         )
+        normalized_filters = dict(binding_decision.get("normalized_filters") or normalized_filters)
         resolved_intent = StructuredQueryIntent(
             raw_query=intent.raw_query,
             domain_code=self.RUNTIME_DOMAIN_CODE,
@@ -775,23 +807,63 @@ class InventorySemanticResolver:
             warnings.append("inventario_stock_pendiente_validacion_db_ai_dictionary")
         semantic_context = dict(semantic_context or {})
         semantic_context["inventory_semantic_inference"] = dict(inference)
+        if isinstance(inference.get("governed_match"), dict):
+            semantic_context["inventory_governed_match"] = dict(inference.get("governed_match") or {})
         semantic_context["inventory_semantic_matrix"] = list(INVENTORY_SEMANTIC_MATRIX)
         semantic_context["business_query_semantic_plan"] = semantic_plan.as_dict()
         semantic_context["inventory_semantic_plan"] = semantic_plan.as_dict()
         semantic_context["semantic_memory_seed"] = dict(memory_seed_status or {})
+        semantic_context["semantic_capability_registry"] = dict(binding_decision or {})
         semantic_context.setdefault("resolved_semantic", {})
         semantic_context["resolved_semantic"]["inventory"] = dict(inference)
         semantic_context["resolved_semantic"]["business_query_semantic_plan"] = semantic_plan.as_dict()
-        semantic_context["resolved_semantic"]["limitations"] = limitations
+        semantic_context["resolved_semantic"]["semantic_capability_registry"] = dict(binding_decision or {})
+        semantic_context["resolved_semantic"]["limitations"] = list(
+            dict.fromkeys([*limitations, *list(semantic_plan.known_limitations or [])])
+        )
         semantic_context["resolved_semantic"]["rules_applied"] = list(semantic_plan.applicable_business_rules or [])
-        semantic_context["resolved_semantic"]["candidate_capability"] = str(semantic_plan.candidate_capability or "")
-        semantic_context["resolved_semantic"]["consulted_sources"] = list(semantic_plan.consulted_sources or [])
+        semantic_context["resolved_semantic"]["candidate_capability"] = str(
+            binding_decision.get("candidate_capability") or semantic_plan.candidate_capability or ""
+        )
+        semantic_context["resolved_semantic"]["consulted_sources"] = list(
+            dict.fromkeys(
+                [
+                    *list(semantic_plan.consulted_sources or []),
+                    *list(binding_decision.get("consulted_metadata") or []),
+                ]
+            )
+        )
         semantic_context["resolved_semantic"]["memory_keys_used"] = list(semantic_plan.memory_keys_used or [])
-        semantic_context["resolved_semantic"]["final_filters"] = dict(semantic_plan.normalized_filters or {})
+        semantic_context["resolved_semantic"]["final_filters"] = dict(binding_decision.get("normalized_filters") or semantic_plan.normalized_filters or {})
         semantic_context["resolved_semantic"]["runtime_flow_hint"] = str(
             inference.get("expected_runtime_flow")
             or ("business_validation_required" if str(resolved_intent.template_id or "").strip() == "inventory_stock_balance_pending_validation" else "sql_assisted")
         )
+        semantic_context["resolved_semantic"]["binding_template_id"] = str(binding_decision.get("template_id") or "")
+        semantic_context["resolved_semantic"]["binding_tool_id"] = str(binding_decision.get("tool_id") or "")
+        semantic_context["resolved_semantic"]["planner_route_hint"] = str(binding_decision.get("planner_route_hint") or "")
+        semantic_context["resolved_semantic"]["response_profile"] = str(binding_decision.get("response_profile") or "")
+        semantic_context["resolved_semantic"]["binding_trace"] = {
+            "source": str(binding_decision.get("source") or ""),
+            "matched_rules": list(binding_decision.get("matched_rules") or []),
+            "confidence": float(binding_decision.get("confidence") or 0.0),
+            "fallback_used": bool(binding_decision.get("fallback_used")),
+            "unresolved_reason": str(binding_decision.get("unresolved_reason") or ""),
+            "legacy_mapping_used": bool(binding_decision.get("legacy_mapping_used")),
+            "reason": str(binding_decision.get("legacy_reason") or ""),
+            "migration_target": str(binding_decision.get("migration_target") or ""),
+            "regla_metadata_usada": list(binding_decision.get("regla_metadata_usada") or []),
+            "fuente_dd": list(binding_decision.get("fuente_dd") or []),
+            "fallback_sombreado_usado": bool(binding_decision.get("fallback_sombreado_usado")),
+            "regla_legacy_detectada": bool(binding_decision.get("regla_legacy_detectada")),
+            "regla_migrada": bool(binding_decision.get("regla_migrada")),
+            "paquete_capacidad_usado": str(binding_decision.get("paquete_capacidad_usado") or ""),
+            "version_paquete": str(binding_decision.get("version_paquete") or ""),
+            "capacidades_declaradas": list(binding_decision.get("capacidades_declaradas") or []),
+            "reglas_declaradas": list(binding_decision.get("reglas_declaradas") or []),
+            "perfiles_respuesta": list(binding_decision.get("perfiles_respuesta") or []),
+            "evaluaciones_asociadas": list(binding_decision.get("evaluaciones_asociadas") or []),
+        }
         semantic_context["material_family"] = str(inference.get("material_family") or "")
         semantic_context["business_concept"] = str(inference.get("business_concept") or "")
 

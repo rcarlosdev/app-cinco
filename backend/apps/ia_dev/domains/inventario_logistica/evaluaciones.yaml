@@ -1,0 +1,18 @@
+evaluaciones:
+  - id: inventario_runtime_eval_v1
+    suite_python: apps.ia_dev.application.runtime.inventario_runtime_eval_suite.run_inventory_runtime_eval_suite
+    descripcion: Suite real P5 anti-hardcode para inventario_logistica.
+    casos_cubiertos:
+      - stock_cuadrilla_asignado
+      - stock_movil_muestrame
+      - stock_inventario_operativo_con_empleados
+      - stock_brigada_asignado
+      - stock_materiales_movil
+      - stock_tecnico_ferretero
+      - kardex_tecnico_movimientos
+      - kardex_tecnico_entradas_salidas
+      - kardex_codigo_para_empleado
+      - clarificacion_nombre_propio
+      - limitacion_actas_sap
+      - resultado_vacio_stock_tecnico
+      - fallback_sombreado_controlado

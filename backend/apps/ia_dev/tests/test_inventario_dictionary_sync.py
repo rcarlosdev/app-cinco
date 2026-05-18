@@ -150,7 +150,32 @@ class InventarioDictionarySyncTests(SimpleTestCase):
         self.assertGreater(int(summary.get("dd_campos_preview_count") or 0), 0)
         self.assertGreater(int(summary.get("dd_relaciones_preview_count") or 0), 0)
         self.assertGreater(int(summary.get("dd_sinonimos_preview_count") or 0), 0)
+        self.assertGreater(int(summary.get("dd_reglas_preview_count") or 0), 0)
+        self.assertGreater(int(summary.get("ia_dev_capacidades_columna_preview_count") or 0), 0)
         self.assertNotIn("apply_result", summary)
+
+    def test_preview_includes_p3b_governed_rules_and_column_capabilities(self):
+        service = InventoryDictionarySyncService(
+            audit_service=InventoryDictionaryAuditService(inspector_class=_InspectorCompleto)
+        )
+
+        preview = service.build_preview()
+
+        rule_codes = {
+            str(item.get("codigo") or item.get("rule_name") or "")
+            for item in list(preview.get("dd_reglas") or [])
+            if isinstance(item, dict)
+        }
+        capability_fields = {
+            str(item.get("campo_logico") or "")
+            for item in list(preview.get("ia_dev_capacidades_columna") or [])
+            if isinstance(item, dict)
+        }
+
+        self.assertIn("inventario.route.kardex_employee", rule_codes)
+        self.assertIn("inventario.scope.dual_block_unspecified_family", rule_codes)
+        self.assertIn("cedula", capability_fields)
+        self.assertIn("movil", capability_fields)
 
     def test_audit_reports_missing_columns_as_warning_when_allowed(self):
         audit = InventoryDictionaryAuditService(inspector_class=_InspectorCompleto)

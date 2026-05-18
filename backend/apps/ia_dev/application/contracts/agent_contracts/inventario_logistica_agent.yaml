@@ -34,6 +34,15 @@ agent_contract:
       optional_filters: [movil, codigo]
       tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro]
       validation_rules: ["dictionary_table_mapping_required"]
+    - id: inventory_stock_by_dimension
+      description: Stock balance of materials grouped by business dimension.
+      examples: ["saldo por movil del codigo 1025507", "inventario de conector rj 45 por cuadrilla"]
+      capability: inventory_stock_balance_by_material_dimension
+      strategy: sql_assisted
+      required_filters: []
+      optional_filters: [codigo, descripcion, tipo, bodega]
+      tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, bd_c3nc4s1s.cinco_base_de_personal]
+      validation_rules: ["dictionary_table_mapping_required"]
     - id: inventory_traceability
       description: Traceability by serial.
       examples: ["trazabilidad del serial ABC123"]
@@ -106,6 +115,16 @@ agent_contract:
       planner_required: true
       handler_required: false
       allowed_tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_stock_balance_by_material_dimension
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, bd_c3nc4s1s.cinco_base_de_personal]
       blocked_tables: []
       response_shape: table
       rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED

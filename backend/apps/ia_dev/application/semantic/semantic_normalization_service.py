@@ -14,7 +14,8 @@ from apps.ia_dev.application.taxonomia_dominios import (
     dominio_desde_capacidad,
     normalizar_codigo_dominio,
 )
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 
 
@@ -122,8 +123,10 @@ class SemanticNormalizationService:
         self,
         *,
         llm_resolver: Callable[..., dict[str, Any]] | None = None,
+        gateway: OpenAIGatewayService | None = None,
     ):
         self._llm_resolver = llm_resolver
+        self.gateway = gateway or OpenAIGatewayService()
 
     def normalize(
         self,
@@ -957,9 +960,7 @@ class SemanticNormalizationService:
         if not api_key:
             return {"ok": False, "error": "missing_openai_api_key"}
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=api_key)
+            del api_key
             prompt_payload = {
                 "raw_query": raw_query,
                 "normalized_query": normalized_query,
@@ -967,9 +968,15 @@ class SemanticNormalizationService:
                 "mini_context": mini_context,
                 "candidate_entities": candidate_entities,
             }
-            response = client.responses.create(
-                model=resolve_model_name("semantic_normalization_llm"),
-                input=[
+            response = self.gateway.create(
+                OpenAIGatewayRequest(
+                    component="semantic_normalization_service",
+                    model_route="semantic_normalization_llm",
+                    timeout_seconds=30,
+                    retries=1,
+                    trace_metadata={"flow": "semantic_normalization"},
+                    metadata={"llm_mode": "normalization"},
+                    input=[
                     {
                         "role": "system",
                         "content": self._semantic_normalization_system_prompt(),
@@ -978,11 +985,12 @@ class SemanticNormalizationService:
                         "role": "user",
                         "content": json.dumps(prompt_payload, ensure_ascii=False),
                     },
-                ],
+                    ],
+                )
             )
-            text = str(getattr(response, "output_text", "") or "").strip()
+            text = response.output_text
             payload = self._safe_json(text)
-            return {"ok": True, **payload}
+            return {"ok": True, "gateway_meta": dict(response.metadata or {}), **payload}
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}:{exc}"}
 

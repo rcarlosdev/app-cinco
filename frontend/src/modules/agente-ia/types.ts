@@ -2,6 +2,7 @@ import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types"
 import type {
   IADevChartPayload,
   IADevChatResponse,
+  IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 import type {
   NormalizedAssistantPayload,
@@ -9,7 +10,43 @@ import type {
   NormalizedTable,
 } from "@/modules/programacion/ia-dev/chat/types";
 
-export type DashboardWidgetType = "kpi" | "chart" | "table" | "insights";
+export type DashboardWidgetType =
+  | "kpi"
+  | "chart"
+  | "table"
+  | "insights"
+  | "semantic_explanation";
+
+export type DashboardTaskStatusTone =
+  | "neutral"
+  | "success"
+  | "warning"
+  | "danger"
+  | "info";
+
+export type DashboardLifecycleStage =
+  | "idle"
+  | "preparing"
+  | "routing"
+  | "planning"
+  | "executing_tools"
+  | "waiting_approval"
+  | "streaming_evidence"
+  | "completed"
+  | "failed"
+  | "partial";
+
+export type DashboardSupportItem = {
+  key: string;
+  label: string;
+  detail?: string;
+};
+
+export type DashboardTimelineStep = {
+  step: string;
+  state: string;
+  detail?: string;
+};
 
 export type DashboardTableTab = {
   id: string;
@@ -50,6 +87,14 @@ export type DashboardWidget =
       data: {
         items: string[];
       };
+    }
+  | {
+      id: string;
+      type: "semantic_explanation";
+      title: string;
+      data: {
+        explanation: IADevSemanticExplanation;
+      };
     };
 
 export type DashboardSnapshot = {
@@ -57,10 +102,31 @@ export type DashboardSnapshot = {
   response: Partial<IADevChatResponse> | null;
   payload: NormalizedAssistantPayload | null;
   widgets: DashboardWidget[];
+  messageId: string | null;
+  messageCreatedAt: number | null;
   summary: string;
+  executiveSummary: string;
   intent: string;
   domain: string;
   selectedAgent: string;
+  taskStatus: string;
+  taskStatusLabel: string;
+  taskStatusTone: DashboardTaskStatusTone;
+  taskPreparationLabel: string;
+  taskTimeline: DashboardTimelineStep[];
+  toolsUsed: DashboardSupportItem[];
+  capabilitiesUsed: DashboardSupportItem[];
+  approvals: DashboardSupportItem[];
+  backgroundRuns: DashboardSupportItem[];
+  clarificationQuestion: string;
+  limitations: string[];
+  evidenceSummary: Record<string, unknown>;
+  validationSummary: Record<string, unknown>;
   isLoading: boolean;
+  isTerminal: boolean;
   hasStructuredContent: boolean;
+  semanticExplanation: IADevSemanticExplanation | null;
+  lifecycleStage: DashboardLifecycleStage;
+  lifecycleLabel: string;
+  stageDetail: string;
 };

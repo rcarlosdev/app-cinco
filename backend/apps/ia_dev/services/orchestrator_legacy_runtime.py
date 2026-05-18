@@ -12,6 +12,8 @@ from apps.ia_dev.application.semantic.cause_diagnostics_service import CauseDiag
 from apps.ia_dev.application.runtime.service_runtime_bootstrap import (
     apply_service_runtime_bootstrap,
 )
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 
 from .attendance_period_resolver_service import AttendancePeriodResolverService
@@ -53,6 +55,7 @@ class LegacyOrchestratorRuntime:
             "IA_DEV_USE_OPENAI_FOLLOWUPS", "1"
         ).strip().lower() in ("1", "true", "yes", "on")
         self.followup_model = resolve_model_name("followups")
+        self.openai_gateway = OpenAIGatewayService()
         self._last_openai_usage: dict | None = None
         self.cause_diagnostics_service = CauseDiagnosticsService()
         self.attendance_period_resolver = AttendancePeriodResolverService(
@@ -2028,9 +2031,6 @@ class LegacyOrchestratorRuntime:
             return None
 
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=openai_api_key)
             today_iso = date.today().isoformat()
             history_text = self._format_recent_messages_for_prompt(recent_messages or [])
             context_period = ""
@@ -2040,9 +2040,15 @@ class LegacyOrchestratorRuntime:
                 if start and end:
                     context_period = f"Last period in session: {start} to {end}"
 
-            response = client.responses.create(
-                model=self.period_model,
-                input=[
+            response = self.openai_gateway.create(
+                OpenAIGatewayRequest(
+                    component="legacy_orchestrator_runtime.period_resolution",
+                    model=self.period_model,
+                    timeout_seconds=20,
+                    retries=1,
+                    trace_metadata={"flow": "legacy_period_resolution"},
+                    metadata={"has_session_context": bool(context_period)},
+                    input=[
                     {
                         "role": "system",
                         "content": (
@@ -2065,11 +2071,12 @@ class LegacyOrchestratorRuntime:
                         ),
                     },
                     {"role": "user", "content": message},
-                ],
+                    ],
+                )
             )
-            self._accumulate_openai_usage(self._extract_usage(response))
+            self._accumulate_openai_usage(response.usage)
 
-            text = (getattr(response, "output_text", "") or "").strip()
+            text = response.output_text
             if not text:
                 return None
             json_match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -2252,13 +2259,15 @@ class LegacyOrchestratorRuntime:
             return None
 
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=openai_api_key)
             history_text = self._format_recent_messages_for_prompt(recent_messages or [])
-            response = client.responses.create(
-                model=self.general_model,
-                input=[
+            response = self.openai_gateway.create(
+                OpenAIGatewayRequest(
+                    component="legacy_orchestrator_runtime.general_reply",
+                    model=self.general_model,
+                    timeout_seconds=20,
+                    retries=1,
+                    trace_metadata={"flow": "legacy_general_reply"},
+                    input=[
                     {
                         "role": "system",
                         "content": (
@@ -2277,10 +2286,11 @@ class LegacyOrchestratorRuntime:
                         ),
                     },
                     {"role": "user", "content": message},
-                ],
+                    ],
+                )
             )
-            self._accumulate_openai_usage(self._extract_usage(response))
-            text = (getattr(response, "output_text", "") or "").strip()
+            self._accumulate_openai_usage(response.usage)
+            text = response.output_text
             return text or None
         except Exception:
             logger.exception("General response generation failed")
@@ -2304,13 +2314,16 @@ class LegacyOrchestratorRuntime:
             return "Si quieres, tambien puedo mostrarlo dia a dia (ausentismo por ausentismo)."
 
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=openai_api_key)
             history_text = self._format_recent_messages_for_prompt(recent_messages or [])
-            response = client.responses.create(
-                model=self.followup_model,
-                input=[
+            response = self.openai_gateway.create(
+                OpenAIGatewayRequest(
+                    component="legacy_orchestrator_runtime.contextual_followup",
+                    model=self.followup_model,
+                    timeout_seconds=20,
+                    retries=1,
+                    trace_metadata={"flow": "legacy_contextual_followup"},
+                    metadata={"domain": str(domain or ""), "intent": str(intent or "")},
+                    input=[
                     {
                         "role": "system",
                         "content": (
@@ -2332,10 +2345,11 @@ class LegacyOrchestratorRuntime:
                         ),
                     },
                     {"role": "user", "content": message},
-                ],
+                    ],
+                )
             )
-            self._accumulate_openai_usage(self._extract_usage(response))
-            text = (getattr(response, "output_text", "") or "").strip()
+            self._accumulate_openai_usage(response.usage)
+            text = response.output_text
             if not text:
                 return None
             json_match = re.search(r"\{.*\}", text, re.DOTALL)

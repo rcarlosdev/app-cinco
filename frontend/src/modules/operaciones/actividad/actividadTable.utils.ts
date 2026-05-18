@@ -7,8 +7,8 @@ export const actividadCsvColumns: CsvColumn<ActividadFormData>[] = [
     accessor: (row) => row.id,
   },
   {
-    header: "OT",
-    accessor: (row) => row.ot,
+    header: "OTs",
+    accessor: (row) => row.ots?.join(", "),
   },
   {
     header: "Estado",

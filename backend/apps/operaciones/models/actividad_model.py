@@ -2,6 +2,30 @@ from django.db import models
 from django.utils import timezone
 
 
+def normalize_ot_values(values):
+    if values is None:
+        return []
+
+    if isinstance(values, str):
+        raw_values = values.replace(",", "\n").split("\n")
+    else:
+        raw_values = values
+
+    normalized = []
+    seen = set()
+
+    for value in raw_values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        normalized.append(text)
+        seen.add(text)
+
+    return normalized
+
+
 class Actividad(models.Model):
     ESTADO_CHOICES = [
         ('pendiente', 'Pendiente'),
@@ -12,7 +36,7 @@ class Actividad(models.Model):
         ('reprogramada', 'Reprogramada'),
     ]
 
-    ot = models.CharField(max_length=100, unique=True)
+    ot = models.CharField(max_length=100, blank=True, default="")
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='pendiente')
 
     responsable_id = models.IntegerField()
@@ -34,6 +58,37 @@ class Actividad(models.Model):
     class Meta:
         db_table = 'operaciones_actividades'
         ordering = ['-id']
+
+    @property
+    def ots_list(self):
+        relaciones = getattr(self, '_prefetched_objects_cache', {}).get('ot_relaciones')
+        if relaciones is not None:
+            return [rel.ot for rel in relaciones if rel.is_active]
+        relaciones_activas = list(self.ot_relaciones.filter(is_active=True).values_list('ot', flat=True))
+        if relaciones_activas:
+            return relaciones_activas
+        return normalize_ot_values(self.ot)
+
+
+class ActividadOT(models.Model):
+    actividad = models.ForeignKey(
+        Actividad,
+        on_delete=models.CASCADE,
+        related_name='ot_relaciones'
+    )
+    ot = models.CharField(max_length=100, db_index=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'operaciones_actividad_ots'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['ot', 'is_active']),
+        ]
 
 
 class ActividadResponsableSnapshot(models.Model):

@@ -2,6 +2,7 @@ import type {
   IADevAction,
   IADevChartPayload,
   IADevChatResponse,
+  IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 import type {
   NormalizedAssistantPayload,
@@ -182,6 +183,30 @@ const normalizeTable = (value: unknown): NormalizedTable | null => {
   };
 };
 
+const normalizeColumnKey = (value: string) =>
+  value.trim().toLowerCase().replace(/\s+/g, "_");
+
+const hasRequiredColumns = (
+  table: NormalizedTable,
+  requiredColumns: readonly string[],
+) => {
+  const availableColumns = new Set(table.columns.map(normalizeColumnKey));
+  return requiredColumns.every((column) => availableColumns.has(column));
+};
+
+const isTransactionalInventoryKardexTable = (table: NormalizedTable | null) => {
+  if (!table || table.rows.length === 0) return false;
+  return hasRequiredColumns(table, [
+    "fecha",
+    "tipo_movimiento",
+    "codigo",
+    "cedula",
+    "cantidad",
+    "efecto",
+    "saldo_movimiento",
+  ]);
+};
+
 const rebuildChartFromTable = (
   table: NormalizedTable | null,
   title: string,
@@ -293,6 +318,10 @@ export const normalizeChatPayload = (
   const data = asObject(response?.data) || {};
   const envelope = asObject(response?.response_envelope) || {};
   const runtime = asObject(asObject(response?.data_sources)?.runtime) || {};
+  const semanticExplanation =
+    (asObject(response?.task?.current_run?.semantic_explanation) as
+      | IADevSemanticExplanation
+      | null) || null;
 
   const kpis = normalizeKpis(
     data.kpis ?? (response as Record<string, unknown> | undefined)?.kpis,
@@ -349,9 +378,10 @@ export const normalizeChatPayload = (
     (summary.length > 0 ? summary.slice(0, 72) : "Analisis de datos");
 
   const chartFromActions = getChartFromActions(response?.actions);
-  const rebuiltChart =
-    rebuildChartFromTable(table, title, meta) ||
-    rebuildChartFromLabelsSeries(labels, series, title, meta);
+  const rebuiltChart = isTransactionalInventoryKardexTable(table)
+    ? null
+    : rebuildChartFromTable(table, title, meta) ||
+      rebuildChartFromLabelsSeries(labels, series, title, meta);
 
   const charts = dedupeCharts([
     rawChart,
@@ -368,7 +398,8 @@ export const normalizeChatPayload = (
     extraTables.length ||
     chart ||
     charts.length ||
-    (labels.length && series.length),
+    (labels.length && series.length) ||
+    semanticExplanation,
   );
 
   const kind: NormalizedAssistantPayload["kind"] =
@@ -414,5 +445,6 @@ export const normalizeChatPayload = (
       asString(envelope.progress_source) ||
       asString(runtime.progress_source) ||
       "backend",
+    semanticExplanation,
   };
 };

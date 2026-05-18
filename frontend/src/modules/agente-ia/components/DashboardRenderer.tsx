@@ -30,6 +30,8 @@ const TableWidget = ({ widget }: RendererProps) =>
 const InsightWidget = ({ widget }: RendererProps) =>
   widget.type === "insights" ? <InsightCards items={widget.data.items} /> : null;
 
+const EmptyWidget = () => null;
+
 const widgetRegistry: Record<
   DashboardWidget["type"],
   ComponentType<RendererProps>
@@ -38,6 +40,7 @@ const widgetRegistry: Record<
   chart: ChartWidget,
   table: TableWidget,
   insights: InsightWidget,
+  semantic_explanation: EmptyWidget,
 };
 
 type DashboardRendererProps = {
@@ -94,6 +97,8 @@ const DashboardRenderer = ({
               ? AreaChart
               : widget.type === "table"
                 ? Table2
+                : widget.type === "semantic_explanation"
+                  ? WandSparkles
                 : BarChart3;
 
         return (

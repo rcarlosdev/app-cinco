@@ -1,0 +1,210 @@
+nombre_paquete: inventario_logistica
+dominio: inventario_logistica
+version: 1.0.0
+descripcion: >
+  Capability Pack empresarial para incorporar procesos operativos de inventario y logistica
+  sobre metadata gobernada, capabilities declaradas y respuesta evidence-first.
+procesos_operativos:
+  - inventario operativo por tecnico, empleado, movil, cuadrilla o brigada
+  - inventario de materiales y ferretero
+  - inventario serializado de equipos y CPE
+  - kardex y movimientos por empleado o codigo
+  - limitaciones documentales SAP, actas y documentos no habilitados
+entidades:
+  - cedula
+  - movil
+  - codigo
+  - serial
+  - bodega
+fuentes_metadata_gobernada:
+  - ai_dictionary.dd_sinonimos
+  - ai_dictionary.dd_reglas
+  - ai_dictionary.ia_dev_capacidades_columna
+limitaciones_declaradas:
+  - documentos_sap_y_actas_no_habilitados
+  - missing_physical_column:bodega_destino
+  - serializados_employee_kardex_not_available
+  - result_set_empty
+  - aclaracion_portador_requerida
+  - scope_required:operacion_hfc
+capacidades:
+  - capability_id: inventory_stock_balance_by_mobile
+    template_id: inventory_material_stock_mobile
+    planner_route_hint: inventory.material_stock.mobile
+    response_profile: inventory.stock.mobile.detail
+    tools:
+      - inventory_stock_balance_by_mobile
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.stock_balance_holder
+      - inventario.scope.dual_block_unspecified_family
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+      - aclaracion_portador_requerida
+  - capability_id: inventory_stock_balance_by_material_dimension
+    template_id: inventory_material_stock_grouped_dimension
+    planner_route_hint: inventory.material_stock.dimension
+    response_profile: inventory.stock.dimension.summary
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.stock_balance_material_grouped_dimension
+      - inventario.metric.stock_include_zero_negative
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_serial_stock_by_family_grouped_dimension
+    template_id: inventory_serial_stock_by_family_grouped_dimension
+    planner_route_hint: inventory.serial_stock.family_dimension
+    response_profile: inventory.serial.stock.dimension.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.serial_stock_family_grouped_dimension
+      - inventario.metric.serial_count_only
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_stock_balance_by_warehouse
+    template_id: inventory_material_stock_by_warehouse
+    planner_route_hint: inventory.material_stock.warehouse
+    response_profile: inventory.stock.warehouse.detail
+    tools:
+      - inventory_stock_balance_by_warehouse
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.metric.stock_include_zero_negative
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_stock_balance
+    template_id: inventory_material_stock_balance
+    planner_route_hint: inventory.material_stock.balance
+    response_profile: inventory.stock.balance.summary
+    tools:
+      - inventory_stock_balance
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.metric.stock_include_zero_negative
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_kardex_by_employee
+    template_id: inventory_kardex_by_employee
+    planner_route_hint: inventory.kardex.employee
+    response_profile: inventory.kardex.employee.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.kardex_employee
+      - inventario.kardex.signos_operativos
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - serializados_employee_kardex_not_available
+      - result_set_empty
+  - capability_id: inventory_kardex_consolidated
+    template_id: inventory_kardex_consolidated
+    planner_route_hint: inventory.kardex.consolidated
+    response_profile: inventory.kardex.consolidated.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.kardex_codigo
+      - inventario.kardex.signos_operativos
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_serial_by_operational_holder
+    template_id: inventory_serial_by_operational_holder
+    planner_route_hint: inventory.serial.holder
+    response_profile: inventory.serial.holder.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.serial_holder
+      - inventario.metric.serial_count_only
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_document_generation_pending
+    template_id: inventory_document_generation_pending
+    planner_route_hint: inventory.document_generation.pending
+    response_profile: inventory.document_generation.pending
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: blocked_external_pending
+    reglas:
+      - inventario.limit.document_generation_pending
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - documentos_sap_y_actas_no_habilitados
+  - capability_id: inventory_transfer_destination_not_available
+    template_id: inventory_transfer_destination_not_available
+    planner_route_hint: inventory.transfer.destination_unresolved
+    response_profile: inventory.transfer.destination.blocked
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: blocked_external_pending
+    reglas:
+      - inventario.limit.transfer_destination_missing_metadata
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - missing_physical_column:bodega_destino
+  - capability_id: inventory_traceability_by_serial
+    template_id: inventory_traceability_by_serial
+    planner_route_hint: inventory.traceability.serial
+    response_profile: inventory.traceability.serial.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.metric.serial_count_only
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_transfer_warehouse
+    template_id: inventory_transfer_warehouse
+    planner_route_hint: inventory.transfer.warehouse
+    response_profile: inventory.transfer.warehouse.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.transfer_warehouse
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_transfer_other_ally
+    template_id: inventory_transfer_other_ally
+    planner_route_hint: inventory.transfer.other_ally
+    response_profile: inventory.transfer.other_ally.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.transfer_other_ally
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty

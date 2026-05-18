@@ -5,10 +5,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from apps.ia_dev.application.delegation.domain_context_loader import DomainContextLoader
+from apps.ia_dev.application.runtime.runtime_hardening_service import RuntimeHardeningService
+from apps.ia_dev.application.runtime.semantic_gap_registry_service import SemanticGapRegistryService
+from apps.ia_dev.application.runtime.semantic_gap_review_service import SemanticGapReviewService
 from apps.ia_dev.application.runtime.functional_validation_suite import (
     ValidationCase,
     build_functional_validation_cases,
 )
+from apps.ia_dev.application.workflow.task_state_service import TaskStateService
 from apps.ia_dev.services.ai_dictionary_deduplication_service import (
     AIDictionaryDeduplicationService,
 )
@@ -28,6 +32,10 @@ class RuntimeGovernanceService:
         context_loader: DomainContextLoader | None = None,
         deduplication_service: AIDictionaryDeduplicationService | None = None,
         sql_store: IADevSqlStore | None = None,
+        task_state_service: TaskStateService | None = None,
+        runtime_hardening_service: RuntimeHardeningService | None = None,
+        semantic_gap_registry_service: SemanticGapRegistryService | None = None,
+        semantic_gap_review_service: SemanticGapReviewService | None = None,
     ) -> None:
         self.observability_service = observability_service or ObservabilityService()
         self.dictionary_service = dictionary_service or DictionaryToolService()
@@ -36,6 +44,14 @@ class RuntimeGovernanceService:
             context_loader=self.context_loader,
         )
         self.sql_store = sql_store or IADevSqlStore()
+        self.task_state_service = task_state_service or TaskStateService()
+        self.runtime_hardening_service = runtime_hardening_service or RuntimeHardeningService()
+        self.semantic_gap_registry_service = (
+            semantic_gap_registry_service or SemanticGapRegistryService()
+        )
+        self.semantic_gap_review_service = semantic_gap_review_service or SemanticGapReviewService(
+            repo=self.semantic_gap_registry_service.repo,
+        )
 
     def build_monitor_summary(self, *, domain: str, days: int) -> dict[str, Any]:
         normalized_domain = str(domain or "").strip().lower() or "ausentismo"
@@ -271,6 +287,215 @@ class RuntimeGovernanceService:
             "report": report,
         }
 
+    def build_runtime_operations_summary(
+        self,
+        *,
+        limit: int = 100,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit), 500))
+        normalized_status = str(status or "").strip().lower() or None
+        workflows = list(self.task_state_service.list(status=normalized_status, limit=safe_limit) or [])
+
+        status_counter = Counter()
+        domain_counter = Counter()
+        background_counter = Counter()
+        approval_role_counter = Counter()
+        recent_runs: list[dict[str, Any]] = []
+        alerts: list[dict[str, Any]] = []
+
+        approval_pending_count = 0
+        approval_overdue_count = 0
+        background_active_count = 0
+        background_failed_count = 0
+        dead_letter_count = 0
+        tool_call_total = 0
+        retry_total = 0
+
+        now = datetime.now(timezone.utc)
+
+        for workflow in workflows:
+            state = dict((workflow or {}).get("state") or {})
+            runtime_metrics = dict(state.get("runtime_metrics") or {})
+            background = dict(state.get("background") or {})
+            approvals = [
+                dict(item)
+                for item in list(state.get("approvals") or [])
+                if isinstance(item, dict)
+            ]
+            current_status = str(
+                state.get("task_status") or workflow.get("status") or ""
+            ).strip().lower() or "unknown"
+            domain = str(state.get("detected_domain") or "").strip().lower() or "unknown"
+            background_status = str(background.get("run_status") or "").strip().lower()
+            retry_count = int(workflow.get("retry_count") or 0)
+            dead_lettered = bool(dict(state.get("dead_letter") or {}).get("dead_lettered"))
+            pending_approvals = [
+                approval
+                for approval in approvals
+                if str(approval.get("approval_status") or "").strip().lower() == "awaiting_approval"
+            ]
+
+            status_counter[current_status] += 1
+            domain_counter[domain] += 1
+            if background_status:
+                background_counter[background_status] += 1
+            for approval in approvals:
+                required_role = str(approval.get("required_role") or "").strip().lower()
+                if required_role:
+                    approval_role_counter[required_role] += 1
+
+            approval_pending_count += len(pending_approvals)
+            tool_call_total += int(runtime_metrics.get("tool_call_count") or 0)
+            retry_total += retry_count
+
+            if dead_lettered:
+                dead_letter_count += 1
+            if background_status in {"queued", "running", "awaiting_approval", "paused", "resumed"}:
+                background_active_count += 1
+            if background_status in {"failed", "expired", "cancelled"}:
+                background_failed_count += 1
+
+            for approval in pending_approvals:
+                expires_at = self._parse_datetime(approval.get("expires_at"))
+                if expires_at and expires_at < now:
+                    approval_overdue_count += 1
+
+            recent_runs.append(
+                {
+                    "run_id": str(state.get("run_id") or ""),
+                    "task_id": str(state.get("task_id") or ""),
+                    "status": current_status,
+                    "domain": domain,
+                    "updated_at": int(workflow.get("updated_at") or 0),
+                    "retry_count": retry_count,
+                    "tool_call_count": int(runtime_metrics.get("tool_call_count") or 0),
+                    "approval_pending_count": len(pending_approvals),
+                    "background_status": background_status,
+                    "dead_lettered": dead_lettered,
+                    "correlation_id": str((dict(state.get("correlation") or {})).get("correlation_id") or ""),
+                }
+            )
+
+            alert_reason = ""
+            if dead_lettered:
+                alert_reason = "dead_lettered"
+            elif background_status in {"failed", "expired"}:
+                alert_reason = f"background_{background_status}"
+            elif any(self._parse_datetime(item.get("expires_at")) and self._parse_datetime(item.get("expires_at")) < now for item in pending_approvals):
+                alert_reason = "approval_overdue"
+            elif current_status == "awaiting_approval" and pending_approvals:
+                alert_reason = "awaiting_approval"
+            if alert_reason:
+                alerts.append(
+                    {
+                        "run_id": str(state.get("run_id") or ""),
+                        "task_id": str(state.get("task_id") or ""),
+                        "status": current_status,
+                        "domain": domain,
+                        "reason": alert_reason,
+                        "updated_at": int(workflow.get("updated_at") or 0),
+                    }
+                )
+
+        recent_runs.sort(key=lambda item: int(item.get("updated_at") or 0), reverse=True)
+        alerts.sort(key=lambda item: int(item.get("updated_at") or 0), reverse=True)
+        total = len(workflows)
+        return {
+            "generated_at": now.isoformat(),
+            "sample_size": total,
+            "filters": {
+                "status": normalized_status,
+                "limit": safe_limit,
+            },
+            "totals": {
+                "tasks": total,
+                "approval_pending_count": approval_pending_count,
+                "approval_overdue_count": approval_overdue_count,
+                "background_active_count": background_active_count,
+                "background_failed_count": background_failed_count,
+                "dead_letter_count": dead_letter_count,
+                "retry_count": retry_total,
+                "avg_tool_calls_per_run": round((float(tool_call_total) / float(total)), 2) if total else 0.0,
+            },
+            "statuses": self._top_counter(status_counter, label="status"),
+            "domains": self._top_counter(domain_counter, label="domain"),
+            "background_statuses": self._top_counter(background_counter, label="background_status"),
+            "approval_roles": self._top_counter(approval_role_counter, label="role"),
+            "alerts": alerts[:20],
+            "recent_runs": recent_runs[:20],
+            "continuous_runtime_learning": self.semantic_gap_registry_service.build_operations_snapshot(
+                limit=min(10, safe_limit)
+            ),
+            "gestion_brechas_semanticas": self.semantic_gap_review_service.build_operations_snapshot(
+                limit=min(20, safe_limit)
+            ),
+        }
+
+    def build_task_trace_explorer(
+        self,
+        *,
+        run_id: str | None = None,
+        resume_token: str | None = None,
+        background_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        workflow = self._find_task_workflow(
+            run_id=run_id,
+            resume_token=resume_token,
+            background_run_id=background_run_id,
+        )
+        if not workflow:
+            return None
+
+        state = dict((workflow or {}).get("state") or {})
+        traces = {
+            "tool_execution_trace": self._sanitize_trace_items(state.get("tool_execution_trace"), limit=10),
+            "agent_trace": self._sanitize_trace_items(state.get("agent_trace"), limit=10),
+            "handoff_trace": self._sanitize_trace_items(state.get("handoff_trace"), limit=10),
+            "approval_trace": self._sanitize_trace_items(state.get("approval_trace"), limit=10),
+            "background_trace": self._sanitize_trace_items(state.get("background_trace"), limit=10),
+        }
+        trace_counts = {
+            key: len(list(state.get(key) or []))
+            for key in traces.keys()
+        }
+        checkpoints = self._sanitize_trace_items(state.get("checkpoints"), limit=10)
+        history_tail = self._sanitize_trace_items(state.get("history"), limit=10)
+        background = self.runtime_hardening_service.sanitize_payload(dict(state.get("background") or {}))
+        approvals = self.runtime_hardening_service.sanitize_payload(list(state.get("approvals") or []))
+
+        return {
+            "task": {
+                "run_id": str(state.get("run_id") or ""),
+                "task_id": str(state.get("task_id") or ""),
+                "status": str(state.get("task_status") or workflow.get("status") or ""),
+                "domain": str(state.get("detected_domain") or ""),
+                "workflow_key": str(workflow.get("workflow_key") or ""),
+                "updated_at": int(workflow.get("updated_at") or 0),
+                "created_at": int(workflow.get("created_at") or 0),
+                "retry_count": int(workflow.get("retry_count") or 0),
+                "last_error": str(workflow.get("last_error") or ""),
+            },
+            "correlation": self.runtime_hardening_service.sanitize_payload(
+                dict(state.get("correlation") or {})
+            ),
+            "governance": self.runtime_hardening_service.sanitize_payload(
+                dict(state.get("governance") or {})
+            ),
+            "runtime_metrics": self.runtime_hardening_service.sanitize_payload(
+                dict(state.get("runtime_metrics") or {})
+            ),
+            "background": background,
+            "approvals": approvals,
+            "dead_letter": self.runtime_hardening_service.sanitize_payload(
+                dict(state.get("dead_letter") or {})
+            ),
+            "trace_counts": trace_counts,
+            "traces": traces,
+            "checkpoints": checkpoints,
+            "history_tail": history_tail,
+        }
+
     def _resolve_fix_cutoff(
         self,
         *,
@@ -287,6 +512,43 @@ class RuntimeGovernanceService:
         if fix_cutoff > 0:
             return fix_cutoff
         return int(self.PHASE9_LAST_FIX_AT.timestamp())
+
+    def _find_task_workflow(
+        self,
+        *,
+        run_id: str | None,
+        resume_token: str | None,
+        background_run_id: str | None,
+    ) -> dict[str, Any] | None:
+        if str(run_id or "").strip():
+            return self.task_state_service.get(run_id=str(run_id or "").strip())
+        if str(resume_token or "").strip():
+            return self.task_state_service.find_by_resume_token(str(resume_token or "").strip())
+        if str(background_run_id or "").strip():
+            return self.task_state_service.find_by_background_run_id(str(background_run_id or "").strip())
+        return None
+
+    def _sanitize_trace_items(self, value: Any, *, limit: int) -> list[dict[str, Any]]:
+        items = [
+            self.runtime_hardening_service.sanitize_payload(dict(item))
+            for item in list(value or [])
+            if isinstance(item, dict)
+        ]
+        return items[-max(1, limit):]
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def _parse_created_after(value: int | str | None) -> int:

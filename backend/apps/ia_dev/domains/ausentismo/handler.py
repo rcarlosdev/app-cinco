@@ -195,7 +195,10 @@ class AusentismoHandler:
             reply = ""
 
             if capability_id == "attendance.unjustified.summary.v1":
-                focus = "all" if attendance_reason_filter else "unjustified"
+                focus = self._resolve_summary_focus(
+                    message=message,
+                    attendance_reason_filter=attendance_reason_filter,
+                )
                 summary = _measure_tool(
                     "attendance_get_summary",
                     self.tool.get_attendance_summary,
@@ -1099,6 +1102,20 @@ class AusentismoHandler:
 
     def _resolve_aggregation_focus(self, *, message: str) -> str:
         normalized = self._normalize_text(message)
+        if "injustific" in normalized or "sin justificar" in normalized:
+            return "unjustified"
+        return "all"
+
+    @classmethod
+    def _resolve_summary_focus(
+        cls,
+        *,
+        message: str,
+        attendance_reason_filter: str | None,
+    ) -> str:
+        if str(attendance_reason_filter or "").strip():
+            return "all"
+        normalized = cls._normalize_text(message)
         if "injustific" in normalized or "sin justificar" in normalized:
             return "unjustified"
         return "all"

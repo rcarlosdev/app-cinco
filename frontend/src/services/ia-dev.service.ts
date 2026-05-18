@@ -106,9 +106,55 @@ export type IADevReasoningDiagnostic = {
   matched_memory_patterns?: Array<Record<string, unknown>>;
 };
 
+export type IADevSemanticTimelineStep = {
+  step: string;
+  state: "completed" | "current" | "pending" | string;
+  detail?: string;
+};
+
+export type IADevSemanticExplanation = {
+  user_question?: string;
+  understood_as?: string;
+  domain?: string;
+  intent?: string;
+  entity?: Record<string, unknown>;
+  normalized_filters?: Record<string, unknown>;
+  selected_capability?: string;
+  selected_tool?: string;
+  planner_route_hint?: string;
+  validation_status?: Record<string, unknown>;
+  evidence_summary?: Record<string, unknown>;
+  limitations?: string[];
+  clarification_needed?: Record<string, unknown>;
+  metadata_used?: Record<string, unknown>;
+  fallback_used?: Record<string, unknown>;
+  agents_involved?: string[];
+  route_participants?: Record<string, unknown>;
+  approvals_status?: Record<string, unknown>;
+  background_status?: Record<string, unknown>;
+  final_state?: Record<string, unknown>;
+  timeline?: IADevSemanticTimelineStep[];
+};
+
 export type IADevChatResponse = {
   session_id: string;
   reply: string;
+  task?: {
+    task_id: string;
+    current_run: {
+      run_id: string;
+      status: string;
+      domain: string;
+      intent: string;
+      plan: Record<string, unknown>;
+      semantic_explanation?: IADevSemanticExplanation;
+      required_tools: string[];
+      validation: Record<string, unknown>;
+      evidence: Record<string, unknown>;
+      final_state: Record<string, unknown>;
+      reply: string;
+    };
+  };
   response_envelope?: {
     mode?: "user" | "debug" | string;
     progress_source?: "backend" | "synthetic" | string;

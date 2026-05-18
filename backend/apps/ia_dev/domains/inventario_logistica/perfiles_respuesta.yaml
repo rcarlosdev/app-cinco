@@ -1,0 +1,203 @@
+perfiles_respuesta:
+  - id: inventory.stock.mobile.detail
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - descripcion
+      - tipo
+      - cedula
+      - empleado
+      - movil
+      - estado_empleado
+      - entregas
+      - devoluciones
+      - consumos
+      - cobros
+      - saldo
+  - id: inventory.stock.dimension.summary
+    expected_output: saldo_inventario
+    grain: saldo_por_dimension_y_codigo
+    columnas:
+      - dimension
+      - cedula
+      - empleado
+      - movil
+      - bodega
+      - codigo
+      - descripcion
+      - tipo
+      - entregas
+      - devoluciones
+      - consumos
+      - cobros
+      - saldo
+  - id: inventory.serial.stock.dimension.summary
+    expected_output: inventario_serializado
+    grain: saldo_serializado_por_dimension_y_codigo
+    columnas:
+      - dimension
+      - cedula
+      - nombre
+      - apellido
+      - empleado
+      - movil
+      - estado_empleado
+      - bodega
+      - codigo
+      - descripcion
+      - familia
+      - seriales_total
+      - cedulas_asociadas
+      - en_movil
+      - en_base
+      - cobros
+      - saldo
+  - id: inventory.serial.stock.dimension.detail
+    expected_output: inventario_serializado
+    grain: saldo_serializado_por_dimension_y_codigo
+    columnas:
+      - dimension
+      - cedula
+      - nombre
+      - apellido
+      - empleado
+      - movil
+      - estado_empleado
+      - bodega
+      - codigo
+      - descripcion
+      - familia
+      - seriales_total
+      - cedulas_asociadas
+      - en_movil
+      - en_base
+      - cobros
+      - saldo
+  - id: inventory.stock.mobile.dual_block
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - descripcion
+      - tipo
+      - cedula
+      - empleado
+      - movil
+      - estado_empleado
+      - entregas
+      - devoluciones
+      - consumos
+      - cobros
+      - saldo
+      - serializados.serial
+      - serializados.estado
+      - serializados.saldo
+  - id: inventory.stock.warehouse.detail
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - descripcion
+      - tipo
+      - bodega
+      - entregas
+      - devoluciones
+      - consumos
+      - cobros
+      - saldo
+  - id: inventory.stock.balance.summary
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - descripcion
+      - tipo
+      - saldo
+  - id: inventory.kardex.employee.detail
+    expected_output: kardex_operativo
+    grain: movimiento_por_codigo
+    columnas:
+      - fecha
+      - tipo_movimiento
+      - codigo
+      - descripcion
+      - tipo
+      - cedula
+      - empleado
+      - movil
+      - estado_empleado
+      - bodega
+      - orden_trabajo
+      - ticket
+      - entrada
+      - salida
+      - cantidad
+      - efecto
+      - saldo_movimiento
+  - id: inventory.kardex.consolidated.detail
+    expected_output: kardex_operativo
+    grain: movimiento_por_fecha_y_codigo
+    columnas:
+      - fecha
+      - tipo_movimiento
+      - codigo
+      - cantidad
+      - origen
+      - destino
+  - id: inventory.serial.holder.detail
+    expected_output: inventario_serializado
+    grain: serial_por_codigo_y_estado
+    columnas:
+      - serial
+      - codigo
+      - descripcion
+      - familia
+      - estado
+      - cedula
+      - movil
+      - saldo
+  - id: inventory.traceability.serial.detail
+    expected_output: inventario_serializado
+    grain: serial_por_codigo_y_estado
+    columnas:
+      - serial
+      - codigo
+      - descripcion
+      - familia
+      - estado
+      - ubicacion
+      - fecha
+  - id: inventory.document_generation.pending
+    expected_output: document_generation_pending
+    grain: documento_pendiente
+    columnas:
+      - documento
+      - codigo
+      - serial
+      - fecha
+  - id: inventory.transfer.destination.blocked
+    expected_output: saldo_inventario
+    grain: movimiento_por_fecha_y_codigo
+    columnas:
+      - codigo
+      - cantidad
+      - bodega
+  - id: inventory.transfer.warehouse.detail
+    expected_output: saldo_inventario
+    grain: movimiento_por_fecha_y_codigo
+    columnas:
+      - codigo
+      - cantidad
+      - bodega
+      - movimiento
+      - estado
+  - id: inventory.transfer.other_ally.detail
+    expected_output: saldo_inventario
+    grain: movimiento_por_fecha_y_codigo
+    columnas:
+      - codigo
+      - cantidad
+      - bodega
+      - movimiento
+      - estado
