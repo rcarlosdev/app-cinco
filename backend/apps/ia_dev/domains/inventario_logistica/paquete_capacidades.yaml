@@ -44,6 +44,34 @@ capacidades:
     limitaciones:
       - result_set_empty
       - aclaracion_portador_requerida
+  - capability_id: inventory_stock_balance_by_material_dimension
+    template_id: inventory_material_stock_grouped_dimension
+    planner_route_hint: inventory.material_stock.dimension
+    response_profile: inventory.stock.dimension.summary
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.stock_balance_material_grouped_dimension
+      - inventario.metric.stock_include_zero_negative
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_serial_stock_by_family_grouped_dimension
+    template_id: inventory_serial_stock_by_family_grouped_dimension
+    planner_route_hint: inventory.serial_stock.family_dimension
+    response_profile: inventory.serial.stock.dimension.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.serial_stock_family_grouped_dimension
+      - inventario.metric.serial_count_only
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
   - capability_id: inventory_stock_balance_by_warehouse
     template_id: inventory_material_stock_by_warehouse
     planner_route_hint: inventory.material_stock.warehouse

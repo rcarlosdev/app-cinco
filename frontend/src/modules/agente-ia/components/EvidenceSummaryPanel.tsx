@@ -19,6 +19,12 @@ const EvidenceSummaryPanel = ({
   const rowcount = Number(evidence.rowcount || 0);
   const extraTableCount = Number(evidence.extra_table_count || 0);
   const responseProfile = String(evidence.response_profile || "").trim();
+  const evidenceSummary = String(evidence.summary || evidence.evidence_summary || "").trim();
+  const validations = Array.isArray(evidence.validations)
+    ? evidence.validations
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    : [];
   const sources = Array.isArray(evidence.sources)
     ? evidence.sources
         .map((item) => String(item || "").trim())
@@ -66,6 +72,26 @@ const EvidenceSummaryPanel = ({
               {toLabel(source)}
             </span>
           ))}
+        </div>
+      ) : null}
+      {evidenceSummary ? (
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+          <div className="font-semibold text-gray-950 dark:text-white">
+            Resumen de evidencia
+          </div>
+          <div className="mt-1">{evidenceSummary}</div>
+        </div>
+      ) : null}
+      {validations.length > 0 ? (
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+          <div className="font-semibold text-gray-950 dark:text-white">
+            Validaciones
+          </div>
+          <div className="mt-2 space-y-1">
+            {validations.map((item) => (
+              <div key={item}>{item}</div>
+            ))}
+          </div>
         </div>
       ) : null}
       {limitations.length > 0 ? (

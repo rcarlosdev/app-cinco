@@ -226,6 +226,155 @@ class InventoryResponseAssemblerTests(SimpleTestCase):
         self.assertIn("serializados/equipos", str(payload.get("dato") or "").lower())
         self.assertIn("data.extra_tables", list(evidence.get("evidence_sources_used") or []))
 
+    def test_inventory_response_grouped_dimension_summarizes_business_request(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "business_query_semantic_plan": {
+                        "grouping_dimension": ["movil"],
+                        "scope": {"families": ["material_claro", "ferretero"]},
+                    },
+                    "semantic_capability_registry": {
+                        "template_id": "inventory_material_stock_grouped_dimension",
+                        "response_profile": "inventory.stock.dimension.summary",
+                        "output_profile": {"columns": ["movil", "codigo", "saldo"]},
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "descripcion": "CONECTOR RJ 45",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[
+                {"movil": "TIRAN224", "codigo": "1025507", "saldo": 5},
+                {"movil": "TIRAN314", "codigo": "1025507", "saldo": 3},
+            ],
+            result_set={"rowcount": 2},
+        )
+
+        self.assertIn("conector rj 45", str(payload.get("dato") or "").lower())
+        self.assertIn("agrupado por móvil", str(payload.get("dato") or "").lower())
+        self.assertIn("total general: 8", str(payload.get("dato") or "").lower())
+        self.assertIn("2 fila", str(payload.get("hallazgo") or "").lower())
+
+    def test_inventory_response_grouped_dimension_overrides_stale_mobile_detail_profile(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "business_query_semantic_plan": {
+                        "grouping_dimension": ["movil"],
+                        "scope": {"families": ["material_claro"]},
+                    },
+                    "semantic_capability_registry": {
+                        "template_id": "inventory_material_stock_mobile",
+                        "response_profile": "inventory.stock.mobile.detail",
+                        "output_profile": {"columns": ["movil", "codigo", "saldo"]},
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "codigo": "1025507",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[
+                {"dimension": "TIRAN224", "movil": "TIRAN224", "codigo": "1025507", "saldo": 5},
+                {"dimension": "TIRAN314", "movil": "TIRAN314", "codigo": "1025507", "saldo": 3},
+            ],
+            result_set={"rowcount": 2},
+        )
+
+        self.assertIn("1025507", str(payload.get("dato") or ""))
+        self.assertIn("agrupado por", str(payload.get("dato") or "").lower())
+        self.assertNotIn("empleado 1025507", str(payload.get("dato") or "").lower())
+
+    def test_inventory_response_serial_family_grouped_dimension_explains_serial_scope(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "business_query_semantic_plan": {
+                        "inventory_family": "serializados",
+                        "grouping_dimension": ["movil"],
+                        "scope": {"families": ["serializados"]},
+                    },
+                    "semantic_capability_registry": {
+                        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                        "output_profile": {"columns": ["movil", "codigo", "familia", "seriales_total", "saldo"]},
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "material_family": "DECO",
+                            "material_family_match_mode": "contains",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[
+                {"cedula": "1001", "empleado": "Ana Perez", "movil": "TIRAN224", "codigo": "DEC-1", "familia": "DECO HD", "seriales_total": 2, "saldo": 2},
+                {"cedula": "1002", "empleado": "Luis Rojas", "movil": "TIRAN314", "codigo": "DEC-1", "familia": "CPE DECO", "seriales_total": 1, "saldo": 1},
+            ],
+            result_set={"rowcount": 2},
+        )
+
+        self.assertIn("contienen deco", str(payload.get("dato") or "").lower())
+        self.assertIn("empleado, movil y codigo", str(payload.get("dato") or "").lower())
+        self.assertIn("estado_empleado", str(payload.get("hallazgo") or "").lower())
+        self.assertIn("serial(es) en movil", str(payload.get("hallazgo") or "").lower())
+        self.assertIn("conteo", str(payload.get("riesgo") or "").lower())
+
+    def test_inventory_response_serial_family_empty_result_mentions_catalog(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "business_query_semantic_plan": {
+                        "inventory_family": "serializados",
+                        "scope": {"families": ["serializados"]},
+                    },
+                    "semantic_capability_registry": {
+                        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "material_family": "DECO",
+                            "material_family_match_mode": "contains",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[],
+            result_set={"rowcount": 0, "total_records": 0, "returned_records": 0},
+        )
+
+        self.assertIn("codigos del catalogo", str(payload.get("dato") or "").lower())
+        self.assertIn("estado movil", str(payload.get("dato") or "").lower())
+        self.assertIn("catalogo gobernado", str(payload.get("hallazgo") or "").lower())
+
+    def test_inventory_response_hides_legacy_shadow_limitation_from_business_limitations(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "semantic_capability_registry": {
+                        "response_profile": "inventory.stock.dimension.summary",
+                    },
+                    "resolved_semantic": {
+                        "limitations": ["legacy_semantic_binding_shadowed"],
+                        "final_filters": {"descripcion": "CONECTOR RJ 45"},
+                    },
+                }
+            },
+            rows=[],
+            result_set={"rowcount": 0},
+        )
+
+        self.assertNotIn("legacy_semantic_binding_shadowed", str(payload))
+
     def test_inventory_response_preserves_capability_pack_trace(self):
         payload = build_inventory_business_response(
             resolved_query={

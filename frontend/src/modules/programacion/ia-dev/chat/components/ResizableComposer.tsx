@@ -129,7 +129,7 @@ const ResizableComposer = ({
   }, [dynamicMaxHeight, minHeight]);
 
   return (
-    <div className="shadow-theme-xs focus-within:border-brand-500 relative flex-1 rounded-2xl border border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-800">
+    <div className="relative flex-1 rounded-[22px] bg-transparent">
       <textarea
         ref={textareaRef}
         value={value}
@@ -138,15 +138,15 @@ const ResizableComposer = ({
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         style={{ height: effectiveHeight }}
-        className={`w-full resize-none bg-transparent px-4 pt-3 pb-6 text-sm text-gray-700 outline-none placeholder:text-gray-400 dark:text-gray-200 dark:placeholder:text-gray-500 ${
+        className={`w-full resize-none bg-transparent px-4 pt-3 pb-8 text-[15px] leading-6 text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500 ${
           shouldUseInternalScroll ? "overflow-y-auto" : "overflow-y-hidden"
         }`}
       />
-      <div className="pointer-events-none absolute right-2 bottom-1 flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
+      <div className="pointer-events-none absolute right-2 bottom-1.5 flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
         {manualHeight != null && (
           <button
             type="button"
-            className="pointer-events-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="pointer-events-auto inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] hover:bg-gray-100 dark:hover:bg-gray-800"
             onClick={() => setManualHeight(null)}
             title="Volver a tamano automatico"
           >
@@ -156,7 +156,7 @@ const ResizableComposer = ({
         )}
         <button
           type="button"
-          className="pointer-events-auto inline-flex items-center rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-700"
+          className="pointer-events-auto inline-flex items-center rounded-full px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-800"
           onMouseDown={startResize}
           title="Redimensionar compositor"
         >

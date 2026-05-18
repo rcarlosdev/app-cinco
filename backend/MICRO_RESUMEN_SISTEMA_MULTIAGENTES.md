@@ -1562,6 +1562,73 @@ Estado vigente para futuros chats:
 - Fase 6 -> Handoffs + approvals
 - Fase 7 -> Background runs
 
+## Sesion 2026-05-16: Frontend task-first + evidence-first sin rediseño total
+
+Que se asumio sin revalidar:
+
+- El backend task-first ya estaba implementado.
+- `task.current_run.semantic_explanation` ya es la superficie saneada oficial para UX.
+- Los contratos `reply + task + data + evidence + semantic_explanation` no debian romperse.
+- `inventario_logistica`, `empleados` y `ausentismo` debian seguir compatibles.
+- No se reabria arquitectura backend ni transport actual.
+
+Que se modifico en frontend:
+
+- `frontend/src/modules/agente-ia/AgenteIAModule.tsx`
+  - ahora restaura el chat activo desde historial local en vez de abrir siempre uno nuevo.
+  - agrega acciones locales de renombrar, borrar, copiar respuesta, copiar informe y preparar consulta relacionada.
+  - conecta el chat, el panel lateral y el informe empresarial a un mismo `dashboardSnapshot`.
+- `frontend/src/modules/agente-ia/utils/buildDashboardSnapshot.ts`
+  - extiende el snapshot saneado con:
+    - estado de tarea
+    - estado breve de preparacion
+    - timeline
+    - capabilities y tools usadas
+    - approvals y background visibles
+    - aclaraciones y limitaciones
+    - resumen ejecutivo
+    - evidencia y validacion resumidas
+- `frontend/src/modules/agente-ia/components/HistoryPanel.tsx`
+  - deja de ser solo lista de chats y pasa a superficie `Historial | Herramientas | Caracteristicas`.
+- componentes nuevos:
+  - `BusinessReportPanel.tsx`
+  - `ChatHistoryPanel.tsx`
+  - `FeaturePanel.tsx`
+  - `TaskStatusBadge.tsx`
+  - `ToolsPanel.tsx`
+- componentes ajustados:
+  - `ChatPanel.tsx`
+  - `DashboardPanel.tsx`
+  - `MessageList.tsx`
+  - `SemanticExplanationPanel.tsx`
+  - `EvidenceSummaryPanel.tsx`
+  - `TaskTimeline.tsx`
+  - `types.ts`
+
+Reglas UX confirmadas para continuidad:
+
+- El chat izquierdo queda como superficie conversacional simple y humana.
+- El panel derecho queda como informe empresarial de la consulta.
+- La explicacion visible usa metadata saneada y no JSON crudo, SQL sensible, prompts ni chain-of-thought.
+- Historial, herramientas y caracteristicas viven en la zona lateral de soporte operativo sin rehacer el split-view.
+- La UX debe mostrar estado de tarea, evidencia, timeline y limitaciones sin convertirse en panel tecnico de debugging.
+
+Pruebas ejecutadas:
+
+- `npm.cmd run typecheck`
+- `npm.cmd run lint`
+
+Resultado:
+
+- `typecheck`: OK
+- `lint`: OK
+
+Limitaciones pendientes:
+
+- el historial usa `prompt/confirm` del navegador para renombrar y borrar; no se construyo modal dedicado.
+- el boton de exportacion del informe queda deshabilitado como placeholder claro mientras no exista soporte estable.
+- la vista de approvals y background depende de la metadata visible del payload actual; no inventa acciones si el endpoint no existe.
+
 ## Sesion 2026-05-16: V1 flujo gobernado de revision de brechas semanticas
 
 Que se asumio sin revalidar:
@@ -3715,3 +3782,182 @@ Estado vigente para futuros chats:
 - Fase 5 -> Agents SDK
 - Fase 6 -> Handoffs + approvals
 - Fase 7 -> Background runs
+
+
+## Sesion 2026-05-16: familia serializada catalogada + agrupacion operativa
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- `SemanticCapabilityRegistry` sigue siendo la unica autoridad de binding semantico.
+- `ToolRegistryService`, `fallback_policy`, `Agents Runtime`, approvals y background no se reabren en esta correccion.
+
+Hechos nuevos confirmados:
+
+- `DECO` existe en `logistica_cinco.base_codigo_seriales.familia`.
+- En la validacion puntual de catalogo tambien existen `ONT` y `ROUTER` como familias exactas.
+- No se encontro `DECO` con seriales asociados en `logistica_cinco.logistica_base_seriales` para la comprobacion puntual hecha en esta sesion.
+
+Correccion reusable implementada:
+
+- Cuando una consulta de inventario/saldo/existencia agrupada por `movil`, `cuadrilla`, `tecnico` o `bodega` contiene una familia gobernada del catalogo `base_codigo_seriales.familia`, la semantica debe resolver:
+  - `inventory_family = serializados`
+  - filtro gobernado `material_family = <familia_catalogada>`
+  - capability `inventory_serial_stock_by_family_grouped_dimension`
+  - planner seguro sobre `logistica_base_seriales + base_codigo_seriales + cinco_base_de_personal`
+- Para serializados agrupados:
+  - no usar `cantidad`
+  - usar `seriales_total`
+  - `en_movil = estado contiene MOVIL`
+  - `en_base = estado contiene BASE o BODEGA`
+  - `cobros = estado contiene COBRO`
+  - `saldo = en_movil + en_base - cobros`
+- Para serializados agrupados por dimension operativa, la salida evidence-first ya no debe quedarse en KPI global:
+  - usar perfil de respuesta de detalle operativo por dimension y codigo
+  - conservar en la tabla principal:
+    - `dimension|movil|cedula|bodega`
+    - `codigo`
+    - `descripcion`
+    - `familia`
+    - `seriales_total`
+    - `en_movil`
+    - `en_base`
+    - `cobros`
+    - `saldo`
+  - publicar KPIs globales reutilizables:
+    - total general
+    - dimensiones con saldo
+    - codigos coincidentes
+    - seriales totales
+  - publicar tabla suplementaria de subtotales por dimension cuando el dashboard necesite lectura operativa rapida
+- Si la familia existe en catalogo pero no hay seriales asociados al alcance, responder vacio con evidencia de catalogo; no inventar ausencia de familia.
+
+Regla de continuidad nueva:
+
+- No interpretar una familia catalogada de `base_codigo_seriales.familia` como descripcion de `base_codigos` solo porque aparezca en una consulta agrupada tipo:
+  - `saldo en moviles de X`
+  - `inventario de X por cuadrilla`
+  - `equipos X en moviles`
+- Primero validar si `X` corresponde a familia serializada gobernada; solo si no corresponde, mantener la ruta material por descripcion/codigo.
+
+## Sesion 2026-05-17: familia serializada con coincidencia parcial gobernada en catalogo
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- `SemanticCapabilityRegistry` sigue siendo la autoridad de binding semantico.
+- `ToolRegistryService`, `fallback_policy`, `Agents Runtime`, approvals, background y contratos `reply/task/data/evidence/status` no se modifican.
+
+Hechos nuevos confirmados:
+
+- En `logistica_cinco.base_codigo_seriales.familia` existen familias que contienen `DECO`, no solo `DECO` exacto.
+- Validacion puntual confirmada:
+  - familias encontradas: `DECO`, `DECO ALEXA`, `DECO ATV`, `DECO HD`, `DECO HD CAROLESS`, `DECO HD DTH`, `DECO NAGRA`, `DECO PVR`, `DECO SD`, `TARJETA DECO`
+  - codigos de catalogo: `51`
+  - codigos con seriales asociados: `34`
+  - seriales con `estado` que contiene `MOVIL`: `2262`
+  - seriales `MOVIL` con cedula: `2262`
+  - seriales `MOVIL` con cruce en `cinco_base_de_personal`: `2166`
+
+Correccion reusable implementada:
+
+- La familia serializada consultada por texto parcial ya no depende de igualdad exacta ni de `DECO` como excepcion.
+- Nueva regla gobernada reusable:
+  - `inventario.serial_family.busqueda_parcial_catalogo`
+  - aplica sobre `logistica_cinco.base_codigo_seriales.familia`
+  - `match_mode: contains`
+  - normalizacion: `upper/trim`
+- Para consultas tipo `saldo en moviles de <familia serializada>`:
+  - primero se valida la coincidencia parcial en catalogo
+  - luego se filtra `logistica_base_seriales.estado` por `LIKE '%MOVIL%'`
+  - la salida se agrupa por `cedula + codigo` y conserva `movil` y enrichment de personal
+  - la evidencia se responde como saldo por empleado/movil/codigo
+- La respuesta vacia de esta ruta ya no dice ausencia generica:
+  - si la familia fue validada en catalogo pero no devolvio filas en ejecucion, comunica que no hay seriales en `MOVIL`
+
+Pruebas focalizadas validadas:
+
+- `apps.ia_dev.tests.test_inventario_runtime_sql_alignment`
+- `apps.ia_dev.tests.test_inventario_semantic_resolver`
+- `apps.ia_dev.tests.test_semantic_capability_registry`
+- `apps.ia_dev.tests.test_inventory_response_assembler`
+- `apps.ia_dev.tests.test_chat_runtime_metadata`
+- `apps.ia_dev.tests.test_chat_response_contracts`
+
+Regla de continuidad nueva:
+
+- `familia serializada` puede resolverse por coincidencia parcial gobernada sobre `base_codigo_seriales.familia`; no debe degradarse a igualdad exacta cuando el catalogo contiene variantes como `DECO HD`, `CPE DECO`, `ROUTER WIFI`, `ONT GPON`, etc.
+
+## Sesion 2026-05-17: enrichment serializado con fallback por edit
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- El enrichment oficial de personal sigue usando `bd_c3nc4s1s.cinco_base_de_personal`.
+
+Hechos nuevos confirmados:
+
+- `logistica_cinco.logistica_base_seriales` tiene columna fisica `edit`.
+- Para la validacion puntual de `DECO` en estado `MOVIL`, existen `96` registros que no cruzan con personal por `cedula` pero si cruzan por `edit -> cinco_base_de_personal.cedula`.
+
+Correccion reusable implementada:
+
+- En rutas serializadas que enriquecen con personal:
+  - primero se cruza `logistica_base_seriales.cedula -> cinco_base_de_personal.cedula`
+  - si ese cruce no existe, se habilita fallback controlado `logistica_base_seriales.edit -> cinco_base_de_personal.cedula`
+- El fallback no usa `OR` directo en un solo join para evitar duplicar filas o inflar conteos.
+- La estrategia segura es:
+  - `emp` por `cedula`
+  - `emp_edit` por `edit`
+  - `COALESCE(emp.*, emp_edit.*, valor_serial)` para `cedula`, `movil`, `nombre`, `apellido`, `estado_empleado`
+
+Regla de continuidad nueva:
+
+- En serializados/equipos, `edit` puede actuar como llave de enrichment de personal solo como fallback de `cedula`, nunca como reemplazo ciego del portador principal ni como join ambiguo con riesgo de duplicacion.
+
+## Sesion 2026-05-17: frontend Agente IA con dashboard desacoplado por respuesta
+
+Que se asumio sin revalidar:
+
+- el contrato frontend vigente sigue siendo `reply`, `task`, `data`, `evidence`, `status`
+- `semantic_explanation` sigue siendo la superficie saneada oficial para UX enterprise
+- el panel derecho debe permanecer evidence-first y no degradarse a debug visual
+
+Correccion reusable implementada:
+
+- el panel derecho del modulo `Agente IA` ya no depende solo del ultimo snapshot global del chat
+- ahora existe asociacion visual persistente por chat:
+  - `message_id -> dashboard snapshot`
+- la seleccion visual del dashboard vive separada del runtime y se persiste como estado UI local
+- una nueva consulta ya no reemplaza automaticamente el dashboard visible:
+  - el panel puede mantener una respuesta historica seleccionada
+  - mientras tanto muestra continuidad del runtime vivo de la nueva corrida
+- las acciones del chat para `mostrar dashboard` y `copiar respuesta` ahora viven por bloque de respuesta y no solo como accion global del ultimo mensaje
+
+Regla de continuidad nueva:
+
+- en la UX enterprise del sistema multiagente, el chat conversacional y el panel operativo deben permanecer desacoplados
+- el panel derecho debe poder conservar evidencia historica seleccionada aunque llegue una corrida nueva
+- el estado runtime visible de la corrida nueva debe mostrarse como continuidad operativa, no como reemplazo silencioso del dashboard anterior
+
+## Sesion 2026-05-17: compositor del chat con adjuntos locales y limitacion honesta de transporte
+
+Que se asumio sin revalidar:
+
+- el contrato actual del chat frontend sigue enviando solo `message` y `session_id`
+- no existe soporte binario confirmado en el transporte actual hacia `/ia-dev/chat/`
+
+Correccion reusable implementada:
+
+- el compositor principal del `Agente IA` ahora acepta adjuntos locales por:
+  - selector de archivos
+  - arrastrar y soltar
+- la UI muestra chips de adjuntos en el compositor y en el mensaje del usuario ya enviado
+- cuando hay adjuntos, el frontend agrega una nota honesta al prompt saliente indicando que:
+  - los archivos fueron seleccionados en la interfaz
+  - el contenido binario no fue enviado en esta version
+
+Regla de continuidad nueva:
+
+- si el frontend expone adjuntos antes de que exista transporte binario real, debe comunicar esa limitacion de forma explicita
+- no se debe simular lectura real del archivo si el runtime no recibio el binario

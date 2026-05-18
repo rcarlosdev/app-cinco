@@ -126,6 +126,45 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(str(intent.filters.get("cedula") or ""), "1214730857")
         self.assertEqual(str(intent.filters.get("stock_scope") or ""), "movil")
 
+    def test_query_intent_resolver_routes_grouped_material_description_to_dimension_template(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="saldo en moviles de CONECTOR RJ 45",
+                base_classification={
+                    "domain": "inventario_logistica",
+                    "intent": "stock_balance",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+
+        self.assertEqual(intent.domain_code, "inventario_logistica")
+        self.assertEqual(intent.operation, "stock_balance")
+        self.assertEqual(intent.template_id, "inventory_material_stock_grouped_dimension")
+        self.assertIn("movil", list(intent.group_by or []))
+
+    def test_query_intent_resolver_routes_grouped_material_code_to_dimension_template_without_cedula_filter(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="saldo por movil del codigo 1025507",
+                base_classification={
+                    "domain": "inventario_logistica",
+                    "intent": "stock_balance",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+
+        self.assertEqual(intent.domain_code, "inventario_logistica")
+        self.assertEqual(intent.operation, "stock_balance")
+        self.assertEqual(intent.template_id, "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(intent.entity_type or ""), "codigo")
+        self.assertEqual(str(intent.entity_value or ""), "1025507")
+        self.assertEqual(str(intent.filters.get("codigo") or ""), "1025507")
+        self.assertEqual(str(intent.filters.get("cedula") or ""), "")
+
     def test_query_intent_resolver_ignores_unrelated_attendance_memory_for_inventory(self):
         resolver = QueryIntentResolver()
         with patch.dict(

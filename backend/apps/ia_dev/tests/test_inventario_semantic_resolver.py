@@ -26,6 +26,13 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         }
 
     def _resolve(self, message: str, operation: str = "detail"):
+        return self._resolve_with_context(
+            message=message,
+            operation=operation,
+            semantic_context={"inventory_catalog_families": ["DECO", "CPE RESIDENCIAL", "ONT", "ROUTER"]},
+        )
+
+    def _resolve_with_context(self, *, message: str, operation: str = "detail", semantic_context: dict | None = None):
         return self.resolver.resolve_query(
             message=message,
             intent=StructuredQueryIntent(
@@ -35,7 +42,7 @@ class InventarioSemanticResolverTests(SimpleTestCase):
                 template_id="",
                 confidence=0.8,
             ),
-            semantic_context={},
+            semantic_context=semantic_context or {},
         )
 
     def _semantic_plan(self, resolved):
@@ -203,6 +210,75 @@ class InventarioSemanticResolverTests(SimpleTestCase):
 
         self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
         self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "movil")
+
+    def test_saldo_en_moviles_de_material_resuelve_dimension_agrupada_por_descripcion(self):
+        resolved = self._resolve("saldo en moviles de CONECTOR RJ 45", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("descripcion") or ""), "CONECTOR RJ 45")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+        self.assertEqual(str(resolved.normalized_filters.get("grouping_dimension") or ""), "movil")
+
+    def test_saldo_por_movil_del_codigo_resuelve_dimension_agrupada_por_codigo(self):
+        resolved = self._resolve("saldo por movil del codigo 1025507", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("codigo") or ""), "1025507")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_inventario_de_material_por_cuadrilla_usa_dimension_movil(self):
+        resolved = self._resolve("inventario de CONECTOR RJ 45 por cuadrilla", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("descripcion") or ""), "CONECTOR RJ 45")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_saldo_en_moviles_de_deco_resuelve_familia_serializada_por_movil(self):
+        resolved = self._resolve("saldo en moviles de Deco", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family_match_mode") or ""), "contains")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_inventario_de_deco_por_cuadrilla_resuelve_familia_serializada(self):
+        resolved = self._resolve("inventario de Deco por cuadrilla", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_equipos_deco_en_moviles_resuelve_familia_serializada(self):
+        resolved = self._resolve("equipos Deco en moviles", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_saldo_en_moviles_de_cpe_residencial_resuelve_concepto_serializado_gobernado(self):
+        resolved = self._resolve("saldo en moviles de CPE residencial", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "CPE RESIDENCIAL")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_saldo_en_moviles_de_deco_usa_busqueda_parcial_en_catalogo_serializado(self):
+        resolved = self._resolve_with_context(
+            message="saldo en moviles de Deco",
+            operation="aggregate",
+            semantic_context={"inventory_catalog_families": ["DECO HD", "DECO IPTV", "ONT", "ROUTER"]},
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family_match_mode") or ""), "contains")
+
+    def test_existencias_de_ferretero_por_movil_resuelve_dimension_por_familia(self):
+        resolved = self._resolve("existencias de ferretero por movil", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "ferretero")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
 
     def test_saldo_empleado_resuelve_stock_movil_por_cedula(self):
         resolved = self._resolve("saldo empleado 98672304", operation="stock_balance")

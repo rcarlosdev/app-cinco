@@ -16,6 +16,8 @@ LIMITACIONES_DECLARADAS = {
     "scope_required:operacion_hfc": "La regla gobernada exige precisar el alcance operativo operacion_hfc.",
 }
 
+LIMITACIONES_NO_NEGOCIO = {"legacy_semantic_binding_shadowed"}
+
 
 def _inventory_type_scope_label(*, filters: dict[str, Any], semantic_plan: dict[str, Any]) -> str:
     familias = [
@@ -66,7 +68,11 @@ def _output_profile(semantic_binding: dict[str, Any], semantic_plan: dict[str, A
 
 
 def _limitation_text(limitations: list[str]) -> str:
-    normalized = [str(item or "").strip() for item in limitations if str(item or "").strip()]
+    normalized = [
+        str(item or "").strip()
+        for item in limitations
+        if str(item or "").strip() and str(item or "").strip() not in LIMITACIONES_NO_NEGOCIO
+    ]
     for limitation in normalized:
         if limitation in LIMITACIONES_DECLARADAS:
             return LIMITACIONES_DECLARADAS[limitation]
@@ -272,6 +278,17 @@ def _success_response(
         ),
         {},
     )
+    grouping_dimension = str(filters.get("grouping_dimension") or "").strip().lower()
+    if not grouping_dimension:
+        grouping_dimensions = [
+            str(item or "").strip().lower()
+            for item in list((semantic_plan.get("grouping_dimension") or []))
+            if str(item or "").strip()
+        ]
+        for candidate in ("movil", "cedula", "bodega"):
+            if candidate in grouping_dimensions:
+                grouping_dimension = candidate
+                break
 
     if response_profile_id == "inventory.kardex.employee.detail":
         codigo = str(filters.get("codigo") or "").strip()
@@ -298,7 +315,54 @@ def _success_response(
         "inventory.stock.mobile.detail",
         "inventory.stock.mobile.dual_block",
         "inventory.stock.critical.employee",
+        "inventory.stock.dimension.summary",
     }:
+        is_grouped_dimension_scope = bool(
+            grouping_dimension in {"movil", "cedula", "bodega"}
+            and str(entity.get("field") or "").strip().lower() not in {"movil", "cedula"}
+            and not any(str(filters.get(key) or "").strip() for key in ("movil", "cedula"))
+            and any(str(filters.get(key) or "").strip() for key in ("codigo", "descripcion", "tipo", "material_family"))
+        )
+        if response_profile_id == "inventory.stock.dimension.summary" or is_grouped_dimension_scope:
+            dimension_field = grouping_dimension or "dimension"
+            dimension_label = "móvil" if dimension_field == "movil" else "técnico" if dimension_field == "cedula" else "bodega"
+            dimension_label_plural = "móviles" if dimension_field == "movil" else "técnicos" if dimension_field == "cedula" else "bodegas"
+            material_ref = str(filters.get("codigo") or filters.get("descripcion") or material_scope_label).strip()
+            total_saldo = sum(float(item.get("saldo") or 0) for item in rows if isinstance(item, dict))
+            dimensiones = {
+                str(
+                    item.get(dimension_field)
+                    or item.get("dimension")
+                    or item.get("movil")
+                    or item.get("cedula")
+                    or item.get("bodega")
+                    or ""
+                ).strip()
+                for item in rows
+                if isinstance(item, dict)
+            }
+            dimensiones.discard("")
+            codigos = {
+                str(item.get("codigo") or "").strip()
+                for item in rows
+                if isinstance(item, dict) and str(item.get("codigo") or "").strip()
+            }
+            dato = (
+                f"Consulté el saldo del material {material_ref} agrupado por {dimension_label}. "
+                f"Total general: {total_saldo:g}. "
+                f"{dimension_label_plural.capitalize()} con saldo: {len(dimensiones)}."
+            )
+            hallazgo = (
+                f"La evidencia se consolidó en {len(rows)} filas agrupadas por {dimension_label} y código, "
+                f"con {len(codigos)} código(s) coincidente(s)."
+            )
+            interpretacion = (
+                "La respuesta se armó desde evidencia agregada por dimensión y no desde detalle operativo sin resumir."
+            )
+            recomendacion = (
+                f"La tabla muestra {dimension_label}, código, descripción, tipo, entregas, devoluciones, consumos, cobros y saldo."
+            )
+            return dato, hallazgo, interpretacion, recomendacion, False
         scope_text = "movil" if entity_field == "movil" else "empleado"
         if response_profile_id == "inventory.stock.mobile.dual_block" and not bool(serial_table.get("skipped")):
             serial_rowcount = int(serial_table.get("rowcount") or 0)
@@ -331,6 +395,62 @@ def _success_response(
             "El inventario se presenta por evidencia operativa ejecutada; no se agrego un saldo narrativo fuera del result_set."
         )
         recomendacion = "Si quieres, puedo filtrar por cedula, movil o codigo para revisar el detalle."
+        return dato, hallazgo, interpretacion, recomendacion, False
+
+    if response_profile_id in {
+        "inventory.serial.stock.dimension.summary",
+        "inventory.serial.stock.dimension.detail",
+    }:
+        dimension_field = grouping_dimension or "dimension"
+        dimension_label = "movil" if dimension_field == "movil" else "tecnico" if dimension_field == "cedula" else "bodega"
+        dimension_label_plural = "moviles" if dimension_field == "movil" else "tecnicos" if dimension_field == "cedula" else "bodegas"
+        family_value = str(filters.get("material_family") or "").strip()
+        total_saldo = sum(float(item.get("saldo") or 0) for item in rows if isinstance(item, dict))
+        total_seriales = sum(float(item.get("seriales_total") or 0) for item in rows if isinstance(item, dict))
+        distinct_dimensions = {
+            str(
+                item.get(dimension_field)
+                or item.get("dimension")
+                or item.get("movil")
+                or item.get("cedula")
+                or item.get("bodega")
+                or ""
+            ).strip()
+            for item in rows
+            if isinstance(item, dict)
+        }
+        distinct_dimensions.discard("")
+        distinct_codes = {
+            str(item.get("codigo") or "").strip()
+            for item in rows
+            if isinstance(item, dict) and str(item.get("codigo") or "").strip()
+        }
+        subtotal_table = next(
+            (
+                item
+                for item in supplemental_tables
+                if isinstance(item, dict)
+                and str(item.get("name") or "").strip().startswith("subtotales_serializados_por_")
+            ),
+            {},
+        )
+        dato = (
+            f"Encontre equipos de familias del catalogo que contienen {family_value} en estado MOVIL. "
+            "La tabla muestra el saldo por empleado, movil y codigo."
+        ).strip()
+        hallazgo = (
+            f"El detalle conserva cedula, empleado, movil, estado_empleado, codigo, descripcion y familia, "
+            f"con {len(distinct_codes)} codigo(s), {len(distinct_dimensions)} {dimension_label_plural} y {total_seriales:g} serial(es) en MOVIL."
+        )
+        if subtotal_table:
+            hallazgo += f" Tambien se generaron subtotales por {dimension_label} para el dashboard."
+        interpretacion = (
+            "La respuesta usa la ruta serializada validada por catalogo, filtra estado MOVIL y calcula saldo por conteo, no por cantidad."
+        )
+        recomendacion = (
+            f"Si quieres, puedo resumir la familia {family_value} por otra dimension operativa "
+            "o profundizar en un movil, cuadrilla, tecnico o bodega puntual."
+        )
         return dato, hallazgo, interpretacion, recomendacion, False
 
     if response_profile_id == "inventory.serial.holder.detail":
@@ -383,9 +503,11 @@ def build_inventory_business_response(
         or ((semantic_context.get("resolved_semantic") or {}).get("semantic_capability_registry") or {})
     )
     resolved_semantic = dict(semantic_context.get("resolved_semantic") or {})
-    limitations = list(
-        limitations or resolved_semantic.get("limitations") or execution_metadata.get("limitations") or []
-    )
+    limitations = [
+        item
+        for item in list(limitations or resolved_semantic.get("limitations") or execution_metadata.get("limitations") or [])
+        if str(item or "").strip() and str(item or "").strip() not in LIMITACIONES_NO_NEGOCIO
+    ]
     query_intent = dict(resolved_query.get("intent") or {})
     filters = dict(
         semantic_binding.get("normalized_filters")
@@ -434,13 +556,28 @@ def build_inventory_business_response(
         interpretacion = "La limitacion proviene de metadata gobernada o de una fuente externa no habilitada."
         recomendacion = "Si quieres, puedo ayudarte a reformular la consulta dentro del alcance actualmente soportado."
     elif status == "empty_result":
-        dato = "La consulta se ejecuto, pero no devolvio filas para el alcance solicitado."
-        hallazgo = (
-            "El result_set principal y los bloques suplementarios quedaron vacios con los filtros "
-            f"{', '.join(sorted(str(key) for key in filters.keys())) or 'aplicados'}."
-        )
-        interpretacion = "No hay evidencia suficiente para afirmar inventario, movimientos o asignacion para ese alcance."
-        recomendacion = "Revisa el identificador, amplía el alcance o cambia la familia consultada."
+        filtro_texto = str(filters.get("codigo") or filters.get("descripcion") or filters.get("tipo") or "").strip()
+        serial_family = str(filters.get("material_family") or "").strip()
+        if str((semantic_plan.get("inventory_family") or "")).strip().lower() == "serializados" and serial_family:
+            dato = (
+                f"Encontre codigos del catalogo con familia que contiene {serial_family}, "
+                "pero no hay seriales en estado MOVIL para esos codigos."
+            )
+            hallazgo = "La validacion se hizo contra el catalogo gobernado de serializados y la ejecucion no devolvio filas operativas en MOVIL."
+            interpretacion = "La familia existe en el catalogo, pero no hay evidencia de seriales en estado MOVIL para el alcance consultado."
+            recomendacion = "Si quieres, puedo revisar la misma familia por otra dimension operativa o validar otra familia del catalogo."
+        else:
+            dato = "La consulta se ejecuto, pero no devolvio filas para el alcance solicitado."
+            hallazgo = (
+                "El result_set principal y los bloques suplementarios quedaron vacios "
+                + (
+                    f"para el filtro {filtro_texto}."
+                    if filtro_texto
+                    else f"con los filtros {', '.join(sorted(str(key) for key in filters.keys())) or 'aplicados'}."
+                )
+            )
+            interpretacion = "No hay evidencia suficiente para afirmar inventario, movimientos o asignacion para ese alcance."
+            recomendacion = "Revisa el identificador, amplia el alcance o cambia la familia consultada."
     else:
         dato, hallazgo, interpretacion, recomendacion, fallback_narrativo_usado = _success_response(
             response_profile_id=response_profile_id,

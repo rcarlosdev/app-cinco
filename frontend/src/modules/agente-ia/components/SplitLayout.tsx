@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type SplitLayoutSizes = {
   history: number;
@@ -57,6 +57,7 @@ const SplitLayout = ({
   chat,
   dashboard,
 }: SplitLayoutProps) => {
+  const desktopLayoutRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<"history-chat" | "chat-dashboard" | null>(
     null,
   );
@@ -67,13 +68,15 @@ const SplitLayout = ({
     if (!dragMode) return;
 
     const handlePointerMove = (event: PointerEvent) => {
-      const viewportWidth = window.innerWidth;
-      if (!viewportWidth) return;
+      const containerRect = desktopLayoutRef.current?.getBoundingClientRect();
+      const containerWidth = containerRect?.width ?? 0;
+      if (!containerRect || !containerWidth) return;
 
-      const x = (event.clientX / viewportWidth) * 100;
+      const x = ((event.clientX - containerRect.left) / containerWidth) * 100;
+      const relativeX = Math.min(100, Math.max(0, x));
 
       if (dragMode === "history-chat") {
-        const nextHistory = clamp(x, 8, 35);
+        const nextHistory = clamp(relativeX, 8, 35);
         const delta = nextHistory - normalizedSizes.history;
         const nextChat = clamp(normalizedSizes.chat - delta, 18, 60);
 
@@ -88,7 +91,7 @@ const SplitLayout = ({
 
       if (dragMode === "chat-dashboard") {
         const left = normalizedSizes.history;
-        const nextChat = clamp(x - left, 18, 65);
+        const nextChat = clamp(relativeX - left, 18, 65);
         const nextDashboard = clamp(100 - left - nextChat, 20, 70);
 
         onSizesChange(
@@ -128,7 +131,7 @@ const SplitLayout = ({
 
   return (
     <>
-      <div className="hidden h-full min-h-0 lg:flex">
+      <div ref={desktopLayoutRef} className="hidden h-full min-h-0 lg:flex">
         <div
           className="min-h-0 min-w-0 overflow-hidden"
           style={{ flexBasis: `${historyBasis}%` }}

@@ -72,6 +72,100 @@ class SemanticCapabilityRegistryTests(SimpleTestCase):
         self.assertIn("inventario.route.kardex_employee", list(payload.get("matched_rules") or []))
         self.assertIn("inventario.route.kardex_employee", list(payload.get("regla_metadata_usada") or []))
 
+    def test_inventory_grouped_material_binding_resolves_dimension_summary_route(self):
+        decision = self.registry.resolve(
+            SemanticBindingRequest(
+                domain="inventario_logistica",
+                message="saldo en moviles de CONECTOR RJ 45",
+                intent="stock_balance",
+                normalized_filters={
+                    "descripcion": "CONECTOR RJ 45",
+                    "grouping_dimension": "movil",
+                },
+                group_by=["movil"],
+                source_hints={
+                    "governed_match": {
+                        "coincidencia_gobernada": True,
+                        "template_id": "inventory_material_stock_grouped_dimension",
+                        "capacidad_candidata": "inventory_stock_balance_by_material_dimension",
+                    }
+                },
+            )
+        )
+
+        payload = decision.as_dict()
+        self.assertEqual(str(payload.get("template_id") or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(payload.get("candidate_capability") or ""), "inventory_stock_balance_by_material_dimension")
+        self.assertEqual(str(payload.get("planner_route_hint") or ""), "inventory.material_stock.dimension")
+        self.assertEqual(str(payload.get("response_profile") or ""), "inventory.stock.dimension.summary")
+        self.assertEqual(str(payload.get("tool_id") or ""), "query_execution_planner.sql_assisted")
+        self.assertIn(
+            "inventario.route.stock_balance_material_grouped_dimension",
+            list(payload.get("regla_metadata_usada") or []),
+        )
+
+    def test_inventory_grouped_serial_family_binding_resolves_serial_dimension_route(self):
+        decision = self.registry.resolve(
+            SemanticBindingRequest(
+                domain="inventario_logistica",
+                message="saldo en moviles de Deco",
+                intent="stock_balance",
+                normalized_filters={
+                    "material_family": "DECO",
+                    "material_family_match_mode": "contains",
+                    "grouping_dimension": "movil",
+                },
+                group_by=["movil"],
+                source_hints={
+                    "inventory_inference": {"material_family": "serializados"},
+                    "governed_match": {
+                        "coincidencia_gobernada": True,
+                        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                        "capacidad_candidata": "inventory_serial_stock_by_family_grouped_dimension",
+                    },
+                },
+            )
+        )
+
+        payload = decision.as_dict()
+        self.assertEqual(str(payload.get("template_id") or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(payload.get("candidate_capability") or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(payload.get("planner_route_hint") or ""), "inventory.serial_stock.family_dimension")
+        self.assertEqual(str(payload.get("response_profile") or ""), "inventory.serial.stock.dimension.detail")
+        self.assertEqual(str(payload.get("tool_id") or ""), "query_execution_planner.sql_assisted")
+        self.assertIn(
+            "inventario.route.serial_stock_family_grouped_dimension",
+            list(payload.get("regla_metadata_usada") or []),
+        )
+
+    def test_inventory_grouped_serial_family_binding_ignores_stale_material_dimension_template(self):
+        decision = self.registry.resolve(
+            SemanticBindingRequest(
+                domain="inventario_logistica",
+                message="saldo en moviles de Deco",
+                intent="stock_balance",
+                normalized_filters={
+                    "material_family": "DECO",
+                    "grouping_dimension": "movil",
+                },
+                group_by=["movil"],
+                source_hints={
+                    "template_id": "inventory_material_stock_grouped_dimension",
+                    "inventory_inference": {"material_family": "serializados"},
+                    "governed_match": {
+                        "coincidencia_gobernada": True,
+                        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                        "capacidad_candidata": "inventory_serial_stock_by_family_grouped_dimension",
+                    },
+                },
+            )
+        )
+
+        payload = decision.as_dict()
+        self.assertEqual(str(payload.get("template_id") or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(payload.get("response_profile") or ""), "inventory.serial.stock.dimension.detail")
+        self.assertEqual(str(dict(payload.get("normalized_filters") or {}).get("material_family_match_mode") or ""), "contains")
+
     def test_inventory_document_pending_trace_is_governed(self):
         decision = self.registry.resolve(
             SemanticBindingRequest(

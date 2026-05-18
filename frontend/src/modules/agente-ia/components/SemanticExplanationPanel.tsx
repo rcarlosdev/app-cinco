@@ -1,7 +1,5 @@
 "use client";
 
-import EvidenceSummaryPanel from "@/modules/agente-ia/components/EvidenceSummaryPanel";
-import TaskTimeline from "@/modules/agente-ia/components/TaskTimeline";
 import ValidationStatusPanel from "@/modules/agente-ia/components/ValidationStatusPanel";
 import type { IADevSemanticExplanation } from "@/services/ia-dev.service";
 
@@ -15,6 +13,19 @@ const toLabel = (value: string) =>
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const toBusinessLabel = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  const mapping: Record<string, string> = {
+    "inventory_stock_balance_by_material_dimension":
+      "Saldo de material agrupado por dimensión",
+    "inventory_stock_balance_by_mobile": "Saldo de inventario por portador",
+    "query_execution_planner.sql_assisted": "Consulta segura con evidencia",
+    "inventory.material_stock.dimension": "Saldo agrupado por dimensión",
+    "inventory.material_stock.mobile": "Saldo operativo por portador",
+  };
+  return mapping[normalized] || toLabel(value);
+};
 
 const toEntries = (value: Record<string, unknown>) =>
   Object.entries(value)
@@ -38,7 +49,6 @@ const SemanticExplanationPanel = ({
 }: SemanticExplanationPanelProps) => {
   const entity = explanation.entity || {};
   const filters = explanation.normalized_filters || {};
-  const evidence = explanation.evidence_summary || {};
   const validation = explanation.validation_status || {};
   const metadataUsed = explanation.metadata_used || {};
   const fallbackUsed = explanation.fallback_used || {};
@@ -54,7 +64,6 @@ const SemanticExplanationPanel = ({
         .map((item) => String(item || "").trim())
         .filter(Boolean)
     : [];
-  const timeline = Array.isArray(explanation.timeline) ? explanation.timeline : [];
   const clarification = (explanation.clarification_needed || {}) as Record<
     string,
     unknown
@@ -143,7 +152,7 @@ const SemanticExplanationPanel = ({
               </span>{" "}
               <span className="text-gray-700 dark:text-gray-300">
                 {explanation.selected_capability
-                  ? toLabel(explanation.selected_capability)
+                  ? toBusinessLabel(explanation.selected_capability)
                   : "No informada"}
               </span>
             </div>
@@ -153,7 +162,7 @@ const SemanticExplanationPanel = ({
               </span>{" "}
               <span className="text-gray-700 dark:text-gray-300">
                 {explanation.selected_tool
-                  ? toLabel(explanation.selected_tool)
+                  ? toBusinessLabel(explanation.selected_tool)
                   : "No informada"}
               </span>
             </div>
@@ -163,7 +172,7 @@ const SemanticExplanationPanel = ({
               </span>{" "}
               <span className="text-gray-700 dark:text-gray-300">
                 {explanation.planner_route_hint
-                  ? toLabel(explanation.planner_route_hint)
+                  ? toBusinessLabel(explanation.planner_route_hint)
                   : "No informada"}
               </span>
             </div>
@@ -197,9 +206,14 @@ const SemanticExplanationPanel = ({
         backgroundStatus={backgroundStatus}
       />
 
-      <EvidenceSummaryPanel evidence={evidence} limitations={limitations} />
-
-      <TaskTimeline steps={timeline} />
+      {limitations.length > 0 ? (
+        <div className="space-y-2 rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="font-semibold">Limitaciones declaradas</div>
+          {limitations.map((item) => (
+            <div key={item}>{item}</div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 };
