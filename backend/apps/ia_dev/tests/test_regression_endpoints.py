@@ -23,6 +23,10 @@ from apps.ia_dev.views.chat_view import (
     IADevKnowledgeApproveView,
     IADevMemoryResetView,
     IADevObservabilitySummaryView,
+    IADevRuntimeGovernanceHealthView,
+    IADevRuntimeOperationsSummaryView,
+    IADevSemanticGapOperationsView,
+    IADevRuntimeTaskExplorerView,
 )
 
 
@@ -467,6 +471,124 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
         response = IADevObservabilitySummaryView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("generator", str(response.data.get("detail") or "").lower())
+
+    def test_runtime_operations_summary_endpoint_returns_payload(self):
+        payload = {"sample_size": 2, "totals": {"tasks": 2}}
+        with patch.object(
+            chat_view_module.runtime_governance_service,
+            "build_runtime_operations_summary",
+            return_value=payload,
+        ) as mock_summary:
+            request = self.factory.get("/ia-dev/runtime/operations/summary/?limit=50&status=awaiting_approval")
+            force_authenticate(request, user=self.user)
+            response = IADevRuntimeOperationsSummaryView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data.get("operations"), payload)
+        mock_summary.assert_called_once_with(limit=50, status="awaiting_approval")
+
+    def test_semantic_gap_operations_endpoint_returns_operational_payload(self):
+        with patch.object(
+            chat_view_module.semantic_gap_review_service,
+            "listar_brechas_pendientes",
+            return_value=[{"id": 1, "estado_revision": "nueva"}],
+        ) as mock_pending:
+            with patch.object(
+                chat_view_module.semantic_gap_review_service,
+                "agrupar_por_categoria",
+                return_value=[{"categoria_brecha": "falta_sinonimo", "count": 1}],
+            ) as mock_grouped:
+                with patch.object(
+                    chat_view_module.semantic_gap_review_service,
+                    "ver_brechas_frecuentes",
+                    return_value=[{"categoria_brecha": "falta_sinonimo", "count": 1}],
+                ) as mock_frequent:
+                    request = self.factory.get("/ia-dev/runtime/semantic-gaps/?limit=20")
+                    force_authenticate(request, user=self.user)
+                    response = IADevSemanticGapOperationsView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = dict(response.data.get("gestion_brechas_semanticas") or {})
+        self.assertEqual(len(list(payload.get("brechas_pendientes") or [])), 1)
+        mock_pending.assert_called_once_with(limit=20)
+        mock_grouped.assert_called_once_with(limit=20)
+        mock_frequent.assert_called_once_with(limit=20)
+
+    def test_semantic_gap_operations_endpoint_aprueba_propuesta(self):
+        with patch.object(
+            chat_view_module.semantic_gap_review_service,
+            "aprobar_propuesta",
+            return_value={"propuesta_mejora": {"estado_aprobacion": "aprobada"}},
+        ) as mock_approve:
+            request = self.factory.post(
+                "/ia-dev/runtime/semantic-gaps/",
+                {"action": "aprobar_propuesta", "brecha_id": 7, "rol_aprobador": "governance"},
+                format="json",
+            )
+            force_authenticate(request, user=self.user)
+            response = IADevSemanticGapOperationsView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_approve.assert_called_once_with(
+            brecha_id=7,
+            aprobado_por="user:77",
+            rol_aprobador="governance",
+            evidencia_post_aprobacion={},
+        )
+
+    def test_runtime_task_explorer_endpoint_requires_lookup_identifier(self):
+        request = self.factory.get("/ia-dev/runtime/tasks/explorer/")
+        force_authenticate(request, user=self.user)
+        response = IADevRuntimeTaskExplorerView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_runtime_task_explorer_endpoint_returns_not_found_when_missing(self):
+        with patch.object(
+            chat_view_module.runtime_governance_service,
+            "build_task_trace_explorer",
+            return_value=None,
+        ) as mock_explorer:
+            request = self.factory.get("/ia-dev/runtime/tasks/explorer/?run_id=run-missing")
+            force_authenticate(request, user=self.user)
+            response = IADevRuntimeTaskExplorerView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        mock_explorer.assert_called_once_with(
+            run_id="run-missing",
+            resume_token=None,
+            background_run_id=None,
+        )
+
+    def test_runtime_governance_health_endpoint_returns_monitor_and_pilot_health(self):
+        monitor_payload = {"domain": "ausentismo", "volumen_consultas": 4}
+        health_payload = {"status": "healthy", "checks": {}}
+        with patch.object(
+            chat_view_module.runtime_governance_service,
+            "build_monitor_summary",
+            return_value=monitor_payload,
+        ) as mock_monitor:
+            with patch.object(
+                chat_view_module.runtime_governance_service,
+                "build_pilot_health",
+                return_value=health_payload,
+            ) as mock_health:
+                request = self.factory.get(
+                    "/ia-dev/runtime/governance/health/?domain=ausentismo&days=7&since_fix=1&created_after=2026-05-01"
+                )
+                force_authenticate(request, user=self.user)
+                response = IADevRuntimeGovernanceHealthView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        governance = dict(response.data.get("governance") or {})
+        self.assertEqual(governance.get("monitor_summary"), monitor_payload)
+        self.assertEqual(governance.get("pilot_health"), health_payload)
+        mock_monitor.assert_called_once_with(domain="ausentismo", days=7)
+        mock_health.assert_called_once_with(
+            domain="ausentismo",
+            days=7,
+            since_fix=True,
+            created_after="2026-05-01",
+        )
 
     def test_knowledge_approve_sync_flow_still_works(self):
         result = {"ok": True, "applied": True, "proposal": {"proposal_id": "KPRO-01"}}

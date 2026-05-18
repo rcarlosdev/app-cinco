@@ -241,6 +241,17 @@ const buildWidgets = (
     });
   }
 
+  if (payload.semanticExplanation) {
+    widgets.push({
+      id: "semantic-explanation",
+      type: "semantic_explanation",
+      title: "Explicacion semantica",
+      data: {
+        explanation: payload.semanticExplanation,
+      },
+    });
+  }
+
   const tabs = buildTableTabs(payload, response);
   if (tabs.length > 0) {
     widgets.push({
@@ -297,5 +308,6 @@ export const buildDashboardSnapshot = (
       asString(response?.orchestrator?.selected_agent) || "assistant",
     isLoading,
     hasStructuredContent: Boolean(payload?.hasStructuredContent),
+    semanticExplanation: payload?.semanticExplanation ?? null,
   };
 };

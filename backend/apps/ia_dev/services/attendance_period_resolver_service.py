@@ -8,6 +8,8 @@ import unicodedata
 from datetime import date, timedelta
 from typing import Any
 
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 from apps.ia_dev.services.memory_service import SessionMemoryStore
 from apps.ia_dev.services.period_service import resolve_period_from_text
 
@@ -22,6 +24,7 @@ class AttendancePeriodResolverService:
         *,
         enable_openai_period: bool | None = None,
         period_model: str | None = None,
+        gateway: OpenAIGatewayService | None = None,
     ):
         self.enable_openai_period = (
             self._env_flag("IA_DEV_USE_OPENAI_PERIOD", default="1")
@@ -31,6 +34,7 @@ class AttendancePeriodResolverService:
         self.period_model = str(
             period_model or os.getenv("IA_DEV_OPENAI_PERIOD_MODEL", "gpt-4.1-mini")
         ).strip()
+        self.gateway = gateway or OpenAIGatewayService()
 
     def resolve_attendance_period(
         self,
@@ -180,9 +184,6 @@ class AttendancePeriodResolverService:
             return None
 
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=openai_api_key)
             today_iso = date.today().isoformat()
             history_text = self.format_recent_messages_for_prompt(recent_messages or [])
             context_period = ""
@@ -192,9 +193,15 @@ class AttendancePeriodResolverService:
                 if start and end:
                     context_period = f"Last period in session: {start} to {end}"
 
-            response = client.responses.create(
-                model=self.period_model,
-                input=[
+            response = self.gateway.create(
+                OpenAIGatewayRequest(
+                    component="attendance_period_resolver_service",
+                    model=self.period_model,
+                    timeout_seconds=20,
+                    retries=1,
+                    trace_metadata={"flow": "attendance_period_resolution"},
+                    metadata={"has_session_context": bool(context_period)},
+                    input=[
                     {
                         "role": "system",
                         "content": (
@@ -217,10 +224,11 @@ class AttendancePeriodResolverService:
                         ),
                     },
                     {"role": "user", "content": message},
-                ],
+                    ],
+                )
             )
 
-            text = (getattr(response, "output_text", "") or "").strip()
+            text = response.output_text
             if not text:
                 return None
             json_match = re.search(r"\{.*\}", text, re.DOTALL)

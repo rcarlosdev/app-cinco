@@ -2,6 +2,7 @@ import type {
   IADevAction,
   IADevChartPayload,
   IADevChatResponse,
+  IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 import type {
   NormalizedAssistantPayload,
@@ -317,6 +318,10 @@ export const normalizeChatPayload = (
   const data = asObject(response?.data) || {};
   const envelope = asObject(response?.response_envelope) || {};
   const runtime = asObject(asObject(response?.data_sources)?.runtime) || {};
+  const semanticExplanation =
+    (asObject(response?.task?.current_run?.semantic_explanation) as
+      | IADevSemanticExplanation
+      | null) || null;
 
   const kpis = normalizeKpis(
     data.kpis ?? (response as Record<string, unknown> | undefined)?.kpis,
@@ -393,7 +398,8 @@ export const normalizeChatPayload = (
     extraTables.length ||
     chart ||
     charts.length ||
-    (labels.length && series.length),
+    (labels.length && series.length) ||
+    semanticExplanation,
   );
 
   const kind: NormalizedAssistantPayload["kind"] =
@@ -439,5 +445,6 @@ export const normalizeChatPayload = (
       asString(envelope.progress_source) ||
       asString(runtime.progress_source) ||
       "backend",
+    semanticExplanation,
   };
 };

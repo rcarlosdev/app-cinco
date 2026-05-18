@@ -10,8 +10,10 @@ from apps.ia_dev.services.dictionary_tool_service import DictionaryToolService
 from apps.ia_dev.services.knowledge_governance_service import KnowledgeGovernanceService
 from apps.ia_dev.services.observability_service import ObservabilityService
 from apps.ia_dev.services.runtime_fallback_service import RuntimeFallbackService
+from apps.ia_dev.services.runtime_governance_service import RuntimeGovernanceService
 from apps.ia_dev.services.session_memory_runtime_service import SessionMemoryRuntimeService
 from apps.ia_dev.services.ticket_service import TicketService
+from apps.ia_dev.application.runtime.semantic_gap_review_service import SemanticGapReviewService
 from apps.security.permissions.api_permissions import IsAuthenticatedUser
 
 
@@ -23,6 +25,8 @@ dictionary_tool_service = DictionaryToolService()
 knowledge_governance_service = KnowledgeGovernanceService()
 async_job_service = AsyncJobService()
 observability_service = ObservabilityService()
+runtime_governance_service = RuntimeGovernanceService()
+semantic_gap_review_service = SemanticGapReviewService()
 
 
 def _get_chat_application_service() -> ChatApplicationService:
@@ -84,6 +88,11 @@ def _attach_http_runtime_metadata(
     legacy_runtime_fallback_reason: str | None = None,
 ) -> dict:
     payload = ensure_chat_response_contract(response)
+    task = dict(payload.get("task") or {})
+    current_run = dict(task.get("current_run") or {})
+    current_run["reply"] = str(payload.get("reply") or "")
+    task["current_run"] = current_run
+    payload["task"] = task
     data_sources = dict(payload.get("data_sources") or {})
     runtime = dict(data_sources.get("runtime") or {})
     runtime["entrypoint"] = "chat_view_direct"
@@ -524,3 +533,178 @@ class IADevObservabilitySummaryView(APIView):
             fallback_reason=fallback_reason,
         )
         return Response({"status": "ok", "observability": payload}, status=status.HTTP_200_OK)
+
+
+class IADevRuntimeOperationsSummaryView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 100))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "limit debe ser numerico"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        status_filter = str(request.query_params.get("status", "")).strip().lower() or None
+        payload = runtime_governance_service.build_runtime_operations_summary(
+            limit=limit,
+            status=status_filter,
+        )
+        return Response({"status": "ok", "operations": payload}, status=status.HTTP_200_OK)
+
+
+class IADevRuntimeTaskExplorerView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        run_id = str(request.query_params.get("run_id", "")).strip() or None
+        resume_token = str(request.query_params.get("resume_token", "")).strip() or None
+        background_run_id = str(request.query_params.get("background_run_id", "")).strip() or None
+        if not any((run_id, resume_token, background_run_id)):
+            return Response(
+                {"detail": "run_id, resume_token o background_run_id es requerido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = runtime_governance_service.build_task_trace_explorer(
+            run_id=run_id,
+            resume_token=resume_token,
+            background_run_id=background_run_id,
+        )
+        if not payload:
+            return Response(
+                {"detail": "task not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({"status": "ok", "task_explorer": payload}, status=status.HTTP_200_OK)
+
+
+class IADevRuntimeGovernanceHealthView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        domain = str(request.query_params.get("domain", "ausentismo")).strip() or "ausentismo"
+        try:
+            days = int(request.query_params.get("days", 1))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "days debe ser numerico"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        since_fix = str(request.query_params.get("since_fix", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        created_after = str(request.query_params.get("created_after", "")).strip() or None
+        payload = {
+            "monitor_summary": runtime_governance_service.build_monitor_summary(
+                domain=domain,
+                days=days,
+            ),
+            "pilot_health": runtime_governance_service.build_pilot_health(
+                domain=domain,
+                days=days,
+                since_fix=since_fix,
+                created_after=created_after,
+            ),
+        }
+        return Response({"status": "ok", "governance": payload}, status=status.HTTP_200_OK)
+
+
+class IADevSemanticGapOperationsView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 100))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "limit debe ser numerico"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        include_summary = str(request.query_params.get("summary", "")).strip().lower() in {"1", "true", "yes", "on"}
+        payload = {
+            "brechas_pendientes": semantic_gap_review_service.listar_brechas_pendientes(limit=limit),
+            "brechas_por_categoria": semantic_gap_review_service.agrupar_por_categoria(limit=limit),
+            "brechas_frecuentes": semantic_gap_review_service.ver_brechas_frecuentes(limit=limit),
+        }
+        if include_summary:
+            payload["resumen"] = semantic_gap_review_service.build_operations_snapshot(limit=limit)
+        return Response({"status": "ok", "gestion_brechas_semanticas": payload}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        action = str(request.data.get("action", "")).strip().lower()
+        try:
+            brecha_id = int(request.data.get("brecha_id", 0))
+        except (TypeError, ValueError):
+            return Response({"detail": "brecha_id debe ser numerico"}, status=status.HTTP_400_BAD_REQUEST)
+        actor = _resolve_user_key(request) or str(request.data.get("actor", "")).strip() or "user:unknown"
+
+        try:
+            if action == "marcar_en_revision":
+                payload = semantic_gap_review_service.marcar_en_revision(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    asignado_a=str(request.data.get("asignado_a", "")).strip(),
+                    comentario=str(request.data.get("comentario", "")).strip(),
+                )
+            elif action == "marcar_descartada":
+                payload = semantic_gap_review_service.marcar_descartada(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    decision=str(request.data.get("decision", "")).strip() or "descartar_brecha",
+                    comentario=str(request.data.get("comentario", "")).strip(),
+                )
+            elif action == "marcar_resuelta":
+                payload = semantic_gap_review_service.marcar_resuelta(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    decision=str(request.data.get("decision", "")).strip() or "resolver_brecha",
+                    comentario=str(request.data.get("comentario", "")).strip(),
+                    prueba_validacion=str(request.data.get("prueba_validacion", "")).strip(),
+                )
+            elif action == "crear_propuesta":
+                payload = semantic_gap_review_service.crear_propuesta(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    tipo_propuesta=str(request.data.get("tipo_propuesta", "")).strip(),
+                    descripcion=str(request.data.get("descripcion", "")).strip(),
+                    destino_sugerido=str(request.data.get("destino_sugerido", "")).strip(),
+                    valor_sugerido=request.data.get("valor_sugerido"),
+                    evidencia=dict(request.data.get("evidencia") or {}),
+                    riesgo=str(request.data.get("riesgo", "medio")).strip(),
+                )
+            elif action == "aprobar_propuesta":
+                payload = semantic_gap_review_service.aprobar_propuesta(
+                    brecha_id=brecha_id,
+                    aprobado_por=actor,
+                    rol_aprobador=str(request.data.get("rol_aprobador", "governance")).strip(),
+                    evidencia_post_aprobacion=dict(request.data.get("evidencia_post_aprobacion") or {}),
+                )
+            elif action == "aplicar_propuesta":
+                payload = semantic_gap_review_service.aplicar_propuesta_gobernada(
+                    brecha_id=brecha_id,
+                    aplicado_por=actor,
+                    aplicado_en=str(request.data.get("aplicado_en", "")).strip(),
+                    referencia_metadata_creada=str(request.data.get("referencia_metadata_creada", "")).strip(),
+                    referencia_capacidad_creada=str(request.data.get("referencia_capacidad_creada", "")).strip(),
+                    referencia_agente_creado=str(request.data.get("referencia_agente_creado", "")).strip(),
+                    prueba_validacion=str(request.data.get("prueba_validacion", "")).strip(),
+                    validado_por_eval=bool(request.data.get("validado_por_eval", False)),
+                )
+            elif action == "vincular_eval":
+                payload = semantic_gap_review_service.vincular_eval(
+                    brecha_id=brecha_id,
+                    eval_id=str(request.data.get("eval_id", "")).strip(),
+                    vinculado_por=actor,
+                    caso_real_reproducible=str(request.data.get("caso_real_reproducible", "")).strip(),
+                    eval_actualizado=bool(request.data.get("eval_actualizado", False)),
+                )
+            else:
+                return Response({"detail": "action no soportada"}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"status": "ok", "gestion_brechas_semanticas": payload}, status=status.HTTP_200_OK)

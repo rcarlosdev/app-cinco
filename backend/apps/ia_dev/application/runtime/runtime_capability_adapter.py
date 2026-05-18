@@ -7,8 +7,12 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     QueryExecutionPlan,
     ResolvedQuerySpec,
 )
+from apps.ia_dev.application.runtime.approval_runtime_service import ApprovalRuntimeService
+from apps.ia_dev.application.runtime.background_runtime_service import BackgroundRuntimeService
+from apps.ia_dev.application.runtime.runtime_hardening_service import RuntimeHardeningService
 from apps.ia_dev.application.policies.policy_guard import PolicyAction, PolicyDecision
 from apps.ia_dev.application.routing.capability_catalog import CapabilityCatalog
+from apps.ia_dev.application.runtime.tool_registry_service import ToolRegistryService
 from apps.ia_dev.application.taxonomia_dominios import (
     dominio_desde_capacidad,
     es_dominio_operativo,
@@ -24,11 +28,19 @@ class RuntimeCapabilityAdapter:
         self,
         *,
         catalog: CapabilityCatalog | None = None,
+        tool_registry_service: ToolRegistryService | None = None,
+        approval_runtime_service: ApprovalRuntimeService | None = None,
+        background_runtime_service: BackgroundRuntimeService | None = None,
+        runtime_hardening_service: RuntimeHardeningService | None = None,
         attendance_handler: AusentismoHandler | None = None,
         empleados_handler: EmpleadosHandler | None = None,
         transport_handler: TransportHandler | None = None,
     ):
         self.catalog = catalog or CapabilityCatalog()
+        self.tool_registry_service = tool_registry_service or ToolRegistryService(catalog=self.catalog)
+        self.approval_runtime_service = approval_runtime_service or ApprovalRuntimeService()
+        self.background_runtime_service = background_runtime_service or BackgroundRuntimeService()
+        self.runtime_hardening_service = runtime_hardening_service or RuntimeHardeningService()
         self._attendance_handler = attendance_handler
         self._empleados_handler = empleados_handler
         self._transport_handler = transport_handler
@@ -255,12 +267,114 @@ class RuntimeCapabilityAdapter:
 
         capability_id = str(planned_capability.get("capability_id") or route.get("selected_capability_id") or "")
         execution_constraints = dict((execution_plan.constraints if execution_plan else {}) or {})
+        tool_definition = self.tool_registry_service.resolve_tool_for_runtime(
+            response_flow="handler",
+            capability_id=capability_id,
+            route_payload=route,
+            execution_plan=execution_plan.as_dict() if execution_plan else {},
+        )
         handler = self._resolve_handler(capability_id=capability_id)
         if handler is None:
             return {
                 "ok": False,
                 "error": f"unsupported_capability_domain:{capability_id}",
-                "meta": {"capability_id": capability_id},
+                "meta": {
+                    "capability_id": capability_id,
+                    "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                },
+            }
+        background_decision = self.background_runtime_service.should_run_in_background(
+            tool_definition=tool_definition,
+            arguments={
+                "message": message,
+                "session_id": session_id,
+            },
+            execution_plan=execution_plan.as_dict() if execution_plan else {},
+            approval_pending=False,
+        )
+        if tool_definition is not None and bool(tool_definition.approval_policy.approval_required):
+            approval_result = self.approval_runtime_service.evaluate_tool_execution(
+                run_context=run_context,
+                tool_definition=tool_definition,
+                requested_by_agent=str((run_context.metadata.get("agents_runtime") or {}).get("selected_specialist") or "runtime"),
+                target_action="execute_handler",
+                evidence_before_approval={
+                    "tool_id": str(tool_definition.tool_id or ""),
+                    "capability_id": capability_id,
+                    "candidate_domain": str((planned_capability.get("source") or {}).get("domain") or ""),
+                    "candidate_intent": str((planned_capability.get("source") or {}).get("intent") or ""),
+                    "message_excerpt": str(message or "")[:160],
+                },
+            )
+            run_context.metadata["approval_runtime"] = {
+                "approvals": list(approval_result.get("approvals") or []),
+                "approval_trace": list(approval_result.get("approval_trace") or []),
+                "status": str(approval_result.get("task_status") or "awaiting_approval"),
+            }
+            approval = dict(((approval_result.get("approvals") or [None])[0]) or {})
+            self.background_runtime_service.mark_awaiting_approval(
+                run_context=run_context,
+                resume_token=str(approval.get("resume_token") or ""),
+                partial_evidence=dict(approval.get("evidence_before_approval") or {}),
+                tool_id=str(tool_definition.tool_id or ""),
+            )
+            if observability is not None and hasattr(observability, "record_event"):
+                observability.record_event(
+                    event_type="runtime_approval_requested",
+                    source="RuntimeCapabilityAdapter",
+                    meta={
+                        "run_id": str(run_context.run_id or ""),
+                        "trace_id": str(run_context.trace_id or ""),
+                        "tool_id": str(tool_definition.tool_id or ""),
+                        "capability_id": capability_id,
+                        "approval_request_id": str((((approval_result.get("approvals") or [{}])[0]) or {}).get("approval_request_id") or ""),
+                    },
+                )
+            return {
+                "ok": False,
+                "error": f"approval_required:{tool_definition.tool_id}",
+                "meta": {
+                    "tool_id": str(tool_definition.tool_id or ""),
+                    "tool_definition": tool_definition.as_dict(),
+                    "approval_pending": True,
+                    "approval_status": str(approval_result.get("approval_status") or "awaiting_approval"),
+                    "approvals": list(approval_result.get("approvals") or []),
+                    "approval_trace": list(approval_result.get("approval_trace") or []),
+                },
+            }
+        if bool(background_decision.get("enabled")):
+            background_state = self.background_runtime_service.queue_run(
+                run_context=run_context,
+                tool_id=str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                policy_reason=str(background_decision.get("reason") or ""),
+                partial_evidence={
+                    "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                    "capability_id": capability_id,
+                },
+                timeout_seconds=int(((execution_plan.metadata if execution_plan else {}) or {}).get("timeout_seconds") or 0),
+            )
+            if observability is not None and hasattr(observability, "record_event"):
+                observability.record_event(
+                    event_type="background_run_queued",
+                    source="RuntimeCapabilityAdapter",
+                    meta={
+                        "run_id": str(run_context.run_id or ""),
+                        "trace_id": str(run_context.trace_id or ""),
+                        "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                        "policy_reason": str(background_decision.get("reason") or ""),
+                    },
+                )
+            return {
+                "ok": False,
+                "error": f"background_execution_queued:{capability_id}",
+                "meta": {
+                    "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                    "tool_definition": tool_definition.as_dict() if tool_definition else {},
+                    "background_pending": True,
+                    "background": dict(background_state.get("background") or {}),
+                    "background_trace": list(background_state.get("background_trace") or []),
+                    "checkpoints": list(background_state.get("checkpoints") or []),
+                },
             }
 
         result = handler.handle(
@@ -275,16 +389,191 @@ class RuntimeCapabilityAdapter:
             execution_plan=execution_plan,
             observability=observability,
         )
+        tool_trace = self.tool_registry_service.build_runtime_trace(
+            run_context=run_context,
+            response_flow="handler",
+            capability_id=capability_id,
+            route_payload=route,
+            execution_plan=execution_plan.as_dict() if execution_plan else {},
+            response=result.response,
+            fallback_used={"used": False, "reason": "", "flow": ""},
+            validation_result={"satisfied": bool(result.ok)},
+        )
+        if tool_trace:
+            run_context.metadata["runtime_tool_trace"] = list(tool_trace)
+        idempotency_key = self.runtime_hardening_service.build_idempotency_key(
+            run_id=run_context.run_id,
+            tool_id=str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+            arguments={"message": message, "session_id": session_id},
+        )
         return {
             "ok": bool(result.ok),
             "response": result.response,
             "error": result.error,
             "meta": {
                 **dict(result.metadata or {}),
+                "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                "tool_definition": tool_definition.as_dict() if tool_definition else {},
+                "tool_trace": tool_trace,
+                "correlation": self.runtime_hardening_service.build_correlation_metadata(
+                    run_id=run_context.run_id,
+                    trace_id=run_context.trace_id,
+                    session_id=run_context.session_id,
+                    tool_id=str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                ),
+                "idempotency_key": idempotency_key,
                 "constraints_applied": bool(execution_constraints),
                 "constraint_keys": sorted(list(execution_constraints.keys())),
             },
         }
+
+    def execute_registered_tool(
+        self,
+        *,
+        run_context: RunContext,
+        tool_id: str,
+        arguments: dict[str, Any] | None,
+        session_id: str | None,
+        reset_memory: bool,
+        memory_context: dict[str, Any] | None = None,
+        resolved_query: ResolvedQuerySpec | None = None,
+        execution_plan: QueryExecutionPlan | None = None,
+        observability=None,
+        sql_assisted_executor=None,
+    ) -> dict[str, Any]:
+        tool_definition = self.tool_registry_service.get_tool(tool_id)
+        if tool_definition is None:
+            return {
+                "ok": False,
+                "error": f"tool_not_registered:{tool_id}",
+                "meta": {"tool_id": str(tool_id or "")},
+            }
+        if bool(tool_definition.approval_policy.approval_required):
+            approval_result = self.approval_runtime_service.evaluate_tool_execution(
+                run_context=run_context,
+                tool_definition=tool_definition,
+                requested_by_agent=str((run_context.metadata.get("agents_runtime") or {}).get("selected_specialist") or "runtime"),
+                target_action="execute_registered_tool",
+                evidence_before_approval={
+                    "tool_id": str(tool_definition.tool_id or ""),
+                    "arguments": dict(arguments or {}),
+                },
+            )
+            run_context.metadata["approval_runtime"] = {
+                "approvals": list(approval_result.get("approvals") or []),
+                "approval_trace": list(approval_result.get("approval_trace") or []),
+                "status": str(approval_result.get("task_status") or "awaiting_approval"),
+            }
+            approval = dict(((approval_result.get("approvals") or [None])[0]) or {})
+            self.background_runtime_service.mark_awaiting_approval(
+                run_context=run_context,
+                resume_token=str(approval.get("resume_token") or ""),
+                partial_evidence=dict(approval.get("evidence_before_approval") or {}),
+                tool_id=str(tool_id or ""),
+            )
+            return {
+                "ok": False,
+                "error": f"tool_requires_approval:{tool_id}",
+                "meta": {
+                    "tool_id": str(tool_id or ""),
+                    "approval_policy": tool_definition.approval_policy.as_dict(),
+                    "approval_pending": True,
+                    "approval_status": str(approval_result.get("approval_status") or "awaiting_approval"),
+                    "approvals": list(approval_result.get("approvals") or []),
+                    "approval_trace": list(approval_result.get("approval_trace") or []),
+                },
+            }
+        payload = dict(arguments or {})
+        background_decision = self.background_runtime_service.should_run_in_background(
+            tool_definition=tool_definition,
+            arguments=payload,
+            execution_plan=execution_plan.as_dict() if execution_plan else {},
+            approval_pending=False,
+        )
+        if bool(background_decision.get("enabled")):
+            background_state = self.background_runtime_service.queue_run(
+                run_context=run_context,
+                tool_id=str(tool_definition.tool_id or tool_id or ""),
+                policy_reason=str(background_decision.get("reason") or ""),
+                partial_evidence={"tool_id": str(tool_definition.tool_id or tool_id or ""), "arguments": payload},
+                timeout_seconds=int(((execution_plan.metadata if execution_plan else {}) or {}).get("timeout_seconds") or payload.get("timeout_seconds") or 0),
+            )
+            return {
+                "ok": False,
+                "error": f"background_execution_queued:{tool_id}",
+                "meta": {
+                    "tool_id": str(tool_id or ""),
+                    "tool_definition": tool_definition.as_dict(),
+                    "background_pending": True,
+                    "background": dict(background_state.get("background") or {}),
+                    "background_trace": list(background_state.get("background_trace") or []),
+                    "checkpoints": list(background_state.get("checkpoints") or []),
+                },
+            }
+
+        if tool_definition.tool_id == ToolRegistryService.SQL_ASSISTED_TOOL_ID:
+            if not callable(sql_assisted_executor):
+                return {
+                    "ok": False,
+                    "error": "sql_assisted_executor_not_configured",
+                    "meta": {
+                        "tool_id": tool_definition.tool_id,
+                        "tool_definition": tool_definition.as_dict(),
+                    },
+                }
+            result = dict(
+                sql_assisted_executor(
+                    tool_definition=tool_definition,
+                    arguments=payload,
+                    execution_plan=execution_plan,
+                )
+                or {}
+            )
+            result.setdefault("meta", {})
+            result["meta"] = {
+                **dict(result.get("meta") or {}),
+                "tool_id": tool_definition.tool_id,
+                "tool_definition": tool_definition.as_dict(),
+            }
+            return result
+
+        capability_id = str(tool_definition.capability_id or tool_definition.tool_id or "").strip()
+        planned_capability = self._build_plan(
+            capability_id=capability_id,
+            reason="native_tool_execution",
+            classification={
+                "domain": str(tool_definition.domain or ""),
+                "intent": str(payload.get("intent") or ""),
+                "output_mode": "table",
+                "needs_database": True,
+            },
+            query_constraints=dict((execution_plan.constraints if execution_plan else {}) or {}),
+            candidate_rank=1,
+            candidate_score=100,
+        )
+        route = {
+            "routing_mode": "capability",
+            "selected_capability_id": capability_id,
+            "execute_capability": True,
+            "use_legacy": False,
+            "reason": "native_tool_execution",
+            "policy_action": "allow",
+            "policy_allowed": True,
+            "capability_exists": True,
+            "rollout_enabled": True,
+        }
+        return self.execute(
+            run_context=run_context,
+            route=route,
+            planned_capability=planned_capability,
+            message=str(payload.get("message") or run_context.message or ""),
+            session_id=session_id,
+            reset_memory=reset_memory,
+            memory_context=memory_context,
+            resolved_query=resolved_query,
+            execution_plan=execution_plan,
+            observability=observability,
+        )
 
     def _resolve_primary_capability_id(
         self,
@@ -341,6 +630,21 @@ class RuntimeCapabilityAdapter:
             for item in list(intent.get("group_by") or [])
             if str(item or "").strip()
         ]
+        semantic_context = dict(payload.get("semantic_context") or {})
+        resolved_semantic = dict(semantic_context.get("resolved_semantic") or {})
+        if domain == "inventario_logistica":
+            registry_binding = dict(
+                semantic_context.get("semantic_capability_registry")
+                or resolved_semantic.get("semantic_capability_registry")
+                or {}
+            )
+            registry_capability = str(
+                registry_binding.get("candidate_capability")
+                or resolved_semantic.get("candidate_capability")
+                or ""
+            ).strip()
+            if registry_capability:
+                return registry_capability
         if domain in {"empleados", "rrhh"}:
             if template_id == "detail_by_entity_and_period":
                 return "empleados.detail.v1"
@@ -379,8 +683,10 @@ class RuntimeCapabilityAdapter:
         candidate_score: int,
     ) -> dict[str, Any]:
         definition = self.catalog.get(capability_id)
+        tool_definition = self.tool_registry_service.get_tool_for_capability(capability_id)
         return {
             "capability_id": capability_id,
+            "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
             "capability_exists": bool(definition),
             "rollout_enabled": bool(definition),
             "handler_key": definition.handler_key if definition else "legacy.passthrough",
@@ -400,6 +706,7 @@ class RuntimeCapabilityAdapter:
             "candidate_rank": int(candidate_rank),
             "candidate_score": int(candidate_score),
             "workflow_hints": {},
+            "tool_definition": tool_definition.as_dict() if tool_definition else {},
         }
 
     def _resolve_handler(self, *, capability_id: str):

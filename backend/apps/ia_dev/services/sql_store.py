@@ -3,6 +3,7 @@ import os
 import re
 import threading
 import time
+import hashlib
 from collections import defaultdict
 from typing import Any
 
@@ -603,6 +604,62 @@ class IADevSqlStore:
                     KEY idx_ia_dev_mat_run (run_id),
                     KEY idx_ia_dev_mat_trace (trace_id),
                     KEY idx_ia_dev_mat_created (created_at)
+                )
+                """
+            )
+            self._execute(
+                """
+                CREATE TABLE IF NOT EXISTS registro_brechas_semanticas (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    fecha_creacion BIGINT NOT NULL,
+                    consulta_original TEXT NOT NULL,
+                    usuario_id VARCHAR(128) NULL,
+                    sesion_id VARCHAR(64) NULL,
+                    task_id VARCHAR(120) NULL,
+                    run_id VARCHAR(64) NULL,
+                    dominio_detectado VARCHAR(80) NULL,
+                    intencion_detectada VARCHAR(120) NULL,
+                    capacidad_candidata VARCHAR(160) NULL,
+                    herramienta_candidata VARCHAR(160) NULL,
+                    etapa_fallo VARCHAR(80) NOT NULL,
+                    categoria_brecha VARCHAR(80) NOT NULL,
+                    motivo_brecha TEXT NOT NULL,
+                    requiere_aclaracion TINYINT(1) NOT NULL DEFAULT 0,
+                    fuera_de_alcance TINYINT(1) NOT NULL DEFAULT 0,
+                    falta_metadata TINYINT(1) NOT NULL DEFAULT 0,
+                    faltan_tablas TINYINT(1) NOT NULL DEFAULT 0,
+                    faltan_campos TINYINT(1) NOT NULL DEFAULT 0,
+                    faltan_relaciones TINYINT(1) NOT NULL DEFAULT 0,
+                    faltan_sinonimos TINYINT(1) NOT NULL DEFAULT 0,
+                    faltan_reglas TINYINT(1) NOT NULL DEFAULT 0,
+                    falta_capacidad TINYINT(1) NOT NULL DEFAULT 0,
+                    falta_tool TINYINT(1) NOT NULL DEFAULT 0,
+                    falta_agente TINYINT(1) NOT NULL DEFAULT 0,
+                    fallo_planner TINYINT(1) NOT NULL DEFAULT 0,
+                    fallo_evidencia TINYINT(1) NOT NULL DEFAULT 0,
+                    fallo_validacion TINYINT(1) NOT NULL DEFAULT 0,
+                    error_tecnico TINYINT(1) NOT NULL DEFAULT 0,
+                    fallback_sombreado_usado TINYINT(1) NOT NULL DEFAULT 0,
+                    evidencia_disponible LONGTEXT NULL,
+                    sugerencia_resolucion TEXT NULL,
+                    prioridad VARCHAR(24) NOT NULL DEFAULT 'media',
+                    estado_revision VARCHAR(32) NOT NULL DEFAULT 'nueva',
+                    asignado_a VARCHAR(128) NULL,
+                    fecha_resolucion BIGINT NULL,
+                    tipo_resolucion VARCHAR(80) NULL,
+                    referencia_metadata_creada VARCHAR(160) NULL,
+                    referencia_capacidad_creada VARCHAR(160) NULL,
+                    referencia_agente_creado VARCHAR(160) NULL,
+                    clave_idempotencia VARCHAR(160) NOT NULL,
+                    origen_registro VARCHAR(40) NOT NULL DEFAULT 'runtime',
+                    metadata_json LONGTEXT NULL,
+                    UNIQUE KEY uq_registro_brechas_clave (clave_idempotencia),
+                    KEY idx_registro_brechas_fecha (fecha_creacion),
+                    KEY idx_registro_brechas_categoria (categoria_brecha),
+                    KEY idx_registro_brechas_dominio (dominio_detectado),
+                    KEY idx_registro_brechas_capacidad (capacidad_candidata),
+                    KEY idx_registro_brechas_estado (estado_revision),
+                    KEY idx_registro_brechas_run (run_id)
                 )
                 """
             )
@@ -2803,6 +2860,661 @@ class IADevSqlStore:
             }
             for row in rows
         ]
+
+    def get_registro_brecha_semantica_por_clave(self, clave_idempotencia: str) -> dict | None:
+        self.ensure_tables()
+        key = str(clave_idempotencia or "").strip()
+        if not key:
+            return None
+        row = self._fetchone(
+            """
+            SELECT
+                id,
+                fecha_creacion,
+                consulta_original,
+                usuario_id,
+                sesion_id,
+                task_id,
+                run_id,
+                dominio_detectado,
+                intencion_detectada,
+                capacidad_candidata,
+                herramienta_candidata,
+                etapa_fallo,
+                categoria_brecha,
+                motivo_brecha,
+                requiere_aclaracion,
+                fuera_de_alcance,
+                falta_metadata,
+                faltan_tablas,
+                faltan_campos,
+                faltan_relaciones,
+                faltan_sinonimos,
+                faltan_reglas,
+                falta_capacidad,
+                falta_tool,
+                falta_agente,
+                fallo_planner,
+                fallo_evidencia,
+                fallo_validacion,
+                error_tecnico,
+                fallback_sombreado_usado,
+                evidencia_disponible,
+                sugerencia_resolucion,
+                prioridad,
+                estado_revision,
+                asignado_a,
+                fecha_resolucion,
+                tipo_resolucion,
+                referencia_metadata_creada,
+                referencia_capacidad_creada,
+                referencia_agente_creado,
+                clave_idempotencia,
+                origen_registro,
+                metadata_json
+            FROM registro_brechas_semanticas
+            WHERE clave_idempotencia = %s
+            LIMIT 1
+            """,
+            [key],
+        )
+        return self._row_to_registro_brecha_semantica(row)
+
+    def get_registro_brecha_semantica(self, registro_id: int) -> dict | None:
+        self.ensure_tables()
+        safe_id = int(registro_id or 0)
+        if safe_id <= 0:
+            return None
+        row = self._fetchone(
+            """
+            SELECT
+                id,
+                fecha_creacion,
+                consulta_original,
+                usuario_id,
+                sesion_id,
+                task_id,
+                run_id,
+                dominio_detectado,
+                intencion_detectada,
+                capacidad_candidata,
+                herramienta_candidata,
+                etapa_fallo,
+                categoria_brecha,
+                motivo_brecha,
+                requiere_aclaracion,
+                fuera_de_alcance,
+                falta_metadata,
+                faltan_tablas,
+                faltan_campos,
+                faltan_relaciones,
+                faltan_sinonimos,
+                faltan_reglas,
+                falta_capacidad,
+                falta_tool,
+                falta_agente,
+                fallo_planner,
+                fallo_evidencia,
+                fallo_validacion,
+                error_tecnico,
+                fallback_sombreado_usado,
+                evidencia_disponible,
+                sugerencia_resolucion,
+                prioridad,
+                estado_revision,
+                asignado_a,
+                fecha_resolucion,
+                tipo_resolucion,
+                referencia_metadata_creada,
+                referencia_capacidad_creada,
+                referencia_agente_creado,
+                clave_idempotencia,
+                origen_registro,
+                metadata_json
+            FROM registro_brechas_semanticas
+            WHERE id = %s
+            LIMIT 1
+            """,
+            [safe_id],
+        )
+        return self._row_to_registro_brecha_semantica(row)
+
+    def find_equivalent_open_gap_record(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        self.ensure_tables()
+        item = dict(payload or {})
+        categoria = str(item.get("categoria_brecha") or "").strip().lower()
+        etapa = str(item.get("etapa_fallo") or "").strip().lower()
+        dominio = str(item.get("dominio_detectado") or "").strip().lower()
+        intencion = str(item.get("intencion_detectada") or "").strip().lower()
+        capacidad = str(item.get("capacidad_candidata") or "").strip()
+        motivo = str(item.get("motivo_brecha") or "").strip().lower()
+        consulta = str(item.get("consulta_original") or "").strip().lower()
+        origen = str(item.get("origen_registro") or "runtime").strip().lower()
+        if not all([categoria, etapa, motivo, consulta, origen]):
+            return None
+        row = self._fetchone(
+            """
+            SELECT
+                id,
+                fecha_creacion,
+                consulta_original,
+                usuario_id,
+                sesion_id,
+                task_id,
+                run_id,
+                dominio_detectado,
+                intencion_detectada,
+                capacidad_candidata,
+                herramienta_candidata,
+                etapa_fallo,
+                categoria_brecha,
+                motivo_brecha,
+                requiere_aclaracion,
+                fuera_de_alcance,
+                falta_metadata,
+                faltan_tablas,
+                faltan_campos,
+                faltan_relaciones,
+                faltan_sinonimos,
+                faltan_reglas,
+                falta_capacidad,
+                falta_tool,
+                falta_agente,
+                fallo_planner,
+                fallo_evidencia,
+                fallo_validacion,
+                error_tecnico,
+                fallback_sombreado_usado,
+                evidencia_disponible,
+                sugerencia_resolucion,
+                prioridad,
+                estado_revision,
+                asignado_a,
+                fecha_resolucion,
+                tipo_resolucion,
+                referencia_metadata_creada,
+                referencia_capacidad_creada,
+                referencia_agente_creado,
+                clave_idempotencia,
+                origen_registro,
+                metadata_json
+            FROM registro_brechas_semanticas
+            WHERE LOWER(COALESCE(origen_registro, 'runtime')) = %s
+              AND LOWER(COALESCE(categoria_brecha, '')) = %s
+              AND LOWER(COALESCE(etapa_fallo, '')) = %s
+              AND LOWER(COALESCE(motivo_brecha, '')) = %s
+              AND LOWER(COALESCE(consulta_original, '')) = %s
+              AND LOWER(COALESCE(dominio_detectado, '')) = %s
+              AND LOWER(COALESCE(intencion_detectada, '')) = %s
+              AND COALESCE(capacidad_candidata, '') = %s
+              AND LOWER(COALESCE(estado_revision, '')) NOT IN ('resuelta', 'resuelto', 'descartada', 'descartado')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            [origen, categoria, etapa, motivo, consulta, dominio, intencion, capacidad],
+        )
+        return self._row_to_registro_brecha_semantica(row)
+
+    def insert_registro_brecha_semantica(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_tables()
+        item = dict(payload or {})
+        key = str(item.get("clave_idempotencia") or "").strip()
+        if not key:
+            raise ValueError("clave_idempotencia_required")
+        existing = self.get_registro_brecha_semantica_por_clave(key)
+        if existing:
+            return existing
+        now = int(item.get("fecha_creacion") or self._now())
+        self._execute(
+            """
+            INSERT INTO registro_brechas_semanticas (
+                fecha_creacion,
+                consulta_original,
+                usuario_id,
+                sesion_id,
+                task_id,
+                run_id,
+                dominio_detectado,
+                intencion_detectada,
+                capacidad_candidata,
+                herramienta_candidata,
+                etapa_fallo,
+                categoria_brecha,
+                motivo_brecha,
+                requiere_aclaracion,
+                fuera_de_alcance,
+                falta_metadata,
+                faltan_tablas,
+                faltan_campos,
+                faltan_relaciones,
+                faltan_sinonimos,
+                faltan_reglas,
+                falta_capacidad,
+                falta_tool,
+                falta_agente,
+                fallo_planner,
+                fallo_evidencia,
+                fallo_validacion,
+                error_tecnico,
+                fallback_sombreado_usado,
+                evidencia_disponible,
+                sugerencia_resolucion,
+                prioridad,
+                estado_revision,
+                asignado_a,
+                fecha_resolucion,
+                tipo_resolucion,
+                referencia_metadata_creada,
+                referencia_capacidad_creada,
+                referencia_agente_creado,
+                clave_idempotencia,
+                origen_registro,
+                metadata_json
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
+            """,
+            [
+                now,
+                str(item.get("consulta_original") or ""),
+                str(item.get("usuario_id") or ""),
+                str(item.get("sesion_id") or ""),
+                str(item.get("task_id") or ""),
+                str(item.get("run_id") or ""),
+                str(item.get("dominio_detectado") or ""),
+                str(item.get("intencion_detectada") or ""),
+                str(item.get("capacidad_candidata") or ""),
+                str(item.get("herramienta_candidata") or ""),
+                str(item.get("etapa_fallo") or ""),
+                str(item.get("categoria_brecha") or ""),
+                str(item.get("motivo_brecha") or ""),
+                1 if bool(item.get("requiere_aclaracion")) else 0,
+                1 if bool(item.get("fuera_de_alcance")) else 0,
+                1 if bool(item.get("falta_metadata")) else 0,
+                1 if bool(item.get("faltan_tablas")) else 0,
+                1 if bool(item.get("faltan_campos")) else 0,
+                1 if bool(item.get("faltan_relaciones")) else 0,
+                1 if bool(item.get("faltan_sinonimos")) else 0,
+                1 if bool(item.get("faltan_reglas")) else 0,
+                1 if bool(item.get("falta_capacidad")) else 0,
+                1 if bool(item.get("falta_tool")) else 0,
+                1 if bool(item.get("falta_agente")) else 0,
+                1 if bool(item.get("fallo_planner")) else 0,
+                1 if bool(item.get("fallo_evidencia")) else 0,
+                1 if bool(item.get("fallo_validacion")) else 0,
+                1 if bool(item.get("error_tecnico")) else 0,
+                1 if bool(item.get("fallback_sombreado_usado")) else 0,
+                self._to_json(item.get("evidencia_disponible") or {}),
+                str(item.get("sugerencia_resolucion") or ""),
+                str(item.get("prioridad") or "media"),
+                str(item.get("estado_revision") or "nueva"),
+                str(item.get("asignado_a") or ""),
+                int(item.get("fecha_resolucion") or 0) or None,
+                str(item.get("tipo_resolucion") or ""),
+                str(item.get("referencia_metadata_creada") or ""),
+                str(item.get("referencia_capacidad_creada") or ""),
+                str(item.get("referencia_agente_creado") or ""),
+                key,
+                str(item.get("origen_registro") or "runtime"),
+                self._to_json(item.get("metadata") or {}),
+            ],
+        )
+        return self.get_registro_brecha_semantica_por_clave(key) or {}
+
+    def update_registro_brecha_semantica(
+        self,
+        registro_id: int,
+        updates: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        self.ensure_tables()
+        current = self.get_registro_brecha_semantica(registro_id)
+        if not current:
+            return None
+        item = {**current, **dict(updates or {})}
+        self._execute(
+            """
+            UPDATE registro_brechas_semanticas
+            SET
+                consulta_original = %s,
+                usuario_id = %s,
+                sesion_id = %s,
+                task_id = %s,
+                run_id = %s,
+                dominio_detectado = %s,
+                intencion_detectada = %s,
+                capacidad_candidata = %s,
+                herramienta_candidata = %s,
+                etapa_fallo = %s,
+                categoria_brecha = %s,
+                motivo_brecha = %s,
+                requiere_aclaracion = %s,
+                fuera_de_alcance = %s,
+                falta_metadata = %s,
+                faltan_tablas = %s,
+                faltan_campos = %s,
+                faltan_relaciones = %s,
+                faltan_sinonimos = %s,
+                faltan_reglas = %s,
+                falta_capacidad = %s,
+                falta_tool = %s,
+                falta_agente = %s,
+                fallo_planner = %s,
+                fallo_evidencia = %s,
+                fallo_validacion = %s,
+                error_tecnico = %s,
+                fallback_sombreado_usado = %s,
+                evidencia_disponible = %s,
+                sugerencia_resolucion = %s,
+                prioridad = %s,
+                estado_revision = %s,
+                asignado_a = %s,
+                fecha_resolucion = %s,
+                tipo_resolucion = %s,
+                referencia_metadata_creada = %s,
+                referencia_capacidad_creada = %s,
+                referencia_agente_creado = %s,
+                metadata_json = %s
+            WHERE id = %s
+            """,
+            [
+                str(item.get("consulta_original") or ""),
+                str(item.get("usuario_id") or ""),
+                str(item.get("sesion_id") or ""),
+                str(item.get("task_id") or ""),
+                str(item.get("run_id") or ""),
+                str(item.get("dominio_detectado") or ""),
+                str(item.get("intencion_detectada") or ""),
+                str(item.get("capacidad_candidata") or ""),
+                str(item.get("herramienta_candidata") or ""),
+                str(item.get("etapa_fallo") or ""),
+                str(item.get("categoria_brecha") or ""),
+                str(item.get("motivo_brecha") or ""),
+                1 if bool(item.get("requiere_aclaracion")) else 0,
+                1 if bool(item.get("fuera_de_alcance")) else 0,
+                1 if bool(item.get("falta_metadata")) else 0,
+                1 if bool(item.get("faltan_tablas")) else 0,
+                1 if bool(item.get("faltan_campos")) else 0,
+                1 if bool(item.get("faltan_relaciones")) else 0,
+                1 if bool(item.get("faltan_sinonimos")) else 0,
+                1 if bool(item.get("faltan_reglas")) else 0,
+                1 if bool(item.get("falta_capacidad")) else 0,
+                1 if bool(item.get("falta_tool")) else 0,
+                1 if bool(item.get("falta_agente")) else 0,
+                1 if bool(item.get("fallo_planner")) else 0,
+                1 if bool(item.get("fallo_evidencia")) else 0,
+                1 if bool(item.get("fallo_validacion")) else 0,
+                1 if bool(item.get("error_tecnico")) else 0,
+                1 if bool(item.get("fallback_sombreado_usado")) else 0,
+                self._to_json(item.get("evidencia_disponible") or {}),
+                str(item.get("sugerencia_resolucion") or ""),
+                str(item.get("prioridad") or "media"),
+                str(item.get("estado_revision") or "nueva"),
+                str(item.get("asignado_a") or ""),
+                int(item.get("fecha_resolucion") or 0) or None,
+                str(item.get("tipo_resolucion") or ""),
+                str(item.get("referencia_metadata_creada") or ""),
+                str(item.get("referencia_capacidad_creada") or ""),
+                str(item.get("referencia_agente_creado") or ""),
+                self._to_json(item.get("metadata") or {}),
+                int(registro_id),
+            ],
+        )
+        return self.get_registro_brecha_semantica(registro_id)
+
+    def list_registro_brechas_semanticas(
+        self,
+        *,
+        estado_revision: str | None = None,
+        categoria_brecha: str | None = None,
+        dominio_detectado: str | None = None,
+        capacidad_candidata: str | None = None,
+        solo_con_sugerencia_metadata: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        self.ensure_tables()
+        where: list[str] = []
+        params: list[Any] = []
+        if estado_revision:
+            where.append("estado_revision = %s")
+            params.append(str(estado_revision).strip().lower())
+        if categoria_brecha:
+            where.append("categoria_brecha = %s")
+            params.append(str(categoria_brecha).strip().lower())
+        if dominio_detectado:
+            where.append("dominio_detectado = %s")
+            params.append(str(dominio_detectado).strip().lower())
+        if capacidad_candidata:
+            where.append("capacidad_candidata = %s")
+            params.append(str(capacidad_candidata).strip())
+        if solo_con_sugerencia_metadata:
+            where.append(
+                "(falta_metadata = 1 OR faltan_tablas = 1 OR faltan_campos = 1 OR faltan_relaciones = 1 OR faltan_sinonimos = 1 OR faltan_reglas = 1)"
+            )
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        rows = self._fetchall(
+            f"""
+            SELECT
+                id,
+                fecha_creacion,
+                consulta_original,
+                usuario_id,
+                sesion_id,
+                task_id,
+                run_id,
+                dominio_detectado,
+                intencion_detectada,
+                capacidad_candidata,
+                herramienta_candidata,
+                etapa_fallo,
+                categoria_brecha,
+                motivo_brecha,
+                requiere_aclaracion,
+                fuera_de_alcance,
+                falta_metadata,
+                faltan_tablas,
+                faltan_campos,
+                faltan_relaciones,
+                faltan_sinonimos,
+                faltan_reglas,
+                falta_capacidad,
+                falta_tool,
+                falta_agente,
+                fallo_planner,
+                fallo_evidencia,
+                fallo_validacion,
+                error_tecnico,
+                fallback_sombreado_usado,
+                evidencia_disponible,
+                sugerencia_resolucion,
+                prioridad,
+                estado_revision,
+                asignado_a,
+                fecha_resolucion,
+                tipo_resolucion,
+                referencia_metadata_creada,
+                referencia_capacidad_creada,
+                referencia_agente_creado,
+                clave_idempotencia,
+                origen_registro,
+                metadata_json
+            FROM registro_brechas_semanticas
+            {where_sql}
+            ORDER BY fecha_creacion DESC, id DESC
+            LIMIT %s
+            """,
+            [*params, max(1, min(int(limit), 500))],
+        )
+        return [item for item in (self._row_to_registro_brecha_semantica(row) for row in rows) if item]
+
+    def summarize_registro_brechas_semanticas(self, *, limit: int = 10) -> dict[str, Any]:
+        self.ensure_tables()
+        safe_limit = max(1, min(int(limit), 50))
+        total_row = self._fetchone("SELECT COUNT(*) FROM registro_brechas_semanticas")
+        nuevas_row = self._fetchone(
+            "SELECT COUNT(*) FROM registro_brechas_semanticas WHERE estado_revision IN (%s, %s)",
+            ["nueva", "nuevo"],
+        )
+        resueltas_row = self._fetchone(
+            "SELECT COUNT(*) FROM registro_brechas_semanticas WHERE estado_revision IN (%s, %s, %s)",
+            ["resuelta", "resuelto", "cerrado"],
+        )
+        return {
+            "totales": {
+                "brechas": int((total_row or [0])[0] or 0),
+                "nuevas": int((nuevas_row or [0])[0] or 0),
+                "resueltas": int((resueltas_row or [0])[0] or 0),
+            },
+            "brechas_nuevas": self.list_registro_brechas_semanticas(
+                estado_revision="nueva",
+                limit=safe_limit,
+            ),
+            "brechas_por_categoria": self._aggregate_registro_brechas(
+                field_name="categoria_brecha",
+                label="categoria_brecha",
+                limit=safe_limit,
+            ),
+            "brechas_por_dominio": self._aggregate_registro_brechas(
+                field_name="dominio_detectado",
+                label="dominio_detectado",
+                limit=safe_limit,
+            ),
+            "brechas_por_capacidad": self._aggregate_registro_brechas(
+                field_name="capacidad_candidata",
+                label="capacidad_candidata",
+                limit=safe_limit,
+            ),
+            "brechas_frecuentes": self._aggregate_registro_brechas_frecuentes(limit=safe_limit),
+            "brechas_resueltas": self.list_registro_brechas_semanticas(
+                estado_revision="resuelta",
+                limit=safe_limit,
+            ),
+            "brechas_con_sugerencia_metadata": self.list_registro_brechas_semanticas(
+                solo_con_sugerencia_metadata=True,
+                limit=safe_limit,
+            ),
+        }
+
+    def _aggregate_registro_brechas(
+        self,
+        *,
+        field_name: str,
+        label: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            f"""
+            SELECT {field_name}, COUNT(*)
+            FROM registro_brechas_semanticas
+            WHERE COALESCE({field_name}, '') <> ''
+            GROUP BY {field_name}
+            ORDER BY COUNT(*) DESC, {field_name} ASC
+            LIMIT %s
+            """,
+            [max(1, min(int(limit), 50))],
+        )
+        return [
+            {
+                label: str(row[0] or ""),
+                "count": int(row[1] or 0),
+            }
+            for row in rows
+            if row
+        ]
+
+    def _aggregate_registro_brechas_frecuentes(self, *, limit: int) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            """
+            SELECT
+                categoria_brecha,
+                motivo_brecha,
+                dominio_detectado,
+                capacidad_candidata,
+                COUNT(*) AS total
+            FROM registro_brechas_semanticas
+            GROUP BY categoria_brecha, motivo_brecha, dominio_detectado, capacidad_candidata
+            ORDER BY total DESC, categoria_brecha ASC
+            LIMIT %s
+            """,
+            [max(1, min(int(limit), 50))],
+        )
+        return [
+            {
+                "categoria_brecha": str(row[0] or ""),
+                "motivo_brecha": str(row[1] or ""),
+                "dominio_detectado": str(row[2] or ""),
+                "capacidad_candidata": str(row[3] or ""),
+                "count": int(row[4] or 0),
+            }
+            for row in rows
+            if row
+        ]
+
+    def _row_to_registro_brecha_semantica(self, row: tuple | None) -> dict[str, Any] | None:
+        if not row:
+            return None
+        return {
+            "id": int(row[0] or 0),
+            "fecha_creacion": int(row[1] or 0),
+            "consulta_original": str(row[2] or ""),
+            "usuario_id": str(row[3] or ""),
+            "sesion_id": str(row[4] or ""),
+            "task_id": str(row[5] or ""),
+            "run_id": str(row[6] or ""),
+            "dominio_detectado": str(row[7] or ""),
+            "intencion_detectada": str(row[8] or ""),
+            "capacidad_candidata": str(row[9] or ""),
+            "herramienta_candidata": str(row[10] or ""),
+            "etapa_fallo": str(row[11] or ""),
+            "categoria_brecha": str(row[12] or ""),
+            "motivo_brecha": str(row[13] or ""),
+            "requiere_aclaracion": bool(row[14]),
+            "fuera_de_alcance": bool(row[15]),
+            "falta_metadata": bool(row[16]),
+            "faltan_tablas": bool(row[17]),
+            "faltan_campos": bool(row[18]),
+            "faltan_relaciones": bool(row[19]),
+            "faltan_sinonimos": bool(row[20]),
+            "faltan_reglas": bool(row[21]),
+            "falta_capacidad": bool(row[22]),
+            "falta_tool": bool(row[23]),
+            "falta_agente": bool(row[24]),
+            "fallo_planner": bool(row[25]),
+            "fallo_evidencia": bool(row[26]),
+            "fallo_validacion": bool(row[27]),
+            "error_tecnico": bool(row[28]),
+            "fallback_sombreado_usado": bool(row[29]),
+            "evidencia_disponible": self._from_json(row[30], {}),
+            "sugerencia_resolucion": str(row[31] or ""),
+            "prioridad": str(row[32] or ""),
+            "estado_revision": str(row[33] or ""),
+            "asignado_a": str(row[34] or ""),
+            "fecha_resolucion": int(row[35] or 0),
+            "tipo_resolucion": str(row[36] or ""),
+            "referencia_metadata_creada": str(row[37] or ""),
+            "referencia_capacidad_creada": str(row[38] or ""),
+            "referencia_agente_creado": str(row[39] or ""),
+            "clave_idempotencia": str(row[40] or ""),
+            "origen_registro": str(row[41] or ""),
+            "metadata": self._from_json(row[42], {}),
+        }
+
+    @staticmethod
+    def build_registro_brecha_clave_idempotencia(payload: dict[str, Any]) -> str:
+        item = dict(payload or {})
+        raw = "|".join(
+            [
+                str(item.get("origen_registro") or "runtime").strip().lower(),
+                str(item.get("run_id") or "").strip().lower(),
+                str(item.get("task_id") or "").strip().lower(),
+                str(item.get("categoria_brecha") or "").strip().lower(),
+                str(item.get("etapa_fallo") or "").strip().lower(),
+                str(item.get("motivo_brecha") or "").strip().lower(),
+                str(item.get("consulta_original") or "").strip().lower(),
+            ]
+        )
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
     # Memory audit
     def insert_memory_audit_event(

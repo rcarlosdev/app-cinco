@@ -1,0 +1,13 @@
+politicas_aprobacion:
+  - id: auto_read_only
+    modo: auto
+    approval_required: false
+    approval_type: none
+    risk_level: low
+    descripcion: Consultas read-only gobernadas y ejecutables por planner o handler seguro.
+  - id: blocked_external_pending
+    modo: blocked
+    approval_required: false
+    approval_type: none
+    risk_level: medium
+    descripcion: Flujo bloqueado por limitacion documental o metadata faltante; no ejecuta ruta productiva.

@@ -10,6 +10,30 @@ CHAT_RESPONSE_CONTRACT_VERSION = "ia_dev.chat_response.v1"
 CHAT_RESPONSE_SNAPSHOT_V1: dict[str, Any] = {
     "session_id": "",
     "reply": "",
+    "task": {
+        "task_id": "",
+        "current_run": {
+            "run_id": "",
+            "status": "planned",
+            "domain": "",
+            "intent": "",
+            "plan": {},
+            "semantic_explanation": {},
+            "background": {},
+            "agents": [],
+            "handoffs": [],
+            "approvals": [],
+            "required_tools": [],
+            "tool_execution": {
+                "selected_tool_id": "",
+                "trace": [],
+            },
+            "validation": {},
+            "evidence": {},
+            "final_state": {},
+            "reply": "",
+        },
+    },
     "response_envelope": {
         "mode": "user",
         "progress_source": "backend",
@@ -92,6 +116,48 @@ def ensure_chat_response_contract(payload: dict[str, Any] | None) -> dict[str, A
         response["session_id"] = str(response.get("session_id") or "")
     if not isinstance(response.get("reply"), str):
         response["reply"] = str(response.get("reply") or "")
+    task = response.get("task")
+    if not isinstance(task, dict):
+        task = {}
+    if not isinstance(task.get("task_id"), str):
+        task["task_id"] = str(task.get("task_id") or "")
+    current_run = task.get("current_run")
+    if not isinstance(current_run, dict):
+        current_run = {}
+    current_run.setdefault("run_id", "")
+    current_run.setdefault("status", "planned")
+    current_run.setdefault("domain", "")
+    current_run.setdefault("intent", "")
+    if not isinstance(current_run.get("plan"), dict):
+        current_run["plan"] = {}
+    if not isinstance(current_run.get("semantic_explanation"), dict):
+        current_run["semantic_explanation"] = {}
+    if not isinstance(current_run.get("background"), dict):
+        current_run["background"] = {}
+    if not isinstance(current_run.get("agents"), list):
+        current_run["agents"] = []
+    if not isinstance(current_run.get("handoffs"), list):
+        current_run["handoffs"] = []
+    if not isinstance(current_run.get("approvals"), list):
+        current_run["approvals"] = []
+    if not isinstance(current_run.get("required_tools"), list):
+        current_run["required_tools"] = []
+    tool_execution = current_run.get("tool_execution")
+    if not isinstance(tool_execution, dict):
+        tool_execution = {}
+    tool_execution.setdefault("selected_tool_id", "")
+    if not isinstance(tool_execution.get("trace"), list):
+        tool_execution["trace"] = []
+    current_run["tool_execution"] = tool_execution
+    if not isinstance(current_run.get("validation"), dict):
+        current_run["validation"] = {}
+    if not isinstance(current_run.get("evidence"), dict):
+        current_run["evidence"] = {}
+    if not isinstance(current_run.get("final_state"), dict):
+        current_run["final_state"] = {}
+    current_run["reply"] = str(current_run.get("reply") or response.get("reply") or "")
+    task["current_run"] = current_run
+    response["task"] = task
     response_envelope = response.get("response_envelope")
     if not isinstance(response_envelope, dict):
         response_envelope = {}

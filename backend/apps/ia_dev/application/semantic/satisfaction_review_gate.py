@@ -5,7 +5,6 @@ import os
 import re
 from typing import Any
 
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 from apps.ia_dev.application.contracts.query_intelligence_contracts import (
     ResolvedQuerySpec,
     SatisfactionReviewGateResult,
@@ -17,6 +16,8 @@ from apps.ia_dev.application.taxonomia_dominios import (
     normalizar_codigo_dominio,
     normalizar_intencion_comparable,
 )
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 
 
 class SatisfactionReviewGate:
@@ -35,8 +36,8 @@ class SatisfactionReviewGate:
         r"\bstack trace\b",
     )
 
-    def __init__(self) -> None:
-        self.model = resolve_model_name("query_intent")
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None) -> None:
+        self.gateway = gateway or OpenAIGatewayService()
 
     def evaluate(
         self,
@@ -390,8 +391,6 @@ class SatisfactionReviewGate:
             baseline["notes"] = ["missing_openai_api_key"]
             return baseline
         try:
-            from openai import OpenAI
-
             data = dict((candidate_response or {}).get("data") or {})
             table = dict(data.get("table") or {})
             rows = list(table.get("rows") or [])
@@ -406,10 +405,15 @@ class SatisfactionReviewGate:
                 "columns": list(table.get("columns") or []),
                 "execution_ok": bool((execution_result or {}).get("ok")),
             }
-            client = OpenAI(api_key=api_key)
-            response = client.responses.create(
-                model=self.model,
-                input=[
+            response = self.gateway.create(
+                OpenAIGatewayRequest(
+                    component="satisfaction_review_gate",
+                    model_route="query_intent",
+                    timeout_seconds=20,
+                    retries=1,
+                    trace_metadata={"flow": "satisfaction_review"},
+                    metadata={"execution_ok": bool((execution_result or {}).get("ok"))},
+                    input=[
                     {
                         "role": "system",
                         "content": (
@@ -426,9 +430,10 @@ class SatisfactionReviewGate:
                         "role": "user",
                         "content": json.dumps(payload, ensure_ascii=False),
                     },
-                ],
+                    ],
+                )
             )
-            review = self._safe_json(str(getattr(response, "output_text", "") or "").strip())
+            review = self._safe_json(str(response.output_text or "").strip())
             return {
                 **baseline,
                 "used": True,
@@ -446,6 +451,7 @@ class SatisfactionReviewGate:
                     for item in list(review.get("notes") or [])
                     if str(item or "").strip()
                 ],
+                "gateway_meta": dict(response.metadata or {}),
                 "authority": "runtime_validated_data",
             }
         except Exception as exc:

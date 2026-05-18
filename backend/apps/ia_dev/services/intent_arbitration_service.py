@@ -12,7 +12,8 @@ from apps.ia_dev.application.taxonomia_dominios import normalizar_codigo_dominio
 from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import (
     InventorySemanticResolver,
 )
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 
 
 logger = logging.getLogger(__name__)
@@ -28,11 +29,11 @@ class IntentArbitrationService:
     }
     ANALYTICS_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica", "inventario_materiales"}
 
-    def __init__(self):
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None):
         self.enable_openai = str(
             os.getenv("IA_DEV_USE_OPENAI_INTENT_ARBITRATION", "1") or ""
         ).strip().lower() in {"1", "true", "yes", "on"}
-        self.model = resolve_model_name("intent_arbitration")
+        self.gateway = gateway or OpenAIGatewayService()
         self.confidence_threshold = self._read_threshold(
             "IA_DEV_INTENT_ARBITRATION_CONFIDENCE_THRESHOLD",
             default=0.68,
@@ -148,12 +149,15 @@ class IntentArbitrationService:
         governance_payload: dict[str, Any],
         semantic_inference: dict[str, Any],
     ) -> dict[str, Any]:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=self._get_openai_api_key())
-        response = client.responses.create(
-            model=self.model,
-            input=[
+        response = self.gateway.create(
+            OpenAIGatewayRequest(
+                component="intent_arbitration_service",
+                model_route="intent_arbitration",
+                timeout_seconds=25,
+                retries=1,
+                trace_metadata={"flow": "intent_arbitration"},
+                metadata={"candidate_domain": str(candidate_domain or "")},
+                input=[
                 {
                     "role": "system",
                     "content": (
@@ -207,13 +211,14 @@ class IntentArbitrationService:
             "action_risk": action_payload,
             "knowledge_governance_signals": governance_payload,
             "semantic_inference": semantic_inference,
-        },
-        ensure_ascii=False,
+                        },
+                        ensure_ascii=False,
                     ),
                 },
-            ],
+                ],
+            )
         )
-        raw_text = str(getattr(response, "output_text", "") or "").strip()
+        raw_text = str(response.output_text or "").strip()
         match = re.search(r"\{.*\}", raw_text, re.DOTALL)
         return self._safe_json(match.group(0) if match else raw_text)
 

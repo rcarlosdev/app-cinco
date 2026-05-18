@@ -4,22 +4,23 @@ import os
 import re
 import unicodedata
 
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
 
 
 logger = logging.getLogger(__name__)
 
 
 class IntentClassifierService:
-    def __init__(self):
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None):
         self.enable_openai = os.getenv("IA_DEV_USE_OPENAI_CLASSIFIER", "1").strip().lower() in (
             "1",
             "true",
             "yes",
             "on",
         )
-        self.model = resolve_model_name("intent_classifier")
+        self.gateway = gateway or OpenAIGatewayService()
 
     @staticmethod
     def _get_openai_api_key() -> str:
@@ -259,13 +260,15 @@ class IntentClassifierService:
             return fallback
 
     def _classify_openai(self, message: str, openai_api_key: str) -> dict:
-        # Lazy import to keep service running if dependency is missing.
-        from openai import OpenAI
-
-        client = OpenAI(api_key=openai_api_key)
-        response = client.responses.create(
-            model=self.model,
-            input=[
+        del openai_api_key
+        response = self.gateway.create(
+            OpenAIGatewayRequest(
+                component="intent_classifier_service",
+                model_route="intent_classifier",
+                timeout_seconds=20,
+                retries=1,
+                trace_metadata={"flow": "bootstrap_classification"},
+                input=[
                 {
                     "role": "system",
                     "content": (
@@ -280,10 +283,11 @@ class IntentClassifierService:
                     ),
                 },
                 {"role": "user", "content": message},
-            ],
+                ],
+            )
         )
 
-        text = getattr(response, "output_text", "") or ""
+        text = response.output_text or ""
         json_match = re.search(r"\{.*\}", text, re.DOTALL)
         raw = json_match.group(0) if json_match else text
         data = json.loads(raw)

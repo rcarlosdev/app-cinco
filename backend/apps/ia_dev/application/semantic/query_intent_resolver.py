@@ -12,7 +12,15 @@ from apps.ia_dev.application.taxonomia_dominios import (
     normalizar_codigo_dominio,
     normalizar_dominio_operativo,
 )
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.domains.inventario_logistica.matcher_semantico_gobernado_inventario import (
+    MatcherSemanticoGobernadoInventario,
+)
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
+from apps.ia_dev.application.semantic.semantic_capability_registry import (
+    SemanticBindingRequest,
+    SemanticCapabilityRegistry,
+)
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.period_service import resolve_period_from_text
 
@@ -57,8 +65,10 @@ class QueryIntentResolver:
         r"\bsaldo(?:\s+de)?(?:\s+materiales?)?\s+(?:del?\s+)?(?:emplead\w*|tecnico)\s+([0-9]{5,15})\b"
     )
 
-    def __init__(self):
-        self.model = resolve_model_name("query_intent")
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None):
+        self.gateway = gateway or OpenAIGatewayService()
+        self.matcher_gobernado_inventario = MatcherSemanticoGobernadoInventario()
+        self.semantic_capability_registry = SemanticCapabilityRegistry()
 
     @staticmethod
     def _get_openai_api_key() -> str:
@@ -91,8 +101,6 @@ class QueryIntentResolver:
             fallback=rules,
             memory_hints=memory_hints or {},
         )
-        if self._query_pattern_fastpath_enabled() and str(pattern_guided.source or "").strip().lower() == "memory_pattern":
-            return pattern_guided
         if not self._openai_enabled():
             return pattern_guided
 
@@ -142,11 +150,17 @@ class QueryIntentResolver:
         semantic_context: dict[str, Any] | None = None,
     ) -> StructuredQueryIntent:
         normalized = self._normalize_text(message)
+        match_gobernado = self.matcher_gobernado_inventario.resolver(
+            mensaje=message,
+            contexto_semantico=semantic_context or {},
+        )
         domain = self._resolve_domain(
             normalized=normalized,
             base_domain=str(base_classification.get("domain") or "").strip().lower(),
             semantic_context=semantic_context or {},
         )
+        if match_gobernado.get("coincidencia_gobernada") and str(match_gobernado.get("dominio_candidato") or "") == "inventario_logistica":
+            domain = "inventario_logistica"
 
         dimension_tokens = self._collect_dimension_signal_tokens(
             semantic_context=semantic_context or {},
@@ -200,6 +214,17 @@ class QueryIntentResolver:
             normalized=normalized,
             semantic_context=semantic_context or {},
         )
+        if match_gobernado.get("coincidencia_gobernada"):
+            filtros_gobernados = dict(match_gobernado.get("filtros") or {})
+            if filtros_gobernados:
+                filters.update({key: value for key, value in filtros_gobernados.items() if value not in (None, "")})
+            entidades_gobernadas = dict(match_gobernado.get("entidades") or {})
+            if entidades_gobernadas.get("cedula"):
+                entity_type, entity_value = "cedula", str(entidades_gobernadas.get("cedula") or "")
+            elif entidades_gobernadas.get("movil"):
+                entity_type, entity_value = "movil", str(entidades_gobernadas.get("movil") or "")
+            elif entidades_gobernadas.get("codigo"):
+                entity_type, entity_value = "codigo", str(entidades_gobernadas.get("codigo") or "")
         if entity_type == "cedula" and entity_value:
             filters.setdefault("cedula", entity_value)
         elif entity_type == "movil" and entity_value:
@@ -246,6 +271,39 @@ class QueryIntentResolver:
             operation=operation,
             dimension_tokens=dimension_tokens,
         )
+        if domain == "inventario_logistica":
+            registry_binding = self.semantic_capability_registry.resolve(
+                SemanticBindingRequest(
+                    domain=domain,
+                    message=message,
+                    intent=operation,
+                    entity={
+                        "type": entity_type,
+                        "identifier": entity_value,
+                        "field": entity_type,
+                    }
+                    if entity_type and entity_value
+                    else None,
+                    normalized_filters=filters,
+                    group_by=group_by,
+                    semantic_context=semantic_context or {},
+                    source_hints={
+                        "governed_match": dict(match_gobernado or {}),
+                    },
+                )
+            )
+            if str(registry_binding.template_id or "").strip():
+                template_id = str(registry_binding.template_id or "").strip()
+        if match_gobernado.get("coincidencia_gobernada") and str(match_gobernado.get("template_id") or "").strip():
+            template_id = str(match_gobernado.get("template_id") or "").strip()
+            operation = str(match_gobernado.get("operation") or operation or "detail").strip().lower()
+        if bool(match_gobernado.get("requiere_aclaracion")):
+            warning = str(match_gobernado.get("pregunta_aclaracion") or "").strip()
+            warnings = [warning] if warning else []
+            confidence = 0.58
+        else:
+            warnings = []
+            confidence = 0.72
         if (
             domain in {"empleados", "rrhh"}
             and self._has_missingness_filter(filters=filters)
@@ -290,9 +348,9 @@ class QueryIntentResolver:
             period=period,
             group_by=group_by,
             metrics=metrics,
-            confidence=0.72,
+            confidence=confidence,
             source="rules",
-            warnings=[],
+            warnings=warnings,
         )
 
     def _resolve_openai(
@@ -304,14 +362,18 @@ class QueryIntentResolver:
         semantic_context: dict[str, Any],
         memory_hints: dict[str, Any],
     ) -> StructuredQueryIntent:
-        from openai import OpenAI
-
         context_payload = self._compact_semantic_context(semantic_context=semantic_context)
         memory_patterns = self._compact_query_patterns(memory_hints=memory_hints)
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(
-            model=self.model,
-            input=[
+        del api_key
+        response = self.gateway.create(
+            OpenAIGatewayRequest(
+                component="query_intent_resolver",
+                model_route="query_intent",
+                timeout_seconds=30,
+                retries=1,
+                trace_metadata={"flow": "query_intelligence", "operation": "structured_intent_resolution"},
+                metadata={"fallback_source": str(fallback.source or "rules")},
+                input=[
                 {
                     "role": "system",
                     "content": (
@@ -365,9 +427,10 @@ class QueryIntentResolver:
                     ),
                 },
                 {"role": "user", "content": message},
-            ],
+                ],
+            )
         )
-        raw_text = str(getattr(response, "output_text", "") or "").strip()
+        raw_text = response.output_text
         payload = self._safe_json(raw_text)
         return StructuredQueryIntent(
             raw_query=message,

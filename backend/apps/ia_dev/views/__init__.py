@@ -8,6 +8,10 @@ from .chat_view import (
     IADevKnowledgeRejectView,
     IADevMemoryResetView,
     IADevObservabilitySummaryView,
+    IADevRuntimeGovernanceHealthView,
+    IADevRuntimeOperationsSummaryView,
+    IADevSemanticGapOperationsView,
+    IADevRuntimeTaskExplorerView,
     IADevTicketView,
 )
 from apps.ia_dev.interfaces.api.views.memory_view import (

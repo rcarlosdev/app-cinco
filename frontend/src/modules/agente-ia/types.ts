@@ -2,6 +2,7 @@ import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types"
 import type {
   IADevChartPayload,
   IADevChatResponse,
+  IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 import type {
   NormalizedAssistantPayload,
@@ -9,7 +10,12 @@ import type {
   NormalizedTable,
 } from "@/modules/programacion/ia-dev/chat/types";
 
-export type DashboardWidgetType = "kpi" | "chart" | "table" | "insights";
+export type DashboardWidgetType =
+  | "kpi"
+  | "chart"
+  | "table"
+  | "insights"
+  | "semantic_explanation";
 
 export type DashboardTableTab = {
   id: string;
@@ -50,6 +56,14 @@ export type DashboardWidget =
       data: {
         items: string[];
       };
+    }
+  | {
+      id: string;
+      type: "semantic_explanation";
+      title: string;
+      data: {
+        explanation: IADevSemanticExplanation;
+      };
     };
 
 export type DashboardSnapshot = {
@@ -63,4 +77,5 @@ export type DashboardSnapshot = {
   selectedAgent: string;
   isLoading: boolean;
   hasStructuredContent: boolean;
+  semanticExplanation: IADevSemanticExplanation | null;
 };
