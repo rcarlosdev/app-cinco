@@ -354,6 +354,69 @@ class IntentArbitrationServiceTests(SimpleTestCase):
         self.assertTrue(bool(result.get("should_execute_query")))
         self.assertFalse(bool(result.get("should_fallback")))
 
+    def test_inventory_provider_serial_validation_keeps_handler_execution_without_clarification(self):
+        service = self._service()
+
+        with patch.object(
+            service,
+            "_arbitrate_openai",
+            return_value={
+                "final_intent": "analytics_query",
+                "final_domain": "inventario_logistica",
+                "should_execute_query": True,
+                "should_create_kpro": False,
+                "should_use_sql_assisted": False,
+                "should_use_handler": True,
+                "should_fallback": True,
+                "confidence": 0.61,
+                "reasoning_summary": "Consulta de validacion de seriales.",
+                "required_clarification": "Se requiere especificar criterios de filtrado para la validacion.",
+            },
+        ):
+            service.enable_openai = True
+            result = service.arbitrate(
+                original_question="Validar los seriales",
+                candidate_domain="inventario_logistica",
+                heuristic_intent={"intent": "inventario_logistica_query", "domain": "inventario_logistica", "confidence": 0.7},
+                llm_intent=StructuredQueryIntent(
+                    raw_query="Validar los seriales",
+                    domain_code="inventario_logistica",
+                    operation="validate_file",
+                    template_id="inventory_provider_serial_validation",
+                    confidence=0.94,
+                    source="inventory_yaml_semantic_resolver",
+                ),
+                candidate_capabilities=[{"capability_id": "inventory_provider_serial_validation"}],
+                ai_dictionary_context={
+                    "fields": [
+                        {"logical_name": "serial", "table_name": "logistica_base_seriales", "supports_filter": True},
+                    ],
+                    "relations": [{"nombre_relacion": "serial_personal"}],
+                    "rules": [],
+                    "synonyms": [],
+                    "tables": [
+                        {"table_name": "logistica_base_seriales"},
+                        {"table_name": "logistica_seriales_asociados"},
+                        {"table_name": "cinco_base_de_personal"},
+                    ],
+                    "runtime_attachment_summary": {
+                        "present": True,
+                        "count": 1,
+                        "names": ["validacion seriales 5k1.xlsx"],
+                    },
+                },
+                action_risk={"level": "low"},
+                knowledge_governance_signals={"explicit_change_request": False, "explicit_apply_request": False},
+            )
+
+        self.assertEqual(str(result.get("final_intent") or ""), "analytics_query")
+        self.assertEqual(str(result.get("final_domain") or ""), "inventario_logistica")
+        self.assertTrue(bool(result.get("should_execute_query")))
+        self.assertFalse(bool(result.get("should_use_sql_assisted")))
+        self.assertTrue(bool(result.get("should_use_handler")))
+        self.assertFalse(bool(result.get("should_fallback")))
+        self.assertEqual(str(result.get("required_clarification") or ""), "")
+
     def test_birthday_queries_expose_structural_semantic_inference(self):
         service = self._service()
 

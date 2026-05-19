@@ -160,6 +160,11 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
         self.assertEqual(int(progress["rows_processed"]), 75)
         self.assertEqual(int(progress["total_estimated"]), 300)
         self.assertEqual(str(progress["phase"]), "validando_seriales")
+        self.assertIn("response_time_ms", progress)
+        self.assertIn("snapshot_age_ms", progress)
+        self.assertEqual(int(progress["snapshot_age_ms"]), 0)
+        self.assertNotIn("final_evidence", response.data["task"]["current_run"]["evidence"])
+        self.assertNotIn("partial_evidence", response.data["task"]["current_run"]["background"])
         self.assertEqual(list((response.data.get("trace") or [])), [])
         self.assertEqual(list((dict(response.data.get("data") or {}).get("table") or {}).get("rows") or []), [])
 

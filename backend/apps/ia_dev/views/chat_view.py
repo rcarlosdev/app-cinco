@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from time import perf_counter
+
 from django.http import FileResponse
 from rest_framework import status
 from rest_framework.response import Response
@@ -593,6 +596,7 @@ class IADevChatTaskStatusView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def get(self, request):
+        started_at = perf_counter()
         run_id = str(request.query_params.get("run_id", "")).strip() or None
         resume_token = str(request.query_params.get("resume_token", "")).strip() or None
         background_run_id = str(request.query_params.get("background_run_id", "")).strip() or None
@@ -613,7 +617,39 @@ class IADevChatTaskStatusView(APIView):
             raise
         if not payload:
             return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(ensure_chat_response_contract(payload), status=status.HTTP_200_OK)
+        payload = ensure_chat_response_contract(payload)
+        response_time_ms = round((perf_counter() - started_at) * 1000.0, 2)
+        current_run = dict(((payload.get("task") or {}).get("current_run") or {}))
+        evidence = dict(current_run.get("evidence") or {})
+        progress = dict(evidence.get("background_progress") or {})
+        last_progress_update_at = str(progress.get("last_progress_update_at") or "").strip()
+        snapshot_age_ms = 0
+        if last_progress_update_at:
+            try:
+                last_update_dt = datetime.fromisoformat(last_progress_update_at.replace("Z", "+00:00"))
+                if last_update_dt.tzinfo is None:
+                    last_update_dt = last_update_dt.replace(tzinfo=timezone.utc)
+                snapshot_age_ms = max(
+                    0,
+                    int((datetime.now(timezone.utc) - last_update_dt.astimezone(timezone.utc)).total_seconds() * 1000),
+                )
+            except ValueError:
+                snapshot_age_ms = 0
+        progress["response_time_ms"] = response_time_ms
+        progress["snapshot_age_ms"] = snapshot_age_ms
+        evidence["background_progress"] = progress
+        current_run["evidence"] = evidence
+        payload.setdefault("task", {})["current_run"] = current_run
+        data = dict(payload.get("data") or {})
+        meta = dict(data.get("meta") or {})
+        background_job = dict(meta.get("background_job") or {})
+        if background_job:
+            background_job["response_time_ms"] = response_time_ms
+            background_job["snapshot_age_ms"] = snapshot_age_ms
+            meta["background_job"] = background_job
+        data["meta"] = meta
+        payload["data"] = data
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class IADevProviderSerialArtifactDownloadView(APIView):

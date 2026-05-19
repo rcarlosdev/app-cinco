@@ -36,6 +36,8 @@ _EXTRA_TABLE_PREVIEW_ROW_LIMIT = 50
 _EXPORT_ARTIFACT_DIR = "tmp_provider_serial_validation_exports"
 _RUNTIME_ARTIFACT_SERVICE = RuntimeArtifactService()
 _DB_LOOKUP_CHUNK_SIZE = 1000
+_MAX_QUERY_PLACEHOLDERS = 5500
+_UNION_STAGE_METADATA_PLACEHOLDERS_PER_TABLE = 5
 _NONCANONICAL_SERIAL_CACHE_LIMIT = 5000
 _CURRENT_TABLES = (
     {"schema": "logistica_cinco", "table": "logistica_base_seriales", "kind": "base_actual", "label": "base actual"},
@@ -831,6 +833,242 @@ class ValidadorSerialesProveedorService:
             },
         ]
 
+    @staticmethod
+    def _safe_union_chunk_size(*, requested_chunk_size: int, table_count: int) -> int:
+        normalized_requested = max(1, int(requested_chunk_size or 1))
+        normalized_tables = max(1, int(table_count or 1))
+        per_table_budget = max(
+            1,
+            int(_MAX_QUERY_PLACEHOLDERS // normalized_tables) - _UNION_STAGE_METADATA_PLACEHOLDERS_PER_TABLE,
+        )
+        return max(1, min(normalized_requested, per_table_budget))
+
+    def _build_table_lookup_descriptor(self, *, table: dict[str, Any]) -> dict[str, Any] | None:
+        columns = list(table.get("columns") or [])
+        serial_column = self._resolve_table_field(columns=columns, logical_name="serial")
+        if not serial_column:
+            return None
+        alias_columns = {
+            "estado": self._resolve_table_field(columns=columns, logical_name="estado"),
+            "lote": self._resolve_table_field(columns=columns, logical_name="lote"),
+            "cedula": self._resolve_table_field(columns=columns, logical_name="cedula"),
+            "edit": self._resolve_table_field(columns=columns, logical_name="edit"),
+            "movil": self._resolve_table_field(columns=columns, logical_name="movil"),
+            "bodega": self._resolve_table_field(columns=columns, logical_name="bodega"),
+            "codigo": self._resolve_table_field(columns=columns, logical_name="codigo"),
+            "descripcion": self._resolve_table_field(columns=columns, logical_name="descripcion"),
+            "fecha": self._resolve_table_field(columns=columns, logical_name="fecha"),
+        }
+        selected_columns = [serial_column, *[column for column in alias_columns.values() if column]]
+        field_select_parts = [f"s.{_quote_identifier(serial_column)} AS serial_raw"]
+        for alias, column_name in alias_columns.items():
+            if column_name:
+                field_select_parts.append(f"s.{_quote_identifier(column_name)} AS {_quote_identifier(alias)}")
+            else:
+                field_select_parts.append(f"NULL AS {_quote_identifier(alias)}")
+        return {
+            "schema": str(table.get("schema") or "").strip(),
+            "table": str(table.get("table") or "").strip(),
+            "fqn": f"{str(table['schema']).strip()}.{str(table['table']).strip()}",
+            "label": str(table.get("label") or ""),
+            "kind": str(table.get("kind") or ""),
+            "year": table.get("year"),
+            "serial_column": serial_column,
+            "selected_columns": selected_columns,
+            "field_select_parts": field_select_parts,
+            "table": dict(table),
+        }
+
+    def _query_tables_union_stage(
+        self,
+        *,
+        tables: list[dict[str, Any]],
+        normalized_serials: list[str],
+        lookup_metrics: dict[str, Any] | None = None,
+        skip_noncanonical_probe: bool = False,
+    ) -> list[dict[str, Any]]:
+        descriptors = [
+            descriptor
+            for descriptor in (
+                self._build_table_lookup_descriptor(table=table)
+                for table in list(tables or [])
+            )
+            if descriptor is not None
+        ]
+        if not descriptors or not normalized_serials:
+            return []
+        chunk_size = _DB_LOOKUP_CHUNK_SIZE
+        chunk_size = self._safe_union_chunk_size(
+            requested_chunk_size=chunk_size,
+            table_count=len(descriptors),
+        )
+        limit_per_chunk = max(1, chunk_size * 20 * max(1, len(descriptors)))
+        results: list[dict[str, Any]] = []
+        sql_time_ms_total = 0.0
+        python_time_ms_total = 0.0
+        serialization_time_ms_total = 0.0
+        rows_returned = 0
+        query_count = 0
+        chunk_metrics: list[dict[str, Any]] = []
+        table_rows_kept: dict[str, int] = defaultdict(int)
+        table_rows_returned: dict[str, int] = defaultdict(int)
+        fallback_reason = (
+            "disabled_for_large_provider_validation"
+            if skip_noncanonical_probe
+            else "union_stage_exact_only_for_index_usage"
+        )
+
+        for start in range(0, len(normalized_serials), chunk_size):
+            chunk = normalized_serials[start : start + chunk_size]
+            if not chunk:
+                continue
+            chunk_started_at = time.perf_counter()
+            placeholders = ", ".join(["%s"] * len(chunk))
+            query_parts: list[str] = []
+            params: list[Any] = []
+            allowed_tables: list[str] = []
+            allowed_columns: list[str] = []
+            for priority, descriptor in enumerate(descriptors):
+                query_parts.append(
+                    (
+                        f"SELECT {', '.join(descriptor['field_select_parts'])}, "
+                        "%s AS source_label, %s AS source_kind, %s AS source_table, %s AS source_year, %s AS source_priority "
+                        f"FROM {descriptor['fqn']} AS s "
+                        f"WHERE s.{_quote_identifier(str(descriptor['serial_column']))} IN ({placeholders})"
+                    )
+                )
+                params.extend(
+                    [
+                        descriptor["label"],
+                        descriptor["kind"],
+                        descriptor["fqn"],
+                        descriptor.get("year"),
+                        priority,
+                        *chunk,
+                    ]
+                )
+                allowed_tables.append(str(descriptor["fqn"]))
+                allowed_columns.extend(list(descriptor.get("selected_columns") or []))
+            query = " UNION ALL ".join(query_parts) + f" LIMIT {limit_per_chunk}"
+            sql_started_at = time.perf_counter()
+            executed = self.planner.execute_governed_select(
+                db_alias=self.DB_ALIAS,
+                query=query,
+                params=params,
+                allowed_tables=allowed_tables,
+                allowed_columns=allowed_columns,
+                declared_columns=allowed_columns,
+                max_limit=max(limit_per_chunk, 1000),
+            )
+            sql_ms = (time.perf_counter() - sql_started_at) * 1000
+            sql_time_ms_total += sql_ms
+            query_count += 1
+            raw_rows = [
+                dict(row)
+                for row in list(executed.get("rows") or [])
+                if isinstance(row, dict)
+            ] if executed.get("ok") else []
+            rows_returned += len(raw_rows)
+            rows_by_serial: dict[str, dict[str, Any]] = {}
+            best_priority_by_serial: dict[str, int] = {}
+            grouping_started_at = time.perf_counter()
+            for row in raw_rows:
+                serial_normalizado = _normalize_serial(row.get("serial_raw"))
+                if not serial_normalizado:
+                    continue
+                source_table = str(row.get("source_table") or "")
+                if source_table:
+                    table_rows_returned[source_table] += 1
+                priority = int(row.get("source_priority") or 0)
+                best_priority = best_priority_by_serial.get(serial_normalizado)
+                if best_priority is None or priority < best_priority:
+                    best_priority_by_serial[serial_normalizado] = priority
+                    rows_by_serial[serial_normalizado] = row
+                elif priority == best_priority and serial_normalizado not in rows_by_serial:
+                    rows_by_serial[serial_normalizado] = row
+            grouping_ms = (time.perf_counter() - grouping_started_at) * 1000
+            serialization_started_at = time.perf_counter()
+            accepted_rows = list(rows_by_serial.values())
+            for row in accepted_rows:
+                source_table = str(row.get("source_table") or "")
+                if source_table:
+                    table_rows_kept[source_table] += 1
+                results.append(
+                    {
+                        "serial_normalizado": _normalize_serial(row.get("serial_raw")),
+                        "source_label": str(row.get("source_label") or ""),
+                        "source_kind": str(row.get("source_kind") or ""),
+                        "source_table": source_table,
+                        "year": row.get("source_year"),
+                        "estado": _clean_text(row.get("estado")),
+                        "lote": _clean_text(row.get("lote")),
+                        "cedula": _clean_text(row.get("cedula")),
+                        "edit": _clean_text(row.get("edit")),
+                        "movil": _clean_text(row.get("movil")),
+                        "bodega": _clean_text(row.get("bodega")),
+                        "codigo": _clean_text(row.get("codigo")),
+                        "descripcion": _clean_text(row.get("descripcion")),
+                        "fecha": _format_datetime(row.get("fecha")),
+                    }
+                )
+            serialization_ms = (time.perf_counter() - serialization_started_at) * 1000
+            chunk_elapsed_ms = (time.perf_counter() - chunk_started_at) * 1000
+            python_ms = max(0.0, chunk_elapsed_ms - sql_ms - serialization_ms)
+            python_time_ms_total += python_ms
+            serialization_time_ms_total += serialization_ms
+            chunk_metrics.append(
+                {
+                    "chunk_index": int((start // chunk_size) + 1),
+                    "input_serials": len(chunk),
+                    "query_count": 1,
+                    "sql_time_ms": round(sql_ms, 2),
+                    "rows_returned": len(raw_rows),
+                    "rows_kept": len(accepted_rows),
+                    "grouping_ms": round(grouping_ms, 2),
+                    "serialization_ms": round(serialization_ms, 2),
+                    "python_ms": round(python_ms, 2),
+                    "elapsed_ms": round(chunk_elapsed_ms, 2),
+                }
+            )
+
+        if lookup_metrics is not None:
+            lookup_metrics.update(
+                {
+                    "union_stage": True,
+                    "table_count": len(descriptors),
+                    "table_label": ", ".join(str(item.get("label") or "") for item in descriptors),
+                    "table_fqn": ", ".join(str(item.get("fqn") or "") for item in descriptors),
+                    "chunk_size": chunk_size,
+                    "max_query_placeholders": _MAX_QUERY_PLACEHOLDERS,
+                    "chunk_count": len(chunk_metrics),
+                    "query_count": query_count,
+                    "preflight_query_count": 0,
+                    "preflight_sql_time_ms": 0.0,
+                    "sql_time_ms": round(sql_time_ms_total, 2),
+                    "lookup_sql_time_ms": round(sql_time_ms_total, 2),
+                    "python_time_ms": round(python_time_ms_total, 2),
+                    "serialization_time_ms": round(serialization_time_ms_total, 2),
+                    "rows_returned": rows_returned,
+                    "rows_kept": len(results),
+                    "normalized_fallback_enabled": False,
+                    "normalized_fallback_reason": fallback_reason,
+                    "noncanonical_rows_loaded": 0,
+                    "noncanonical_cache_hits": 0,
+                    "noncanonical_cache_truncated": False,
+                    "chunk_metrics": chunk_metrics,
+                    "table_metrics": [
+                        {
+                            "label": str(descriptor.get("label") or ""),
+                            "table_fqn": str(descriptor.get("fqn") or ""),
+                            "rows_returned": int(table_rows_returned.get(str(descriptor.get("fqn") or "")) or 0),
+                            "rows_kept": int(table_rows_kept.get(str(descriptor.get("fqn") or "")) or 0),
+                        }
+                        for descriptor in descriptors
+                    ],
+                }
+            )
+        return results
+
     def _query_all_tables(
         self,
         *,
@@ -999,55 +1237,12 @@ class ValidadorSerialesProveedorService:
         lookup_metrics: dict[str, Any] | None = None,
         skip_noncanonical_probe: bool = False,
     ) -> list[dict[str, Any]]:
-        columns = list(table.get("columns") or [])
-        serial_column = self._resolve_table_field(columns=columns, logical_name="serial")
-        if not serial_column:
+        descriptor = self._build_table_lookup_descriptor(table=table)
+        if descriptor is None:
             return []
-        estado_column = self._resolve_table_field(columns=columns, logical_name="estado")
-        lote_column = self._resolve_table_field(columns=columns, logical_name="lote")
-        cedula_column = self._resolve_table_field(columns=columns, logical_name="cedula")
-        edit_column = self._resolve_table_field(columns=columns, logical_name="edit")
-        movil_column = self._resolve_table_field(columns=columns, logical_name="movil")
-        bodega_column = self._resolve_table_field(columns=columns, logical_name="bodega")
-        codigo_column = self._resolve_table_field(columns=columns, logical_name="codigo")
-        descripcion_column = self._resolve_table_field(columns=columns, logical_name="descripcion")
-        fecha_column = self._resolve_table_field(columns=columns, logical_name="fecha")
-
-        selected_columns = [
-            item
-            for item in [
-                serial_column,
-                estado_column,
-                lote_column,
-                cedula_column,
-                edit_column,
-                movil_column,
-                bodega_column,
-                codigo_column,
-                descripcion_column,
-                fecha_column,
-            ]
-            if item
-        ]
-        select_parts = [f"s.{_quote_identifier(serial_column)} AS serial_raw"]
-        alias_map = {
-            "estado": estado_column,
-            "lote": lote_column,
-            "cedula": cedula_column,
-            "edit": edit_column,
-            "movil": movil_column,
-            "bodega": bodega_column,
-            "codigo": codigo_column,
-            "descripcion": descripcion_column,
-            "fecha": fecha_column,
-        }
-        for alias, column_name in alias_map.items():
-            if column_name:
-                select_parts.append(f"s.{_quote_identifier(column_name)} AS {_quote_identifier(alias)}")
-
         chunk_size = _DB_LOOKUP_CHUNK_SIZE
         limit_per_chunk = max(1, chunk_size * 20)
-        fqn = f"{str(table['schema']).strip()}.{str(table['table']).strip()}"
+        fqn = str(descriptor["fqn"])
         results: list[dict[str, Any]] = []
         noncanonical_cache = (
             {
@@ -1062,9 +1257,9 @@ class ValidadorSerialesProveedorService:
             if skip_noncanonical_probe
             else self._get_noncanonical_serial_cache(
                 table_fqn=fqn,
-                serial_column=serial_column,
-                select_parts=select_parts,
-                selected_columns=selected_columns,
+                serial_column=str(descriptor["serial_column"]),
+                select_parts=list(descriptor["field_select_parts"]),
+                selected_columns=list(descriptor["selected_columns"]),
             )
         )
         normalized_fallback_enabled = bool(noncanonical_cache.get("rows_by_serial")) or bool(
@@ -1083,9 +1278,9 @@ class ValidadorSerialesProveedorService:
             exact_started_at = time.perf_counter()
             exact_matches = self._execute_serial_lookup(
                 table_fqn=fqn,
-                serial_column=serial_column,
-                select_parts=select_parts,
-                selected_columns=selected_columns,
+                serial_column=str(descriptor["serial_column"]),
+                select_parts=list(descriptor["field_select_parts"]),
+                selected_columns=list(descriptor["selected_columns"]),
                 chunk=chunk,
                 limit_per_chunk=limit_per_chunk,
                 normalized_fallback=False,
@@ -1121,9 +1316,9 @@ class ValidadorSerialesProveedorService:
                     fallback_started_at = time.perf_counter()
                     fallback_matches = self._execute_serial_lookup(
                         table_fqn=fqn,
-                        serial_column=serial_column,
-                        select_parts=select_parts,
-                        selected_columns=selected_columns,
+                        serial_column=str(descriptor["serial_column"]),
+                        select_parts=list(descriptor["field_select_parts"]),
+                        selected_columns=list(descriptor["selected_columns"]),
                         chunk=unresolved_chunk,
                         limit_per_chunk=limit_per_chunk,
                         normalized_fallback=True,
@@ -1140,10 +1335,10 @@ class ValidadorSerialesProveedorService:
                 results.append(
                     {
                         "serial_normalizado": serial_normalizado,
-                        "source_label": str(table["label"]),
-                        "source_kind": str(table["kind"]),
+                        "source_label": str(descriptor["label"]),
+                        "source_kind": str(descriptor["kind"]),
                         "source_table": str(table["fqn"]),
-                        "year": table.get("year"),
+                        "year": descriptor.get("year"),
                         "estado": _clean_text(row.get("estado")),
                         "lote": _clean_text(row.get("lote")),
                         "cedula": _clean_text(row.get("cedula")),
@@ -1180,7 +1375,7 @@ class ValidadorSerialesProveedorService:
             preflight_sql_time_ms = float(noncanonical_cache.get("sql_time_ms") or 0.0)
             lookup_metrics.update(
                 {
-                    "table_label": str(table.get("label") or ""),
+                    "table_label": str(descriptor.get("label") or ""),
                     "table_fqn": fqn,
                     "chunk_size": chunk_size,
                     "chunk_count": len(chunk_metrics),
@@ -1702,17 +1897,26 @@ class ValidadorSerialesProveedorService:
             observations.append("El estado contiene MOVIL, pero no hubo responsable enriquecido.")
         return " ".join(observations)
 
-    def _write_export_artifact(self, *, rows: list[dict[str, Any]]) -> dict[str, Any]:
-        columns = list(rows[0].keys()) if rows else []
+    def _write_export_artifact(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        columns: list[str] | None = None,
+        file_stem: str = "inventory_provider_serial_validation",
+    ) -> dict[str, Any]:
+        selected_columns = list(columns or (list(rows[0].keys()) if rows else []))
+        safe_stem = re.sub(r"[^a-z0-9_-]+", "_", str(file_stem or "").strip().lower()).strip("_")
+        if not safe_stem:
+            safe_stem = "inventory_provider_serial_validation"
         export_dir = Path(__file__).resolve().parents[4] / _EXPORT_ARTIFACT_DIR
         export_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-        export_path = export_dir / f"inventory_provider_serial_validation_{timestamp}.csv"
+        export_path = export_dir / f"{safe_stem}_{timestamp}.csv"
         with export_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=columns or ["serial_proveedor"])
+            writer = csv.DictWriter(handle, fieldnames=selected_columns or ["serial_proveedor"])
             writer.writeheader()
             for row in rows:
-                writer.writerow({column: row.get(column, "") for column in (columns or ["serial_proveedor"])})
+                writer.writerow({column: row.get(column, "") for column in (selected_columns or ["serial_proveedor"])})
         return {
             "available": True,
             "format": "csv",
@@ -1894,6 +2098,11 @@ class ValidadorSerialesProveedorService:
             selected_columns,
         )
         truncated = len(preview_rows) < len(rows)
+        export_artifact = self._write_export_artifact(
+            rows=self._project_rows(rows, selected_columns),
+            columns=selected_columns,
+            file_stem=table_id,
+        )
         return {
             "name": table_id,
             "title": title,
@@ -1908,6 +2117,7 @@ class ValidadorSerialesProveedorService:
             "export_limit": len(preview_rows),
             "truncated": truncated,
             "limit": len(preview_rows),
+            "export_artifact": export_artifact,
         }
 
     def _build_kpis(self, *, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2120,6 +2330,11 @@ class ValidadorSerialesProveedorService:
                 "drilldown_mode": "paginated_preview",
                 "full_export_mode": "csv_artifact",
             },
+            "kpi_definitions": {
+                "moviles_detectados": "Seriales unicos cuyo estado final contiene MOVIL.",
+                "moviles_con_responsable_enriquecido": "Subset de MOVIL detectados con responsable/persona enriquecido.",
+                "moviles_sin_responsable_enriquecido": "MOVIL detectados que no lograron enrichment de responsable/persona.",
+            },
             "export_artifact": dict(export_artifact or {}),
         }
         if isinstance(dashboard_composition, dict):
@@ -2226,6 +2441,7 @@ class ValidadorSerialesProveedorService:
             },
             "export_artifact": dict(export_artifact or {}),
             "payload_strategy": dict(metadata["payload_strategy"]),
+            "kpi_definitions": dict(evidence_contract_updates["kpi_definitions"]),
         }
         return {
             "dato": dato,

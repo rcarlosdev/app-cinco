@@ -92,7 +92,21 @@ const buildTable = (tableValue: unknown): NormalizedTable | null => {
       (asNumber(table.total_records) ?? rows.length) >
         (asNumber(table.returned_records) ?? rows.length),
     limit: asNumber(table.limit) ?? 0,
-    exportArtifact: null,
+    exportArtifact: (() => {
+      const artifact = asObject(table.export_artifact);
+      if (!artifact) return null;
+      const artifactId = asString(artifact.artifact_id);
+      if (!artifactId) return null;
+      return {
+        available: Boolean(artifact.available),
+        format: asString(artifact.format) || "csv",
+        artifactId,
+        filename: asString(artifact.filename),
+        recordCount: asNumber(artifact.record_count) ?? 0,
+        endpointHint: asString(artifact.endpoint_hint),
+        expiresInSeconds: asNumber(artifact.expires_in_seconds) ?? 0,
+      };
+    })(),
   };
 };
 

@@ -2816,6 +2816,69 @@ class IADevSqlStore:
             "updated_at": int(row[10] or 0),
         }
 
+    def find_workflow_state_by_background_run_id(self, background_run_id: str) -> dict | None:
+        self.ensure_tables()
+        target = str(background_run_id or "").strip()
+        if not target:
+            return None
+        row = self._fetchone(
+            """
+            SELECT id, workflow_type, workflow_key, status, state_json, retry_count, lock_version, next_retry_at, last_error, created_at, updated_at
+            FROM ia_dev_workflow_state
+            WHERE JSON_UNQUOTE(JSON_EXTRACT(state_json, '$.background.background_run_id')) = %s
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            [target],
+        )
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "workflow_type": str(row[1] or ""),
+            "workflow_key": str(row[2] or ""),
+            "status": str(row[3] or ""),
+            "state": self._from_json(row[4], {}),
+            "retry_count": int(row[5] or 0),
+            "lock_version": int(row[6] or 1),
+            "next_retry_at": int(row[7]) if row[7] is not None else None,
+            "last_error": str(row[8]) if row[8] else None,
+            "created_at": int(row[9] or 0),
+            "updated_at": int(row[10] or 0),
+        }
+
+    def find_workflow_state_by_resume_token(self, resume_token: str) -> dict | None:
+        self.ensure_tables()
+        target = str(resume_token or "").strip()
+        if not target:
+            return None
+        row = self._fetchone(
+            """
+            SELECT id, workflow_type, workflow_key, status, state_json, retry_count, lock_version, next_retry_at, last_error, created_at, updated_at
+            FROM ia_dev_workflow_state
+            WHERE JSON_UNQUOTE(JSON_EXTRACT(state_json, '$.background.resume_token')) = %s
+               OR JSON_SEARCH(state_json, 'one', %s, NULL, '$.approvals[*].resume_token') IS NOT NULL
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            [target, target],
+        )
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "workflow_type": str(row[1] or ""),
+            "workflow_key": str(row[2] or ""),
+            "status": str(row[3] or ""),
+            "state": self._from_json(row[4], {}),
+            "retry_count": int(row[5] or 0),
+            "lock_version": int(row[6] or 1),
+            "next_retry_at": int(row[7]) if row[7] is not None else None,
+            "last_error": str(row[8]) if row[8] else None,
+            "created_at": int(row[9] or 0),
+            "updated_at": int(row[10] or 0),
+        }
+
     def list_workflow_states(
         self,
         *,

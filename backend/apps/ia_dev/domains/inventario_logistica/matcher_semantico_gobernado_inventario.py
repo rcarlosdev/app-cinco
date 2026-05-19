@@ -118,19 +118,23 @@ class MatcherSemanticoGobernadoInventario:
             nombre_probable = True
         es_kardex = senal_kardex
         es_serializado = self._contiene(texto, sinonimos["serializados"]) or bool(familia_serializada)
+        senal_accion_validacion_seriales = bool(
+            "valida" in texto
+            or "validacion" in texto
+            or "validar" in texto
+            or "revisa" in texto
+            or "revisar" in texto
+            or "cruza" in texto
+            or "cruzar" in texto
+            or "contra nuestras bases" in texto
+        )
         es_validacion_seriales_proveedor = bool(
             es_serializado
-            and senal_proveedor
             and senal_archivo
+            and senal_accion_validacion_seriales
             and (
-                "valida" in texto
-                or "validacion" in texto
-                or "validar" in texto
-                or "revisa" in texto
-                or "revisar" in texto
-                or "cruza" in texto
-                or "cruzar" in texto
-                or "contra nuestras bases" in texto
+                senal_proveedor
+                or not bool(cedula or movil or codigo)
             )
         )
         senal_stock = (

@@ -311,6 +311,13 @@ class BackgroundRuntimeService:
                 "background": {
                     **dict(state.get("background") or {}),
                     "checkpoint": checkpoint,
+                    "last_progress_update_at": str(
+                        sanitized_evidence.get("last_progress_update_at")
+                        or ((state.get("background") or {}).get("last_progress_update_at") or "")
+                    ),
+                    "progress_snapshot": dict(
+                        sanitized_evidence or (state.get("background") or {}).get("progress_snapshot") or {}
+                    ),
                     "partial_evidence": dict(
                         sanitized_evidence or (state.get("background") or {}).get("partial_evidence") or {}
                     ),
@@ -347,6 +354,12 @@ class BackgroundRuntimeService:
         background = {
             **current_background,
             "run_status": run_status,
+            "last_progress_update_at": str(
+                dict(partial_evidence or {}).get("last_progress_update_at")
+                or current_background.get("last_progress_update_at")
+                or ""
+            ),
+            "progress_snapshot": dict(self.runtime_hardening_service.sanitize_payload(dict(partial_evidence or {}))),
             "partial_evidence": {
                 **dict(current_background.get("partial_evidence") or {}),
                 **dict(self.runtime_hardening_service.sanitize_payload(dict(partial_evidence or {}))),

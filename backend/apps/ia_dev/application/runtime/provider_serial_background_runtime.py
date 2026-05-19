@@ -26,6 +26,8 @@ class ProviderSerialBackgroundRuntime:
     PARTIAL_ARTIFACT_INTERVAL_ROWS = 5000
     CHECKPOINT_EVERY_N_CHUNKS = 1
     ATTACHMENT_SPOOL_DIR = "tmp_provider_serial_validation_runtime"
+    DEFAULT_CHUNK_SIZE = 1000
+    SAFE_MAX_CHUNK_SIZE = 2000
 
     def __init__(
         self,
@@ -91,7 +93,7 @@ class ProviderSerialBackgroundRuntime:
         attachment = dict(request.get("attachment") or {})
         user_message = str(request.get("message") or "Valida este archivo del proveedor")
         previous_year = int(request.get("previous_year") or (datetime.now(timezone.utc).year - 1))
-        chunk_size = max(1, min(int(request.get("chunk_size") or 1000), 2000))
+        chunk_size = max(1, min(int(request.get("chunk_size") or self.DEFAULT_CHUNK_SIZE), self.SAFE_MAX_CHUNK_SIZE))
         fail_after_chunks = int(request.get("fail_after_chunks") or 0)
 
         try:
@@ -163,6 +165,7 @@ class ProviderSerialBackgroundRuntime:
                 processed_serials=set(runtime_state.get("processed_serials") or set()),
                 matches=list(runtime_state.get("matches") or []),
                 matches_by_serial=dict(runtime_state.get("matches_by_serial") or {}),
+                progress_state=dict(runtime_state.get("progress_state") or {}),
                 failure_reason=str(exc),
                 session_id=str(request.get("session_id") or ""),
             )
@@ -329,6 +332,11 @@ class ProviderSerialBackgroundRuntime:
                 continue
             grouped_rows.setdefault(serial, []).append(row)
         serials = list(grouped_rows.keys())
+        requested_chunk_size = chunk_size
+        chunk_size = self._resolve_chunk_size(
+            requested_chunk_size=requested_chunk_size,
+            total_unique_serials=len(serials),
+        )
         rowcount_by_serial = {serial: len(list(rows)) for serial, rows in grouped_rows.items()}
         runtime_state["attachment_name"] = filename
         progress_state = self._build_progress_state(
@@ -338,6 +346,17 @@ class ProviderSerialBackgroundRuntime:
             total_unique_serials=len(serials),
             rowcount_by_serial=rowcount_by_serial,
         )
+        progress_state["chunk_size"] = chunk_size
+        progress_state["requested_chunk_size"] = requested_chunk_size
+        progress_state["normalized_fallback_mode"] = "disabled_for_large_background"
+        progress_state["elapsed_seconds"] = 0
+        performance_metrics = self._init_performance_metrics(
+            requested_chunk_size=requested_chunk_size,
+            effective_chunk_size=chunk_size,
+            total_unique_serials=len(serials),
+        )
+        progress_state["performance_metrics"] = performance_metrics
+        runtime_state["progress_state"] = progress_state
 
         self._checkpoint(
             run_id=run_id,
@@ -365,14 +384,28 @@ class ProviderSerialBackgroundRuntime:
         stage_plan = validator._build_lookup_stage_plan(tables=discovery["existing_tables"])
 
         for stage in stage_plan:
+            stage_key = str(stage.get("stage_key") or "")
             stage_tables = list(stage.get("tables") or [])
             if not pending_serials:
                 break
             progress_state["phase_label"] = str(stage.get("label") or "")
+            progress_state["table_label"] = ""
             progress_state["stage_serials_total"] = len(pending_serials)
             progress_state["stage_serials_processed"] = 0
             progress_state["stage_serials_pending"] = len(pending_serials)
             if not stage_tables:
+                self._record_stage_metrics(
+                    progress_state=progress_state,
+                    stage_key=stage_key,
+                    stage_label=str(stage.get("label") or ""),
+                    input_serials=len(pending_serials),
+                    found_serials=0,
+                    pending_after_stage=len(pending_serials),
+                    query_count=0,
+                    sql_time_ms=0.0,
+                    rows_returned=0,
+                    table_count=0,
+                )
                 self._checkpoint(
                     run_id=run_id,
                     label=str(stage.get("phase") or ""),
@@ -380,6 +413,125 @@ class ProviderSerialBackgroundRuntime:
                     phase=str(stage.get("phase") or ""),
                     current_stage="running",
                 )
+                continue
+
+            stage_input_serials = list(pending_serials)
+            stage_query_count = 0
+            stage_sql_time_ms = 0.0
+            stage_rows_returned = 0
+            stage_table_count = 0
+            use_union_stage = stage_key in {"backup_base", "backup_asociados"} and len(stage_tables) > 1
+            if use_union_stage:
+                union_chunk_size = validator._safe_union_chunk_size(
+                    requested_chunk_size=chunk_size,
+                    table_count=len(stage_tables),
+                )
+                stage_pending = list(pending_serials)
+                serial_chunks = [
+                    stage_pending[index : index + union_chunk_size]
+                    for index in range(0, len(stage_pending), union_chunk_size)
+                ]
+                total_chunks_counter += len(serial_chunks)
+                progress_state["total_chunks"] = total_chunks_counter
+                progress_state["phase_label"] = str(stage.get("label") or "")
+                progress_state["table_label"] = self._build_stage_table_label(
+                    stage_label=str(stage.get("label") or ""),
+                    tables=stage_tables,
+                )
+                progress_state["table_serials_total"] = len(stage_pending)
+                progress_state["table_serials_pending"] = len(stage_pending)
+                progress_state["table_chunk_total"] = len(serial_chunks)
+                progress_state["chunk_size"] = union_chunk_size
+                for local_chunk_index, chunk_serials in enumerate(serial_chunks, start=1):
+                    progress_state["active_chunk"] = current_chunk_counter + 1
+                    progress_state["table_serials_pending"] = len(stage_pending)
+                    stage_lookup_metrics: dict[str, Any] = {}
+                    chunk_started_at = datetime.now(timezone.utc).timestamp()
+                    table_matches = validator._query_tables_union_stage(
+                        tables=stage_tables,
+                        normalized_serials=chunk_serials,
+                        lookup_metrics=stage_lookup_metrics,
+                        skip_noncanonical_probe=True,
+                    )
+                    matches.extend(table_matches)
+                    found_in_chunk: set[str] = set()
+                    for item in table_matches:
+                        serial_normalizado = str(item.get("serial_normalizado") or "")
+                        if not serial_normalizado:
+                            continue
+                        found_in_chunk.add(serial_normalizado)
+                        matches_by_serial.setdefault(serial_normalizado, []).append(item)
+                    pending_serials = [
+                        serial for serial in pending_serials if serial and serial not in found_in_chunk
+                    ]
+                    stage_pending = [
+                        serial for serial in stage_pending if serial and serial not in found_in_chunk
+                    ]
+                    runtime_state["matches"] = list(matches)
+                    runtime_state["matches_by_serial"] = dict(matches_by_serial)
+                    current_chunk_counter += 1
+                    stage_query_count += int(stage_lookup_metrics.get("query_count") or 0)
+                    stage_sql_time_ms += float(stage_lookup_metrics.get("sql_time_ms") or 0.0)
+                    stage_rows_returned += int(stage_lookup_metrics.get("rows_returned") or 0)
+                    stage_table_count = max(
+                        stage_table_count,
+                        int(stage_lookup_metrics.get("table_count") or len(stage_tables)),
+                    )
+                    self._update_progress_state(
+                        progress_state=progress_state,
+                        processed_serials=chunk_serials,
+                        found_serials=found_in_chunk,
+                        pending_serials=pending_serials,
+                        current_chunk=current_chunk_counter,
+                        stage_key=stage_key,
+                    )
+                    progress_state["table_serials_pending"] = len(stage_pending)
+                    progress_state["active_chunk"] = current_chunk_counter
+                    runtime_state["processed_serials"] = set(progress_state.get("_processed_serials") or set())
+                    self._record_runtime_chunk_metrics(
+                        progress_state=progress_state,
+                        stage_key=stage_key,
+                        stage_label=str(stage.get("label") or ""),
+                        table_label=str(progress_state.get("table_label") or ""),
+                        chunk_index=local_chunk_index,
+                        input_serials=len(chunk_serials),
+                        found_serials=len(found_in_chunk),
+                        pending_after_stage=len(pending_serials),
+                        query_count=int(stage_lookup_metrics.get("query_count") or 0),
+                        sql_time_ms=float(stage_lookup_metrics.get("sql_time_ms") or 0.0),
+                        rows_returned=int(stage_lookup_metrics.get("rows_returned") or 0),
+                        union_stage=True,
+                        table_metrics=list(stage_lookup_metrics.get("table_metrics") or []),
+                        chunk_duration_ms=(datetime.now(timezone.utc).timestamp() - chunk_started_at) * 1000.0,
+                    )
+                    should_checkpoint = (
+                        current_chunk_counter % self.CHECKPOINT_EVERY_N_CHUNKS == 0
+                        or not stage_pending
+                        or not pending_serials
+                    )
+                    if should_checkpoint:
+                        self._checkpoint(
+                            run_id=run_id,
+                            label=f"{stage.get('phase')}_{current_chunk_counter}",
+                            progress_state=progress_state,
+                            phase=str(stage.get("phase") or ""),
+                            current_stage="running",
+                        )
+                    if fail_after_chunks > 0 and current_chunk_counter >= fail_after_chunks:
+                        raise RuntimeError(f"simulated_chunk_failure:{current_chunk_counter}")
+                self._record_stage_metrics(
+                    progress_state=progress_state,
+                    stage_key=stage_key,
+                    stage_label=str(stage.get("label") or ""),
+                    input_serials=len(stage_input_serials),
+                    found_serials=len([serial for serial in stage_input_serials if serial not in pending_serials]),
+                    pending_after_stage=len(pending_serials),
+                    query_count=stage_query_count,
+                    sql_time_ms=stage_sql_time_ms,
+                    rows_returned=stage_rows_returned,
+                    table_count=stage_table_count or len(stage_tables),
+                )
+                progress_state["chunk_size"] = chunk_size
                 continue
 
             for table in stage_tables:
@@ -400,12 +552,15 @@ class ProviderSerialBackgroundRuntime:
                 progress_state["table_serials_pending"] = len(table_pending)
                 progress_state["table_chunk_total"] = len(serial_chunks)
                 progress_state["active_chunk"] = current_chunk_counter + 1 if serial_chunks else current_chunk_counter
-                for chunk_serials in serial_chunks:
+                for local_chunk_index, chunk_serials in enumerate(serial_chunks, start=1):
                     progress_state["active_chunk"] = current_chunk_counter + 1
                     progress_state["table_serials_pending"] = len(table_pending)
+                    table_lookup_metrics: dict[str, Any] = {}
+                    chunk_started_at = datetime.now(timezone.utc).timestamp()
                     table_matches = validator._query_table(
                         table=table,
                         normalized_serials=chunk_serials,
+                        lookup_metrics=table_lookup_metrics,
                         skip_noncanonical_probe=True,
                     )
                     matches.extend(table_matches)
@@ -422,6 +577,10 @@ class ProviderSerialBackgroundRuntime:
                     runtime_state["matches"] = list(matches)
                     runtime_state["matches_by_serial"] = dict(matches_by_serial)
                     current_chunk_counter += 1
+                    stage_query_count += int(table_lookup_metrics.get("query_count") or 0)
+                    stage_sql_time_ms += float(table_lookup_metrics.get("sql_time_ms") or 0.0)
+                    stage_rows_returned += int(table_lookup_metrics.get("rows_returned") or 0)
+                    stage_table_count = len(stage_tables)
                     table_pending = [
                         serial for serial in table_pending if serial and serial not in found_in_chunk
                     ]
@@ -436,6 +595,22 @@ class ProviderSerialBackgroundRuntime:
                     progress_state["table_serials_pending"] = len(table_pending)
                     progress_state["active_chunk"] = current_chunk_counter
                     runtime_state["processed_serials"] = set(progress_state.get("_processed_serials") or set())
+                    self._record_runtime_chunk_metrics(
+                        progress_state=progress_state,
+                        stage_key=stage_key,
+                        stage_label=str(stage.get("label") or ""),
+                        table_label=str(table.get("label") or ""),
+                        chunk_index=local_chunk_index,
+                        input_serials=len(chunk_serials),
+                        found_serials=len(found_in_chunk),
+                        pending_after_stage=len(pending_serials),
+                        query_count=int(table_lookup_metrics.get("query_count") or 0),
+                        sql_time_ms=float(table_lookup_metrics.get("sql_time_ms") or 0.0),
+                        rows_returned=int(table_lookup_metrics.get("rows_returned") or 0),
+                        union_stage=False,
+                        table_metrics=[],
+                        chunk_duration_ms=(datetime.now(timezone.utc).timestamp() - chunk_started_at) * 1000.0,
+                    )
                     should_checkpoint = (
                         current_chunk_counter % self.CHECKPOINT_EVERY_N_CHUNKS == 0
                         or not table_pending
@@ -451,9 +626,23 @@ class ProviderSerialBackgroundRuntime:
                         )
                     if fail_after_chunks > 0 and current_chunk_counter >= fail_after_chunks:
                         raise RuntimeError(f"simulated_chunk_failure:{current_chunk_counter}")
+            self._record_stage_metrics(
+                progress_state=progress_state,
+                stage_key=stage_key,
+                stage_label=str(stage.get("label") or ""),
+                input_serials=len(stage_input_serials),
+                found_serials=len([serial for serial in stage_input_serials if serial not in pending_serials]),
+                pending_after_stage=len(pending_serials),
+                query_count=stage_query_count,
+                sql_time_ms=stage_sql_time_ms,
+                rows_returned=stage_rows_returned,
+                table_count=stage_table_count,
+            )
 
         progress_state["not_found_so_far"] = len(pending_serials)
         progress_state["serials_pending"] = len(pending_serials)
+        progress_state["phase_label"] = "Enriqueciendo responsables"
+        progress_state["table_label"] = ""
         self._checkpoint(
             run_id=run_id,
             label="enriqueciendo_movil_responsables",
@@ -495,6 +684,8 @@ class ProviderSerialBackgroundRuntime:
             }
         )
         progress_state["not_found_so_far"] = progress_state["serials_pending"]
+        progress_state["phase_label"] = "Generando dashboard final"
+        progress_state["table_label"] = ""
         self._checkpoint(
             run_id=run_id,
             label="generando_dashboard_final",
@@ -508,6 +699,8 @@ class ProviderSerialBackgroundRuntime:
         result_table = validator._build_main_table(rows=consolidated_rows, export_artifact=export_artifact)
         extra_tables = validator._build_extra_tables(rows=consolidated_rows, discovery=discovery)
         kpis = validator._build_kpis(rows=consolidated_rows)
+        progress_state["phase_label"] = "Generando export CSV"
+        progress_state["table_label"] = ""
         self._checkpoint(
             run_id=run_id,
             label="generando_export_csv",
@@ -560,6 +753,9 @@ class ProviderSerialBackgroundRuntime:
         )
         final_evidence.update(
             {
+                "phase": "completed",
+                "phase_label": "Completado",
+                "table_label": "",
                 "total_rows": total_rows,
                 "total_estimated": total_rows,
                 "current_stage": "completed",
@@ -579,6 +775,17 @@ class ProviderSerialBackgroundRuntime:
                 "found_in_base_actual": int(progress_state.get("found_in_base_actual") or 0),
                 "found_in_asociados_actual": int(progress_state.get("found_in_asociados_actual") or 0),
                 "found_in_historico": int(progress_state.get("found_in_historico") or 0),
+                "chunk_size": chunk_size,
+                "requested_chunk_size": requested_chunk_size,
+                "normalized_fallback_mode": "disabled_for_large_background",
+                "moviles_detectados": int(kpis.get("moviles_detectados") or 0),
+                "moviles_con_responsable_enriquecido": int(kpis.get("moviles_con_responsable_enriquecido") or 0),
+                "moviles_sin_responsable_enriquecido": int(kpis.get("moviles_sin_responsable_enriquecido") or 0),
+                "movil_kpi_definition": {
+                    "moviles_detectados": "Seriales unicos cuyo estado final contiene MOVIL.",
+                    "moviles_con_responsable_enriquecido": "Subset de MOVIL detectados con responsable/persona enriquecido.",
+                },
+                "performance_metrics": dict(progress_state.get("performance_metrics") or {}),
             }
         )
         return final_result, final_evidence
@@ -597,6 +804,7 @@ class ProviderSerialBackgroundRuntime:
         processed_serials: set[str],
         matches: list[dict[str, Any]],
         matches_by_serial: dict[str, list[dict[str, Any]]],
+        progress_state: dict[str, Any],
         failure_reason: str,
         session_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -632,20 +840,27 @@ class ProviderSerialBackgroundRuntime:
             }
             return ensure_chat_response_contract(snapshot), {
                 "phase": "failed",
+                "phase_label": "",
+                "table_label": "",
                 "failure_reason": failure_reason,
                 "rows_processed": 0,
                 "total_rows": 0,
                 "percentage": 0.0,
-            "current_stage": "failed",
-            "result_kind": "partial",
-            "result_label": "Resultado parcial",
-            "current_chunk": 0,
-            "total_chunks": 0,
-            "found_so_far": 0,
-            "not_found_so_far": 0,
-            "movil_so_far": 0,
-            "enriched_responsible_so_far": 0,
-        }
+                "current_stage": "failed",
+                "result_kind": "partial",
+                "result_label": "Resultado parcial",
+                "current_chunk": 0,
+                "total_chunks": 0,
+                "found_so_far": 0,
+                "not_found_so_far": 0,
+                "movil_so_far": 0,
+                "enriched_responsible_so_far": 0,
+                "performance_metrics": dict(progress_state.get("performance_metrics") or {}),
+                "movil_kpi_definition": {
+                    "moviles_detectados": "Seriales unicos cuyo estado final contiene MOVIL.",
+                    "moviles_con_responsable_enriquecido": "Subset de MOVIL detectados con responsable/persona enriquecido.",
+                },
+            }
 
         export_artifact = validator._write_export_artifact(rows=rows)
         result_table = validator._build_main_table(rows=rows, export_artifact=export_artifact)
@@ -697,6 +912,8 @@ class ProviderSerialBackgroundRuntime:
         }
         return self._build_response_snapshot(result=result, session_id=session_id), {
             "phase": "failed",
+            "phase_label": "",
+            "table_label": "",
             "failure_reason": failure_reason,
             "rows_processed": len(rows),
             "total_rows": len(rows),
@@ -720,6 +937,17 @@ class ProviderSerialBackgroundRuntime:
             "found_in_base_actual": int(kpis.get("fuente_final_base_actual") or 0),
             "found_in_asociados_actual": int(kpis.get("fuente_final_asociados_actual") or 0),
             "found_in_historico": int(kpis.get("fuente_final_historico") or 0),
+            "chunk_size": int(progress_state.get("chunk_size") or 0),
+            "requested_chunk_size": int(progress_state.get("requested_chunk_size") or 0),
+            "normalized_fallback_mode": str(progress_state.get("normalized_fallback_mode") or ""),
+            "moviles_detectados": int(kpis.get("moviles_detectados") or 0),
+            "moviles_con_responsable_enriquecido": int(kpis.get("moviles_con_responsable_enriquecido") or 0),
+            "moviles_sin_responsable_enriquecido": int(kpis.get("moviles_sin_responsable_enriquecido") or 0),
+            "movil_kpi_definition": {
+                "moviles_detectados": "Seriales unicos cuyo estado final contiene MOVIL.",
+                "moviles_con_responsable_enriquecido": "Subset de MOVIL detectados con responsable/persona enriquecido.",
+            },
+            "performance_metrics": dict(progress_state.get("performance_metrics") or {}),
         }
 
     def _build_response_snapshot(self, *, result: dict[str, Any], session_id: str) -> dict[str, Any]:
@@ -757,6 +985,8 @@ class ProviderSerialBackgroundRuntime:
         table = dict((result.get("data") or {}).get("table") or {})
         return {
             "phase": phase,
+            "phase_label": "Completado" if str(result.get("status") or "") == "success" else "",
+            "table_label": "",
             "rows_processed": rows_processed,
             "total_rows": int(table.get("rowcount") or rows_processed),
             "percentage": 100.0 if rows_processed else 0.0,
@@ -776,6 +1006,13 @@ class ProviderSerialBackgroundRuntime:
             "not_found_so_far": int(kpis.get("no_encontrados_por_fila") or 0),
             "movil_so_far": int(kpis.get("moviles_detectados") or 0),
             "enriched_responsible_so_far": int(kpis.get("moviles_con_responsable_enriquecido") or 0),
+            "moviles_detectados": int(kpis.get("moviles_detectados") or 0),
+            "moviles_con_responsable_enriquecido": int(kpis.get("moviles_con_responsable_enriquecido") or 0),
+            "moviles_sin_responsable_enriquecido": int(kpis.get("moviles_sin_responsable_enriquecido") or 0),
+            "movil_kpi_definition": {
+                "moviles_detectados": "Seriales unicos cuyo estado final contiene MOVIL.",
+                "moviles_con_responsable_enriquecido": "Subset de MOVIL detectados con responsable/persona enriquecido.",
+            },
             "found_in_base_actual": int(kpis.get("fuente_final_base_actual") or 0),
             "found_in_asociados_actual": int(kpis.get("fuente_final_asociados_actual") or 0),
             "found_in_historico": int(kpis.get("fuente_final_historico") or 0),
@@ -791,6 +1028,7 @@ class ProviderSerialBackgroundRuntime:
         current_stage: str,
     ) -> None:
         workflow = self.task_state_service.get(run_id=run_id) or {}
+        progress_state["elapsed_seconds"] = self._compute_elapsed_seconds(progress_state=progress_state)
         rows_processed = int(progress_state.get("rows_processed") or 0)
         total_rows = int(progress_state.get("total_rows") or 0)
         total_unique_serials = int(progress_state.get("total_unique_serials") or 0)
@@ -807,48 +1045,12 @@ class ProviderSerialBackgroundRuntime:
         elif phase == "generando_export_csv":
             percentage = max(percentage, 97.0)
         elapsed_seconds = int(progress_state.get("elapsed_seconds") or 0)
-        eta_seconds = 0
-        if percentage > 0 and percentage < 100 and elapsed_seconds > 0:
-            eta_seconds = max(0, int((elapsed_seconds / percentage) * (100 - percentage)))
-        evidence = {
-            "rows_processed": rows_processed,
-            "total_rows": total_rows,
-            "total_estimated": total_rows,
-            "percentage": percentage,
-            "phase": phase,
-            "phase_label": str(progress_state.get("phase_label") or ""),
-            "current_stage": current_stage,
-            "result_kind": "partial",
-            "result_label": "Resultado parcial",
-            "chunks_processed": int(progress_state.get("current_chunk") or 0),
-            "total_chunks": int(progress_state.get("total_chunks") or 0),
-            "current_chunk": int(progress_state.get("current_chunk") or 0),
-            "encontrados_parciales": int(progress_state.get("found_so_far") or 0),
-            "no_encontrados_parciales": int(progress_state.get("not_found_so_far") or 0),
-            "movil_detectados_parciales": int(progress_state.get("movil_so_far") or 0),
-            "errores_parciales": int(progress_state.get("rows_with_errors") or 0),
-            "serials_unique_total": total_unique_serials,
-            "serials_processed": serials_processed,
-            "serials_pending": int(progress_state.get("serials_pending") or 0),
-            "stage_serials_total": int(progress_state.get("stage_serials_total") or 0),
-            "stage_serials_processed": int(progress_state.get("stage_serials_processed") or 0),
-            "stage_serials_pending": int(progress_state.get("stage_serials_pending") or 0),
-            "found_so_far": int(progress_state.get("found_so_far") or 0),
-            "not_found_so_far": int(progress_state.get("not_found_so_far") or 0),
-            "movil_so_far": int(progress_state.get("movil_so_far") or 0),
-            "enriched_responsible_so_far": int(progress_state.get("enriched_responsible_so_far") or 0),
-            "found_in_base_actual": int(progress_state.get("found_in_base_actual") or 0),
-            "found_in_asociados_actual": int(progress_state.get("found_in_asociados_actual") or 0),
-            "found_in_historico": int(progress_state.get("found_in_historico") or 0),
-            "table_label": str(progress_state.get("table_label") or ""),
-            "table_serials_total": int(progress_state.get("table_serials_total") or 0),
-            "table_serials_pending": int(progress_state.get("table_serials_pending") or 0),
-            "table_chunk_total": int(progress_state.get("table_chunk_total") or 0),
-            "active_chunk": int(progress_state.get("active_chunk") or 0),
-            "attachment_name": str(progress_state.get("attachment_name") or ""),
-            "elapsed_seconds": elapsed_seconds,
-            "eta_seconds": eta_seconds,
-        }
+        evidence = self._build_live_progress_snapshot(
+            progress_state=progress_state,
+            phase=phase,
+            current_stage=current_stage,
+            percentage=percentage,
+        )
         artifact_id = str(progress_state.get("artifact_id") or "").strip()
         if artifact_id:
             evidence["artifact_id"] = artifact_id
@@ -952,6 +1154,9 @@ class ProviderSerialBackgroundRuntime:
             "table_serials_pending": 0,
             "table_chunk_total": 0,
             "active_chunk": 0,
+            "chunk_size": 0,
+            "requested_chunk_size": 0,
+            "normalized_fallback_mode": "",
             "_rowcount_by_serial": dict(rowcount_by_serial),
             "_processed_serials": set(),
             "_found_base_actual": set(),
@@ -959,6 +1164,11 @@ class ProviderSerialBackgroundRuntime:
             "_found_historico": set(),
             "_movil_serials": set(),
             "_enriched_serials": set(),
+            "performance_metrics": {},
+            "last_chunk_metrics": {},
+            "_started_at_monotonic": datetime.now(timezone.utc).timestamp(),
+            "_started_at_iso": datetime.now(timezone.utc).isoformat(),
+            "last_progress_update_at": "",
         }
 
     @staticmethod
@@ -1013,6 +1223,228 @@ class ProviderSerialBackgroundRuntime:
             + int(progress_state.get("found_in_asociados_actual") or 0)
             + int(progress_state.get("found_in_historico") or 0)
         )
+
+    @classmethod
+    def _resolve_chunk_size(
+        cls,
+        *,
+        requested_chunk_size: int,
+        total_unique_serials: int,
+    ) -> int:
+        requested = max(1, min(int(requested_chunk_size or cls.DEFAULT_CHUNK_SIZE), cls.SAFE_MAX_CHUNK_SIZE))
+        if requested != cls.DEFAULT_CHUNK_SIZE:
+            return requested
+        if total_unique_serials >= 5000:
+            return 1800
+        if total_unique_serials >= 3000:
+            return 1600
+        if total_unique_serials >= 1500:
+            return 1200
+        return requested
+
+    @staticmethod
+    def _init_performance_metrics(
+        *,
+        requested_chunk_size: int,
+        effective_chunk_size: int,
+        total_unique_serials: int,
+    ) -> dict[str, Any]:
+        return {
+            "requested_chunk_size": int(requested_chunk_size or 0),
+            "effective_chunk_size": int(effective_chunk_size or 0),
+            "total_unique_serials": int(total_unique_serials or 0),
+            "normalized_fallback_mode": "disabled_for_large_background",
+            "query_count_total": 0,
+            "sql_time_ms_total": 0.0,
+            "rows_returned_total": 0,
+            "stages": [],
+            "chunks": [],
+        }
+
+    @staticmethod
+    def _build_stage_table_label(*, stage_label: str, tables: list[dict[str, Any]]) -> str:
+        normalized_label = str(stage_label or "").strip()
+        table_count = len(list(tables or []))
+        if table_count <= 1:
+            return normalized_label
+        return f"{normalized_label} ({table_count} tablas en union)"
+
+    @staticmethod
+    def _compute_elapsed_seconds(*, progress_state: dict[str, Any]) -> int:
+        started_at = float(progress_state.get("_started_at_monotonic") or 0.0)
+        if started_at <= 0:
+            return int(progress_state.get("elapsed_seconds") or 0)
+        return max(0, int(datetime.now(timezone.utc).timestamp() - started_at))
+
+    @classmethod
+    def _record_runtime_chunk_metrics(
+        cls,
+        *,
+        progress_state: dict[str, Any],
+        stage_key: str,
+        stage_label: str,
+        table_label: str,
+        chunk_index: int,
+        input_serials: int,
+        found_serials: int,
+        pending_after_stage: int,
+        query_count: int,
+        sql_time_ms: float,
+        rows_returned: int,
+        union_stage: bool,
+        table_metrics: list[dict[str, Any]],
+        chunk_duration_ms: float = 0.0,
+    ) -> None:
+        performance_metrics = dict(progress_state.get("performance_metrics") or {})
+        chunks = list(performance_metrics.get("chunks") or [])
+        chunk_payload = {
+            "stage_key": stage_key,
+            "stage_label": stage_label,
+            "table_label": table_label,
+            "chunk_index": int(chunk_index or 0),
+            "global_chunk": int(progress_state.get("current_chunk") or 0),
+            "input_serials": int(input_serials or 0),
+            "found_serials": int(found_serials or 0),
+            "pending_after_stage": int(pending_after_stage or 0),
+            "query_count": int(query_count or 0),
+            "sql_time_ms": round(float(sql_time_ms or 0.0), 2),
+            "chunk_duration_ms": round(float(chunk_duration_ms or 0.0), 2),
+            "rows_returned": int(rows_returned or 0),
+            "union_stage": bool(union_stage),
+            "table_metrics": list(table_metrics or []),
+        }
+        chunks.append(chunk_payload)
+        performance_metrics["chunks"] = chunks
+        performance_metrics["query_count_total"] = int(performance_metrics.get("query_count_total") or 0) + int(
+            query_count or 0
+        )
+        performance_metrics["sql_time_ms_total"] = round(
+            float(performance_metrics.get("sql_time_ms_total") or 0.0) + float(sql_time_ms or 0.0),
+            2,
+        )
+        performance_metrics["rows_returned_total"] = int(performance_metrics.get("rows_returned_total") or 0) + int(
+            rows_returned or 0
+        )
+        progress_state["performance_metrics"] = performance_metrics
+        progress_state["last_chunk_metrics"] = chunk_payload
+
+    @staticmethod
+    def _summarize_performance_metrics(*, performance_metrics: dict[str, Any]) -> dict[str, Any]:
+        metrics = dict(performance_metrics or {})
+        stages = list(metrics.get("stages") or [])
+        chunks = list(metrics.get("chunks") or [])
+        summary = {
+            "requested_chunk_size": int(metrics.get("requested_chunk_size") or 0),
+            "effective_chunk_size": int(metrics.get("effective_chunk_size") or 0),
+            "total_unique_serials": int(metrics.get("total_unique_serials") or 0),
+            "normalized_fallback_mode": str(metrics.get("normalized_fallback_mode") or ""),
+            "query_count_total": int(metrics.get("query_count_total") or 0),
+            "sql_time_ms_total": round(float(metrics.get("sql_time_ms_total") or 0.0), 2),
+            "rows_returned_total": int(metrics.get("rows_returned_total") or 0),
+            "stage_count": len(stages),
+            "chunk_count": len(chunks),
+        }
+        if stages:
+            summary["last_stage"] = dict(stages[-1])
+        return summary
+
+    @classmethod
+    def _build_live_progress_snapshot(
+        cls,
+        *,
+        progress_state: dict[str, Any],
+        phase: str,
+        current_stage: str,
+        percentage: float,
+    ) -> dict[str, Any]:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        progress_state["last_progress_update_at"] = now_iso
+        elapsed_seconds = int(progress_state.get("elapsed_seconds") or cls._compute_elapsed_seconds(progress_state=progress_state))
+        eta_seconds = 0
+        if percentage > 0 and percentage < 100 and elapsed_seconds > 0:
+            eta_seconds = max(0, int((elapsed_seconds / percentage) * (100 - percentage)))
+        last_chunk_metrics = dict(progress_state.get("last_chunk_metrics") or {})
+        return {
+            "rows_processed": int(progress_state.get("rows_processed") or 0),
+            "total_rows": int(progress_state.get("total_rows") or 0),
+            "total_estimated": int(progress_state.get("total_rows") or 0),
+            "percentage": round(float(percentage or 0.0), 1),
+            "phase": phase,
+            "phase_label": str(progress_state.get("phase_label") or ""),
+            "current_stage": current_stage,
+            "result_kind": "partial",
+            "result_label": "Resultado parcial",
+            "chunks_processed": int(progress_state.get("current_chunk") or 0),
+            "total_chunks": int(progress_state.get("total_chunks") or 0),
+            "current_chunk": int(progress_state.get("current_chunk") or 0),
+            "encontrados_parciales": int(progress_state.get("found_so_far") or 0),
+            "no_encontrados_parciales": int(progress_state.get("not_found_so_far") or 0),
+            "movil_detectados_parciales": int(progress_state.get("movil_so_far") or 0),
+            "errores_parciales": int(progress_state.get("rows_with_errors") or 0),
+            "serials_unique_total": int(progress_state.get("total_unique_serials") or 0),
+            "serials_processed": int(progress_state.get("serials_processed") or 0),
+            "serials_pending": int(progress_state.get("serials_pending") or 0),
+            "stage_serials_total": int(progress_state.get("stage_serials_total") or 0),
+            "stage_serials_processed": int(progress_state.get("stage_serials_processed") or 0),
+            "stage_serials_pending": int(progress_state.get("stage_serials_pending") or 0),
+            "found_so_far": int(progress_state.get("found_so_far") or 0),
+            "not_found_so_far": int(progress_state.get("not_found_so_far") or 0),
+            "movil_so_far": int(progress_state.get("movil_so_far") or 0),
+            "enriched_responsible_so_far": int(progress_state.get("enriched_responsible_so_far") or 0),
+            "found_in_base_actual": int(progress_state.get("found_in_base_actual") or 0),
+            "found_in_asociados_actual": int(progress_state.get("found_in_asociados_actual") or 0),
+            "found_in_historico": int(progress_state.get("found_in_historico") or 0),
+            "table_label": str(progress_state.get("table_label") or ""),
+            "table_serials_total": int(progress_state.get("table_serials_total") or 0),
+            "table_serials_pending": int(progress_state.get("table_serials_pending") or 0),
+            "table_chunk_total": int(progress_state.get("table_chunk_total") or 0),
+            "active_chunk": int(progress_state.get("active_chunk") or 0),
+            "attachment_name": str(progress_state.get("attachment_name") or ""),
+            "elapsed_seconds": elapsed_seconds,
+            "eta_seconds": eta_seconds,
+            "chunk_size": int(progress_state.get("chunk_size") or 0),
+            "requested_chunk_size": int(progress_state.get("requested_chunk_size") or 0),
+            "normalized_fallback_mode": str(progress_state.get("normalized_fallback_mode") or ""),
+            "last_chunk_metrics": last_chunk_metrics,
+            "chunk_duration_ms": round(float(last_chunk_metrics.get("chunk_duration_ms") or 0.0), 2),
+            "last_progress_update_at": now_iso,
+            "started_at": str(progress_state.get("_started_at_iso") or ""),
+            "performance_metrics": cls._summarize_performance_metrics(
+                performance_metrics=dict(progress_state.get("performance_metrics") or {})
+            ),
+        }
+
+    @staticmethod
+    def _record_stage_metrics(
+        *,
+        progress_state: dict[str, Any],
+        stage_key: str,
+        stage_label: str,
+        input_serials: int,
+        found_serials: int,
+        pending_after_stage: int,
+        query_count: int,
+        sql_time_ms: float,
+        rows_returned: int,
+        table_count: int,
+    ) -> None:
+        performance_metrics = dict(progress_state.get("performance_metrics") or {})
+        stages = list(performance_metrics.get("stages") or [])
+        stages.append(
+            {
+                "stage_key": stage_key,
+                "stage_label": stage_label,
+                "input_serials": int(input_serials or 0),
+                "found_serials": int(found_serials or 0),
+                "pending_after_stage": int(pending_after_stage or 0),
+                "query_count": int(query_count or 0),
+                "sql_time_ms": round(float(sql_time_ms or 0.0), 2),
+                "rows_returned": int(rows_returned or 0),
+                "table_count": int(table_count or 0),
+            }
+        )
+        performance_metrics["stages"] = stages
+        progress_state["performance_metrics"] = performance_metrics
 
     def _should_persist_partial_artifact(
         self,

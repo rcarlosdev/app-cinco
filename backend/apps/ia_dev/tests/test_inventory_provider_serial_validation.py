@@ -207,6 +207,63 @@ class _InfoSchemaCountingPlanner:
         return {"ok": True, "rows": [], "rowcount": 0}
 
 
+class _UnionStagePlanner:
+    def __init__(self):
+        self.queries: list[str] = []
+
+    def execute_governed_select(self, **kwargs):
+        self.queries.append(str(kwargs.get("query") or ""))
+        return {
+            "ok": True,
+            "rows": [
+                {
+                    "serial_raw": "SN-1",
+                    "estado": "HIST-2024",
+                    "lote": "",
+                    "cedula": "",
+                    "edit": "",
+                    "movil": "",
+                    "bodega": "",
+                    "codigo": "",
+                    "descripcion": "",
+                    "fecha": "",
+                    "source_label": "backup base seriales anio 2024",
+                    "source_kind": "backup_base",
+                    "source_table": "z_c3nc4_f3sc1l.logistica_base_seriales_2024",
+                    "source_year": 2024,
+                    "source_priority": 1,
+                },
+                {
+                    "serial_raw": "SN-1",
+                    "estado": "HIST-2025",
+                    "lote": "",
+                    "cedula": "",
+                    "edit": "",
+                    "movil": "",
+                    "bodega": "",
+                    "codigo": "",
+                    "descripcion": "",
+                    "fecha": "",
+                    "source_label": "backup base seriales anio 2025",
+                    "source_kind": "backup_base",
+                    "source_table": "z_c3nc4_f3sc1l.logistica_base_seriales_2025",
+                    "source_year": 2025,
+                    "source_priority": 0,
+                },
+            ],
+            "rowcount": 2,
+        }
+
+
+class _PlaceholderBudgetUnionPlanner:
+    def __init__(self):
+        self.params_lengths: list[int] = []
+
+    def execute_governed_select(self, **kwargs):
+        self.params_lengths.append(len(list(kwargs.get("params") or [])))
+        return {"ok": True, "rows": [], "rowcount": 0}
+
+
 class _RoutingValidator(ValidadorSerialesProveedorService):
     def __init__(self):
         super().__init__(dashboard_planner=DashboardCompositionPlanner())
@@ -512,6 +569,99 @@ class InventoryProviderSerialValidationTests(SimpleTestCase):
         self.assertEqual(len(list(result["matches_by_serial"].get("ASOC-1") or [])), 1)
         self.assertEqual(len(list(result["matches_by_serial"].get("HIST-1") or [])), 1)
 
+    def test_validate_keeps_precedence_when_same_serial_exists_in_current_and_historical_sources(self):
+        validator = _StubValidator(
+            discovery={
+                "existing_tables": [
+                    {
+                        "schema": "logistica_cinco",
+                        "table": "logistica_base_seriales",
+                        "kind": "base_actual",
+                        "label": "base actual",
+                        "fqn": "logistica_cinco.logistica_base_seriales",
+                        "year": None,
+                        "columns": ["serial", "estado"],
+                    },
+                    {
+                        "schema": "logistica_cinco",
+                        "table": "logistica_seriales_asociados",
+                        "kind": "asociados_actual",
+                        "label": "asociados actual",
+                        "fqn": "logistica_cinco.logistica_seriales_asociados",
+                        "year": None,
+                        "columns": ["serial", "estado"],
+                    },
+                    {
+                        "schema": "z_c3nc4_f3sc1l",
+                        "table": "logistica_base_seriales_2025",
+                        "kind": "backup_base",
+                        "label": "backup base seriales anio 2025",
+                        "fqn": "z_c3nc4_f3sc1l.logistica_base_seriales_2025",
+                        "year": 2025,
+                        "columns": ["serial", "estado"],
+                    },
+                ],
+                "missing_tables": [],
+            },
+            matches=[
+                {
+                    "serial_normalizado": "MIX-1",
+                    "source_label": "backup base seriales anio 2025",
+                    "source_kind": "backup_base",
+                    "source_table": "z_c3nc4_f3sc1l.logistica_base_seriales_2025",
+                    "year": 2025,
+                    "estado": "HISTORICO",
+                    "cedula": "",
+                    "movil": "",
+                    "bodega": "",
+                    "codigo": "",
+                    "descripcion": "",
+                    "fecha": "2025-01-01 00:00:00",
+                },
+                {
+                    "serial_normalizado": "MIX-1",
+                    "source_label": "asociados actual",
+                    "source_kind": "asociados_actual",
+                    "source_table": "logistica_cinco.logistica_seriales_asociados",
+                    "year": None,
+                    "estado": "ASOCIADO_MOVIL",
+                    "cedula": "12345",
+                    "movil": "MOV-1",
+                    "bodega": "",
+                    "codigo": "",
+                    "descripcion": "",
+                    "fecha": "2026-01-01 00:00:00",
+                },
+                {
+                    "serial_normalizado": "MIX-1",
+                    "source_label": "base actual",
+                    "source_kind": "base_actual",
+                    "source_table": "logistica_cinco.logistica_base_seriales",
+                    "year": None,
+                    "estado": "BODEGA CENTRAL",
+                    "cedula": "",
+                    "movil": "",
+                    "bodega": "BOD-1",
+                    "codigo": "",
+                    "descripcion": "",
+                    "fecha": "2026-02-01 00:00:00",
+                },
+            ],
+        )
+
+        result = validator.validate(
+            attachment=_csv_attachment(headers=["Numero de serie"], rows=[["MIX-1"]]),
+            user_message="Valida precedencia",
+            previous_year=2025,
+        )
+
+        row = result["data"]["table"]["rows"][0]
+        self.assertEqual(row["fuente"], "base actual")
+        self.assertEqual(row["solo_historico"], "NO")
+        self.assertIn("base actual", row["fuentes_coincidencia"].lower())
+        self.assertIn("asociados actual", row["fuentes_coincidencia"].lower())
+        self.assertIn("backup", row["fuentes_coincidencia"].lower())
+
     def test_personal_metadata_queries_are_cached_between_calls(self):
         planner = _InfoSchemaCountingPlanner()
         validator = ValidadorSerialesProveedorService(
@@ -528,6 +678,102 @@ class InventoryProviderSerialValidationTests(SimpleTestCase):
 
         self.assertEqual(planner.table_exists_calls, 1)
         self.assertEqual(planner.table_columns_calls, 1)
+
+    def test_union_backup_stage_uses_single_query_and_keeps_newest_table_precedence(self):
+        planner = _UnionStagePlanner()
+        validator = ValidadorSerialesProveedorService(
+            planner=planner,
+            dashboard_planner=DashboardCompositionPlanner(),
+        )
+        metrics: dict[str, object] = {}
+
+        rows = validator._query_tables_union_stage(
+            tables=[
+                {
+                    "schema": "z_c3nc4_f3sc1l",
+                    "table": "logistica_base_seriales_2025",
+                    "kind": "backup_base",
+                    "label": "backup base seriales anio 2025",
+                    "fqn": "z_c3nc4_f3sc1l.logistica_base_seriales_2025",
+                    "year": 2025,
+                    "columns": ["serial", "estado"],
+                },
+                {
+                    "schema": "z_c3nc4_f3sc1l",
+                    "table": "logistica_base_seriales_2024",
+                    "kind": "backup_base",
+                    "label": "backup base seriales anio 2024",
+                    "fqn": "z_c3nc4_f3sc1l.logistica_base_seriales_2024",
+                    "year": 2024,
+                    "columns": ["serial", "estado"],
+                },
+            ],
+            normalized_serials=["SN-1"],
+            lookup_metrics=metrics,
+            skip_noncanonical_probe=True,
+        )
+
+        self.assertEqual(len(planner.queries), 1)
+        self.assertIn("UNION ALL", planner.queries[0])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_table"], "z_c3nc4_f3sc1l.logistica_base_seriales_2025")
+        self.assertEqual(int(metrics["query_count"]), 1)
+        self.assertEqual(str(metrics["normalized_fallback_reason"]), "disabled_for_large_provider_validation")
+
+    def test_union_backup_stage_caps_chunk_size_by_placeholder_budget(self):
+        planner = _PlaceholderBudgetUnionPlanner()
+        validator = ValidadorSerialesProveedorService(
+            planner=planner,
+            dashboard_planner=DashboardCompositionPlanner(),
+        )
+        metrics: dict[str, object] = {}
+        serials = [f"SN-{index:04d}" for index in range(4000)]
+        original_chunk_size = (
+            validator._query_tables_union_stage.__globals__["_DB_LOOKUP_CHUNK_SIZE"]
+        )
+        validator._query_tables_union_stage.__globals__["_DB_LOOKUP_CHUNK_SIZE"] = 2000
+
+        try:
+            validator._query_tables_union_stage(
+                tables=[
+                    {
+                        "schema": "z_c3nc4_f3sc1l",
+                        "table": "logistica_base_seriales_2025",
+                        "kind": "backup_base",
+                        "label": "backup base seriales anio 2025",
+                        "fqn": "z_c3nc4_f3sc1l.logistica_base_seriales_2025",
+                        "year": 2025,
+                        "columns": ["serial", "estado"],
+                    },
+                    {
+                        "schema": "z_c3nc4_f3sc1l",
+                        "table": "logistica_base_seriales_2024",
+                        "kind": "backup_base",
+                        "label": "backup base seriales anio 2024",
+                        "fqn": "z_c3nc4_f3sc1l.logistica_base_seriales_2024",
+                        "year": 2024,
+                        "columns": ["serial", "estado"],
+                    },
+                    {
+                        "schema": "z_c3nc4_f3sc1l",
+                        "table": "logistica_base_seriales_2023",
+                        "kind": "backup_base",
+                        "label": "backup base seriales anio 2023",
+                        "fqn": "z_c3nc4_f3sc1l.logistica_base_seriales_2023",
+                        "year": 2023,
+                        "columns": ["serial", "estado"],
+                    },
+                ],
+                normalized_serials=serials,
+                lookup_metrics=metrics,
+                skip_noncanonical_probe=True,
+            )
+        finally:
+            validator._query_tables_union_stage.__globals__["_DB_LOOKUP_CHUNK_SIZE"] = original_chunk_size
+
+        self.assertEqual(int(metrics["chunk_size"]), 1828)
+        self.assertGreater(len(planner.params_lengths), 2)
+        self.assertTrue(all(length <= 5499 for length in planner.params_lengths))
 
     def test_resolves_match_only_in_historical_backup(self):
         validator = _StubValidator(
@@ -949,3 +1195,29 @@ class InventoryProviderSerialValidationTests(SimpleTestCase):
         self.assertTrue(bool(artifact["artifact_id"]))
         self.assertFalse("path" in artifact)
         self.assertEqual(int(artifact["record_count"]), 250)
+
+    def test_drilldown_tables_keep_preview_but_publish_full_export_artifact(self):
+        validator = _StubValidator()
+        rows = [[f"MISS-{index:03d}"] for index in range(60)]
+        result = validator.validate(
+            attachment=_csv_attachment(
+                headers=["Numero de serie"],
+                rows=rows,
+            ),
+            user_message="Valida drilldown completo",
+            previous_year=2025,
+        )
+
+        composition = result["data"]["business_response"]["dashboard_composition"]
+        drilldown = next(
+            item for item in composition["priority_tables"] if item["id"] == "seriales_no_encontrados"
+        )
+        table = drilldown["table"]
+
+        self.assertEqual(int(table["rowcount"]), 60)
+        self.assertEqual(int(table["returned_records"]), 50)
+        self.assertTrue(bool(table["truncated"]))
+        self.assertTrue(bool(table["export_truncated"]))
+        self.assertEqual(int(table["export_records"]), 60)
+        self.assertTrue(bool(dict(table.get("export_artifact") or {}).get("artifact_id")))
+        self.assertEqual(int(dict(table.get("export_artifact") or {}).get("record_count") or 0), 60)

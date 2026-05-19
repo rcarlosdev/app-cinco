@@ -210,6 +210,19 @@ class InventarioSemanticResolverTests(SimpleTestCase):
             "handler",
         )
 
+    def test_valida_seriales_con_adjunto_sin_repetir_proveedor_resuelve_capability_gobernada(self):
+        resolved = self._resolve_with_attachment(
+            message="Validar los seriales",
+            operation="validate_file",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+        self.assertEqual(str(resolved.intent.operation or ""), "validate_file")
+        self.assertEqual(
+            str(((resolved.semantic_context.get("semantic_capability_registry") or {}).get("candidate_capability") or "")),
+            "inventory_provider_serial_validation",
+        )
+
     def test_valida_seriales_sin_adjunto_no_fuerza_ruta_de_proveedor(self):
         resolved = self._resolve("Valida los seriales", operation="detail")
 
