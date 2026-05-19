@@ -449,6 +449,11 @@ const buildBackgroundJob = (
     null;
   const status = asString(background.run_status || progress?.status).toLowerCase();
   if (!status) return null;
+  const isCompleted = status === "completed";
+  const normalizedPhase = isCompleted ? "completed" : asString(progress?.phase) || status;
+  const normalizedPhaseLabel = isCompleted
+    ? asString(progress?.phase_label) || "Completado"
+    : asString(progress?.phase_label) || undefined;
   return {
     status,
     backgroundRunId:
@@ -456,9 +461,9 @@ const buildBackgroundJob = (
     jobId: asString(progress?.job_id) || asString(background.job_id),
     rowsProcessed: Number(progress?.rows_processed || 0),
     totalEstimated: Number(progress?.total_estimated || 0),
-    percentage: Number(progress?.percentage || 0),
-    phase: asString(progress?.phase) || status,
-    phaseLabel: asString(progress?.phase_label) || undefined,
+    percentage: isCompleted ? 100 : Number(progress?.percentage || 0),
+    phase: normalizedPhase,
+    phaseLabel: normalizedPhaseLabel,
     elapsedSeconds: Number(progress?.elapsed_seconds || 0),
     etaSeconds: Number(progress?.eta_seconds || 0) || undefined,
     currentChunk: Number(progress?.current_chunk || 0),
@@ -470,7 +475,7 @@ const buildBackgroundJob = (
     stageSerialsTotal: toOptionalNumber(progress?.stage_serials_total),
     stageSerialsProcessed: toOptionalNumber(progress?.stage_serials_processed),
     stageSerialsPending: toOptionalNumber(progress?.stage_serials_pending),
-    tableLabel: asString(progress?.table_label) || undefined,
+    tableLabel: isCompleted ? undefined : asString(progress?.table_label) || undefined,
     tableSerialsTotal: toOptionalNumber(progress?.table_serials_total),
     tableSerialsPending: toOptionalNumber(progress?.table_serials_pending),
     tableChunkTotal: toOptionalNumber(progress?.table_chunk_total),
@@ -484,10 +489,18 @@ const buildBackgroundJob = (
     attachmentName: asString(progress?.attachment_name) || undefined,
     artifactId: asString(progress?.artifact_id) || undefined,
     resultKind: asString(progress?.result_kind) || undefined,
-    resultLabel: asString(progress?.result_label) || undefined,
+    resultLabel: isCompleted
+      ? asString(progress?.result_label) || "Resultado final"
+      : asString(progress?.result_label) || undefined,
     failureReason:
       asString(background.failure_reason) || asString(progress?.failure_reason) || undefined,
     updatedAt: Number(progress?.updated_at || 0) || undefined,
+    chunkSize: toOptionalNumber(progress?.chunk_size),
+    requestedChunkSize: toOptionalNumber(progress?.requested_chunk_size),
+    normalizedFallbackMode:
+      asString(progress?.normalized_fallback_mode) || undefined,
+    lastChunkMetrics: asObject(progress?.last_chunk_metrics) || undefined,
+    performanceMetrics: asObject(progress?.performance_metrics) || undefined,
   };
 };
 

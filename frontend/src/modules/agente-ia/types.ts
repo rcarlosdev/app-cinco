@@ -88,6 +88,11 @@ export type DashboardBackgroundJob = {
   resultLabel?: string;
   failureReason?: string;
   updatedAt?: number;
+  chunkSize?: number;
+  requestedChunkSize?: number;
+  normalizedFallbackMode?: string;
+  lastChunkMetrics?: Record<string, unknown>;
+  performanceMetrics?: Record<string, unknown>;
 };
 
 export type DashboardTableTab = {

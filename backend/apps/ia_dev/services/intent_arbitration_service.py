@@ -347,6 +347,12 @@ class IntentArbitrationService:
         should_use_handler = bool(decision.get("should_use_handler"))
         should_fallback = bool(decision.get("should_fallback"))
         executable_analytics = bool(semantic_inference.get("executable_analytics"))
+        governed_handler_analytics = bool(
+            final_domain == "inventario_logistica"
+            and str(semantic_inference.get("expected_runtime_flow") or "").strip().lower() == "handler"
+            and str(semantic_inference.get("implementation_status") or "").strip().lower()
+            == "ready_for_handler_execution"
+        )
         guarded_inventory_employee_stock = self._is_inventory_employee_stock_query(
             semantic_inference.get("original_question") or ""
         )
@@ -375,7 +381,9 @@ class IntentArbitrationService:
                 "La frase 'saldo ... empleado/tecnico <cedula>' corresponde a saldo de inventario por movil. "
                 "Se conserva inventario_logistica y empleados queda solo para enrichment."
             )
-        if final_intent in {"operational_question", "fallback"} and (executable_analytics or inventory_sql_executable):
+        if final_intent in {"operational_question", "fallback"} and (
+            executable_analytics or inventory_sql_executable or governed_handler_analytics
+        ):
             final_intent = "analytics_query"
             confidence = max(confidence, self.confidence_threshold)
             reasoning_summary = (
@@ -386,20 +394,28 @@ class IntentArbitrationService:
             should_fallback = False
 
         if final_intent == "analytics_query":
-            if executable_analytics:
+            if executable_analytics or governed_handler_analytics:
                 confidence = max(confidence, self.confidence_threshold)
                 low_confidence = False
             should_create_kpro = False
-            should_execute_query = (not low_confidence or executable_analytics) and final_domain not in {"", "general", "knowledge"}
-            should_use_sql_assisted = (
+            should_execute_query = (
+                not low_confidence or executable_analytics or governed_handler_analytics
+            ) and final_domain not in {"", "general", "knowledge"}
+            should_use_sql_assisted = bool(
                 should_execute_query
                 and has_real_data
                 and final_domain in {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
+                and not governed_handler_analytics
             )
-            should_use_handler = (
+            should_use_handler = bool(
                 should_execute_query
-                and not should_use_sql_assisted
-                and any(item.get("capability_id") for item in capabilities_payload)
+                and (
+                    governed_handler_analytics
+                    or (
+                        not should_use_sql_assisted
+                        and any(item.get("capability_id") for item in capabilities_payload)
+                    )
+                )
             )
 
         elif final_intent == "knowledge_change_request":
@@ -423,15 +439,16 @@ class IntentArbitrationService:
             should_use_sql_assisted = False
             should_use_handler = False
 
-        if low_confidence and not executable_analytics:
+        if low_confidence and not executable_analytics and not governed_handler_analytics:
             should_fallback = True
             should_execute_query = False
             should_use_sql_assisted = False
+            should_use_handler = False
             if not clarification:
                 clarification = (
                     "Aclara si buscas analitica de datos, un cambio de conocimiento o una accion operativa."
                 )
-        elif executable_analytics:
+        elif executable_analytics or governed_handler_analytics:
             should_fallback = False
             clarification = ""
 
@@ -445,7 +462,9 @@ class IntentArbitrationService:
             "should_create_kpro": bool(should_create_kpro),
             "should_use_sql_assisted": bool(should_use_sql_assisted),
             "should_use_handler": bool(should_use_handler),
-            "should_fallback": bool(should_fallback or (low_confidence and not executable_analytics)),
+            "should_fallback": bool(
+                should_fallback or (low_confidence and not executable_analytics and not governed_handler_analytics)
+            ),
             "confidence": confidence,
             "reasoning_summary": reasoning_summary[:280],
             "required_clarification": clarification[:280],

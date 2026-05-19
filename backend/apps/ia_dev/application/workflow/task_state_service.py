@@ -226,6 +226,11 @@ class TaskStateService:
         token = str(resume_token or "").strip()
         if not token:
             return None
+        direct_lookup = getattr(self.repo, "find_workflow_state_by_resume_token", None)
+        if callable(direct_lookup):
+            workflow = direct_lookup(token)
+            if workflow:
+                return workflow
         for workflow in self.list(limit=limit):
             state = dict((workflow or {}).get("state") or {})
             background = dict(state.get("background") or {})
@@ -240,6 +245,11 @@ class TaskStateService:
         target = str(background_run_id or "").strip()
         if not target:
             return None
+        direct_lookup = getattr(self.repo, "find_workflow_state_by_background_run_id", None)
+        if callable(direct_lookup):
+            workflow = direct_lookup(target)
+            if workflow:
+                return workflow
         for workflow in self.list(limit=limit):
             state = dict((workflow or {}).get("state") or {})
             background = dict(state.get("background") or {})

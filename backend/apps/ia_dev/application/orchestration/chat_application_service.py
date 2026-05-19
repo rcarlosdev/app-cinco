@@ -4839,11 +4839,13 @@ class ChatApplicationService:
         checkpoints: list[dict[str, Any]] | None = None,
         updated_at: Any = None,
     ) -> dict[str, Any]:
+        progress_snapshot = dict(background.get("progress_snapshot") or {})
         partial = dict(background.get("partial_evidence") or {})
         final = dict(background.get("final_evidence") or {})
         checkpoint = dict(background.get("checkpoint") or {})
         checkpoint_progress = dict(checkpoint.get("progress") or {})
         merged = {
+            **progress_snapshot,
             **checkpoint_progress,
             **partial,
             **final,
@@ -4885,6 +4887,11 @@ class ChatApplicationService:
         eta_seconds = int(merged.get("eta_seconds") or 0)
         if eta_seconds <= 0 and elapsed_seconds > 0 and 0.0 < percentage < 100.0:
             eta_seconds = max(0, int((elapsed_seconds / percentage) * (100.0 - percentage)))
+        last_progress_update_at = str(
+            merged.get("last_progress_update_at")
+            or background.get("last_progress_update_at")
+            or ""
+        ).strip()
         return {
             "rows_processed": rows_processed,
             "total_estimated": total_estimated,
@@ -4920,6 +4927,11 @@ class ChatApplicationService:
             "found_in_historico": int(merged.get("found_in_historico") or 0),
             "artifact_id": str(merged.get("artifact_id") or "").strip(),
             "failure_reason": str(merged.get("failure_reason") or background.get("failure_reason") or "").strip(),
+            "last_progress_update_at": last_progress_update_at,
+            "started_at": str(merged.get("started_at") or background.get("started_at") or background.get("requested_at") or "").strip(),
+            "chunk_duration_ms": round(float(merged.get("chunk_duration_ms") or 0.0), 2),
+            "last_chunk_metrics": dict(merged.get("last_chunk_metrics") or {}),
+            "performance_metrics": dict(merged.get("performance_metrics") or {}),
             "updated_at": int(updated_at or 0) if str(updated_at or "").strip() else 0,
         }
 
@@ -5202,6 +5214,22 @@ class ChatApplicationService:
             clarification_required=False,
             limitation_declared=False,
         )
+        background_summary = {
+            "background_run_id": str(background.get("background_run_id") or ""),
+            "job_id": str(background.get("job_id") or ""),
+            "tool_id": tool_id,
+            "run_status": str(background.get("run_status") or ""),
+            "queue_status": str(background.get("queue_status") or ""),
+            "resume_token": str(background.get("resume_token") or ""),
+            "failure_reason": str(background.get("failure_reason") or ""),
+            "requested_at": str(background.get("requested_at") or ""),
+            "started_at": str(background.get("started_at") or ""),
+            "finished_at": str(background.get("finished_at") or ""),
+            "polling": dict(background.get("polling") or {}),
+            "last_progress_update_at": str(
+                progress.get("last_progress_update_at") or background.get("last_progress_update_at") or ""
+            ),
+        }
         return {
             "session_id": str(state.get("session_id") or ""),
             "reply": reply,
@@ -5230,7 +5258,7 @@ class ChatApplicationService:
                         "final_state": {"lifecycle": "background"},
                         "timeline": semantic_timeline,
                     },
-                    "background": background,
+                    "background": background_summary,
                     "required_tools": [tool_id] if tool_id else [],
                     "validation": {
                         "status": "passed",

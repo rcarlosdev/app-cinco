@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -34,6 +34,18 @@ const formatValue = (value: unknown) => {
 const normalizeSearchValue = (value: unknown) =>
   formatValue(value).toLocaleLowerCase("es-CO");
 
+const rowMatchesGlobalFilter = (
+  row: Record<string, unknown>,
+  columns: string[],
+  filterValue: string,
+) => {
+  const normalizedFilter = String(filterValue).trim().toLocaleLowerCase("es-CO");
+  if (!normalizedFilter) return true;
+  return columns.some((column) =>
+    normalizeSearchValue(row[column]).includes(normalizedFilter),
+  );
+};
+
 const buildExportFileName = (label: string, extension: "csv" | "xlsx") => {
   const normalizedLabel = label
     .normalize("NFD")
@@ -50,6 +62,12 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
   const [activeTabId, setActiveTabId] = useState(tabs[0]?.id ?? "");
   const [globalFilter, setGlobalFilter] = useState("");
   const [isDownloadingArtifact, setIsDownloadingArtifact] = useState(false);
+  const [loadedRowsByTab, setLoadedRowsByTab] = useState<
+    Record<string, Array<Record<string, unknown>>>
+  >({});
+  const [loadingRowsByTab, setLoadingRowsByTab] = useState<Record<string, boolean>>(
+    {},
+  );
   const deferredGlobalFilter = useDeferredValue(globalFilter);
 
   const activeTab = useMemo(
@@ -68,11 +86,46 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
       }),
     );
   }, [activeTab]);
-  const tableRows = activeTab?.table.rows ?? [];
+  const previewRows = activeTab?.table.rows ?? [];
+  const loadedRows = activeTab ? loadedRowsByTab[activeTab.id] ?? null : null;
+  const tableRows = loadedRows ?? previewRows;
   const exportRowsSource =
-    activeTab?.table.exportRows && activeTab.table.exportRows.length > 0
+    loadedRows ??
+    (activeTab?.table.exportRows && activeTab.table.exportRows.length > 0
       ? activeTab.table.exportRows
-      : tableRows;
+      : previewRows);
+
+  const loadCompleteRows = async (tab: DashboardTableTab) => {
+    const artifact = tab.table.exportArtifact;
+    if (!artifact?.available || !artifact.artifactId) return null;
+    if (loadedRowsByTab[tab.id]) return loadedRowsByTab[tab.id];
+    if (loadingRowsByTab[tab.id]) return null;
+
+    setLoadingRowsByTab((current) => ({ ...current, [tab.id]: true }));
+    try {
+      const blob = await downloadIADevProviderSerialArtifact({
+        artifactId: artifact.artifactId,
+      });
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await blob.arrayBuffer(), { type: "array" });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+      const parsedRows = worksheet
+        ? (XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+            defval: "",
+          }) as Array<Record<string, unknown>>)
+        : [];
+      setLoadedRowsByTab((current) => ({ ...current, [tab.id]: parsedRows }));
+      return parsedRows;
+    } finally {
+      setLoadingRowsByTab((current) => ({ ...current, [tab.id]: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (!activeTab?.table.truncated || !activeTab.table.exportArtifact?.available) return;
+    void loadCompleteRows(activeTab);
+  }, [activeTab]);
 
   const table = useReactTable({
     data: tableRows,
@@ -85,14 +138,10 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     globalFilterFn: (row, _columnId, filterValue) => {
-      const normalizedFilter = String(filterValue)
-        .trim()
-        .toLocaleLowerCase("es-CO");
-
-      if (!normalizedFilter) return true;
-
-      return activeTab.table.columns.some((column) =>
-        normalizeSearchValue(row.original[column]).includes(normalizedFilter),
+      return rowMatchesGlobalFilter(
+        row.original,
+        activeTab.table.columns,
+        String(filterValue),
       );
     },
     initialState: {
@@ -107,15 +156,20 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
 
   const filteredRows = table.getFilteredRowModel().rows.map((row) => row.original);
   const hasFilteredRows = filteredRows.length > 0;
-  const totalRows = activeTab.table.totalRecords ?? activeTab.table.rowcount;
-  const returnedRows =
-    activeTab.table.returnedRecords ?? activeTab.table.rows.length;
-  const exportRows = activeTab.table.exportRecords ?? exportRowsSource.length;
+  const totalRows =
+    loadedRows?.length ??
+    activeTab.table.totalRecords ??
+    activeTab.table.rowcount;
+  const returnedRows = loadedRows?.length ?? activeTab.table.returnedRecords ?? previewRows.length;
+  const exportRows =
+    loadedRows?.length ?? activeTab.table.exportRecords ?? exportRowsSource.length;
   const isTruncated = Boolean(activeTab.table.truncated);
   const isExportTruncated = Boolean(activeTab.table.exportTruncated);
   const exportArtifact = activeTab.table.exportArtifact;
   const hasFullArtifact =
     Boolean(exportArtifact?.available) && Boolean(exportArtifact?.artifactId);
+  const isLoadingFullRows = Boolean(loadingRowsByTab[activeTab.id]);
+  const usingCompleteDataset = Boolean(loadedRows);
   const currentPage = table.getState().pagination.pageIndex + 1;
   const pageCount = table.getPageCount() || 1;
 
@@ -130,11 +184,22 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
     table.setPageIndex(0);
   };
 
-  const handleExportCsv = () => {
+  const handleExportCsv = async () => {
     if (!hasFilteredRows) return;
-
+    const completeRows =
+      (!usingCompleteDataset && isTruncated && hasFullArtifact
+        ? await loadCompleteRows(activeTab)
+        : null) ?? exportRowsSource;
     const rowsToExport =
-      deferredGlobalFilter.trim().length > 0 ? filteredRows : exportRowsSource;
+      deferredGlobalFilter.trim().length > 0
+        ? completeRows.filter((row) =>
+            rowMatchesGlobalFilter(
+              row,
+              activeTab.table.columns,
+              deferredGlobalFilter,
+            ),
+          )
+        : completeRows;
 
     exportToCsv(rowsToExport, {
       fileName: buildExportFileName(activeTab.label, "csv"),
@@ -147,9 +212,20 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
 
   const handleExportXlsx = async () => {
     if (!hasFilteredRows) return;
-
+    const completeRows =
+      (!usingCompleteDataset && isTruncated && hasFullArtifact
+        ? await loadCompleteRows(activeTab)
+        : null) ?? exportRowsSource;
     const rowsToExport =
-      deferredGlobalFilter.trim().length > 0 ? filteredRows : exportRowsSource;
+      deferredGlobalFilter.trim().length > 0
+        ? completeRows.filter((row) =>
+            rowMatchesGlobalFilter(
+              row,
+              activeTab.table.columns,
+              deferredGlobalFilter,
+            ),
+          )
+        : completeRows;
     const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(rowsToExport, {
       header: activeTab.table.columns,
@@ -245,6 +321,7 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
               type="button"
               onClick={handleExportCsv}
               disabled={!hasFilteredRows}
+              aria-busy={isLoadingFullRows}
               className="inline-flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
               title="Exportar filas disponibles a CSV"
             >
@@ -255,6 +332,7 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
               type="button"
               onClick={handleExportXlsx}
               disabled={!hasFilteredRows}
+              aria-busy={isLoadingFullRows}
               className="inline-flex h-10 items-center gap-2 rounded-full border border-gray-300 bg-white px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
               title="Exportar filas disponibles a XLSX"
             >
@@ -280,6 +358,9 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
           {mode === "user" ? (
             <span>
               {filteredRows.length} filas disponibles en esta vista.
+              {isLoadingFullRows
+                ? ` Cargando el dataset completo de ${activeTab.label.toLocaleLowerCase("es-CO")} para habilitar busqueda, paginado y exportacion total.`
+                : ""}
               {returnedRows < exportRows
                 ? ` Mostrando una muestra de ${returnedRows}; la exportacion incluye ${exportRows}.`
                 : ` La exportacion incluye ${exportRows}.`}
@@ -291,6 +372,7 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
             <span>
               {filteredRows.length} de {exportRows} filas disponibles
               {totalRows > exportRows ? ` (${totalRows} total reportadas)` : ""}
+              {isLoadingFullRows ? ", cargando dataset completo" : ""}
               {returnedRows < exportRows
                 ? `, ${returnedRows} usadas para visualizacion inicial`
                 : ""}
@@ -365,7 +447,7 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
           <span>
             {mode === "user"
               ? `Pagina ${currentPage} de ${pageCount}.`
-              : `Pagina ${currentPage} de ${pageCount}. Navegacion local sobre la vista cargada.`}
+              : `Pagina ${currentPage} de ${pageCount}.${usingCompleteDataset ? " Navegacion sobre el dataset completo cargado." : " Navegacion local sobre la vista cargada."}`}
           </span>
           <div className="flex items-center gap-2">
             <button
