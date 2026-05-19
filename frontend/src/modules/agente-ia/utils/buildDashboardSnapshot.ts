@@ -5,6 +5,7 @@ import type {
 } from "@/modules/programacion/ia-dev/chat/types";
 import { normalizeChatPayload } from "@/modules/programacion/ia-dev/chat/utils/normalizeChatPayload";
 import type {
+  DashboardBackgroundJob,
   DashboardLifecycleStage,
   DashboardSnapshot,
   DashboardSupportItem,
@@ -75,6 +76,71 @@ const toLabel = (value: string) =>
 
 const normalizeStatus = (value: unknown) =>
   asString(value).toLowerCase().replace(/\s+/g, "_");
+
+const includesToken = (value: string, token: string) =>
+  value.toLocaleLowerCase("es-CO").includes(token.toLocaleLowerCase("es-CO"));
+
+const formatPlannerSummary = (
+  payload: NormalizedAssistantPayload | null,
+  fallbackSummary: string,
+) => {
+  const composition = payload?.dashboardComposition;
+  if (!composition) return fallbackSummary || "Sin resumen ejecutivo disponible.";
+
+  const semanticBasis = asObject(composition.semantic_basis) || {};
+  const filters = asObject(semanticBasis.filters) || {};
+  const executiveSummary = asObject(composition.executive_summary) || {};
+  const evidenceContract = asObject(composition.evidence_contract) || {};
+
+  const familyFilter = asString(filters.material_family);
+  const familyMatchMode = asString(filters.material_family_match_mode);
+  const groupingDimension = toLabel(
+    asString(semanticBasis.grouping_dimension) || "dimension",
+  ).toLocaleLowerCase("es-CO");
+  const supportedPattern = asString(
+    evidenceContract.semantic_pattern || evidenceContract.supported_pattern,
+  );
+  const responseProfile = asString(
+    asObject(executiveSummary.resolved_route)?.response_profile,
+  );
+  const fallbackSource = [
+    fallbackSummary,
+    payload?.summary || "",
+    ...(payload?.insights || []),
+  ]
+    .join(" ")
+    .trim();
+
+  const sentences: string[] = [];
+
+  if (familyFilter) {
+    sentences.push(
+      familyMatchMode === "contains"
+        ? `Se analizaron familias del catalogo que contienen ${familyFilter}.`
+        : `Se analizo la familia ${familyFilter}.`,
+    );
+  }
+
+  if (includesToken(fallbackSource, "estado movil")) {
+    sentences.push("El saldo corresponde a seriales en estado MOVIL.");
+  } else {
+    const saldoDefinition = asString(executiveSummary.saldo_definition);
+    if (saldoDefinition) {
+      sentences.push(saldoDefinition);
+    }
+  }
+
+  if (
+    supportedPattern === "inventory.serial.stock.dimension" ||
+    responseProfile.startsWith("inventory.serial.stock.dimension")
+  ) {
+    sentences.push(
+      `La ruta usada fue inventario serializado agrupado por ${groupingDimension}.`,
+    );
+  }
+
+  return sentences.join(" ").trim() || fallbackSummary || "Sin resumen ejecutivo disponible.";
+};
 
 const taskStatusLabels: Record<string, string> = {
   awaiting_approval: "Esperando aprobacion",
@@ -361,6 +427,70 @@ const getLatestWorkingUpdate = (
   return workingUpdates[workingUpdates.length - 1] ?? null;
 };
 
+const toOptionalNumber = (value: unknown) => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const buildBackgroundJob = (
+  response: ChatMessageModel["response"],
+): DashboardBackgroundJob | null => {
+  const background = asObject(response?.task?.current_run?.background);
+  if (!background) return null;
+  const progress =
+    asObject(asObject(response?.task?.current_run?.evidence)?.background_progress) ||
+    asObject(asObject(response?.task?.current_run?.semantic_explanation)?.background_status) ||
+    (asObject(asObject(response?.data)?.meta)?.background_job as Record<string, unknown> | null) ||
+    null;
+  const status = asString(background.run_status || progress?.status).toLowerCase();
+  if (!status) return null;
+  return {
+    status,
+    backgroundRunId:
+      asString(progress?.background_run_id) || asString(background.background_run_id),
+    jobId: asString(progress?.job_id) || asString(background.job_id),
+    rowsProcessed: Number(progress?.rows_processed || 0),
+    totalEstimated: Number(progress?.total_estimated || 0),
+    percentage: Number(progress?.percentage || 0),
+    phase: asString(progress?.phase) || status,
+    phaseLabel: asString(progress?.phase_label) || undefined,
+    elapsedSeconds: Number(progress?.elapsed_seconds || 0),
+    etaSeconds: Number(progress?.eta_seconds || 0) || undefined,
+    currentChunk: Number(progress?.current_chunk || 0),
+    totalChunks: Number(progress?.total_chunks || 0),
+    activeChunk: toOptionalNumber(progress?.active_chunk),
+    serialsUniqueTotal: toOptionalNumber(progress?.serials_unique_total),
+    serialsProcessed: toOptionalNumber(progress?.serials_processed),
+    serialsPending: toOptionalNumber(progress?.serials_pending),
+    stageSerialsTotal: toOptionalNumber(progress?.stage_serials_total),
+    stageSerialsProcessed: toOptionalNumber(progress?.stage_serials_processed),
+    stageSerialsPending: toOptionalNumber(progress?.stage_serials_pending),
+    tableLabel: asString(progress?.table_label) || undefined,
+    tableSerialsTotal: toOptionalNumber(progress?.table_serials_total),
+    tableSerialsPending: toOptionalNumber(progress?.table_serials_pending),
+    tableChunkTotal: toOptionalNumber(progress?.table_chunk_total),
+    foundSoFar: Number(progress?.found_so_far || 0),
+    notFoundSoFar: Number(progress?.not_found_so_far || 0),
+    movilSoFar: Number(progress?.movil_so_far || 0),
+    enrichedResponsibleSoFar: Number(progress?.enriched_responsible_so_far || 0),
+    foundInBaseActual: toOptionalNumber(progress?.found_in_base_actual),
+    foundInAsociadosActual: toOptionalNumber(progress?.found_in_asociados_actual),
+    foundInHistorico: toOptionalNumber(progress?.found_in_historico),
+    attachmentName: asString(progress?.attachment_name) || undefined,
+    artifactId: asString(progress?.artifact_id) || undefined,
+    resultKind: asString(progress?.result_kind) || undefined,
+    resultLabel: asString(progress?.result_label) || undefined,
+    failureReason:
+      asString(background.failure_reason) || asString(progress?.failure_reason) || undefined,
+    updatedAt: Number(progress?.updated_at || 0) || undefined,
+  };
+};
+
 const getLifecycleStage = (
   sourceMessage: ChatMessageModel | null,
   response: ChatMessageModel["response"],
@@ -640,7 +770,17 @@ export const buildDashboardSnapshotFromMessage = (
   const response = sourceMessage?.response;
   const isLoading = sourceMessage?.status === "streaming";
   const semanticExplanation = payload?.semanticExplanation ?? null;
+  const dashboardComposition = payload?.dashboardComposition ?? null;
   const taskStatus = getTaskStatus(response, isLoading);
+  const backgroundJob = buildBackgroundJob(response);
+  const isProviderSerialBackgroundActive =
+    backgroundJob != null &&
+    ["queued", "running", "resumed"].includes(backgroundJob.status) &&
+    (
+      asString(response?.task?.current_run?.semantic_explanation?.selected_capability) ||
+      asString(response?.task?.current_run?.intent) ||
+      asString(response?.orchestrator?.intent)
+    ) === "inventory_provider_serial_validation";
   const taskTimeline = buildTaskTimeline(response);
   const evidenceSummary = asObject(semanticExplanation?.evidence_summary)
     || asObject(response?.task?.current_run?.evidence)
@@ -653,9 +793,9 @@ export const buildDashboardSnapshotFromMessage = (
         .map((item) => String(item || "").trim())
         .filter(Boolean)
     : [];
-  const clarificationQuestion = asString(
-    semanticExplanation?.clarification_needed?.question,
-  );
+  const clarificationQuestion = isProviderSerialBackgroundActive
+    ? ""
+    : asString(semanticExplanation?.clarification_needed?.question);
   const toolsUsed = buildSupportItems([
     ...(semanticExplanation?.selected_tool ? [semanticExplanation.selected_tool] : []),
     ...(Array.isArray(response?.orchestrator?.used_tools)
@@ -678,11 +818,15 @@ export const buildDashboardSnapshotFromMessage = (
     semanticExplanation?.background_status,
     asObject(response?.task?.current_run?.final_state)?.background,
   ]);
-  const executiveSummary =
+  const fallbackExecutiveSummary =
     asString(response?.reply) ||
     asString(response?.task?.current_run?.reply) ||
     payload?.summary ||
     "Sin resumen ejecutivo disponible.";
+  const executiveSummary = formatPlannerSummary(
+    payload,
+    fallbackExecutiveSummary,
+  );
   const hasStructuredContent = Boolean(payload?.hasStructuredContent);
   const lifecycleStage = getLifecycleStage(
     sourceMessage,
@@ -726,18 +870,20 @@ export const buildDashboardSnapshotFromMessage = (
     taskStatusTone: taskStatusTones[taskStatus] || "neutral",
     taskPreparationLabel: getTaskPreparationLabel(response, taskStatus, isLoading),
     taskTimeline,
+    backgroundJob,
     toolsUsed,
     capabilitiesUsed,
     approvals,
     backgroundRuns,
     clarificationQuestion,
-    limitations: limitationList,
+    limitations: isProviderSerialBackgroundActive ? [] : limitationList,
     evidenceSummary,
     validationSummary,
     isLoading,
     isTerminal: !isLoading && terminalStatuses.has(taskStatus),
     hasStructuredContent,
     semanticExplanation,
+    dashboardComposition,
     lifecycleStage,
     lifecycleLabel: lifecycleLabels[lifecycleStage],
     stageDetail: getLifecycleDetail(
@@ -765,6 +911,31 @@ export const buildDashboardSnapshot = (
   }
 
   const lastAssistant = assistantMessages[assistantMessages.length - 1] ?? null;
+  const latestActiveBackgroundMessage =
+    [...assistantMessages].reverse().find((message) => {
+      const response = message.response;
+      const semantic = asObject(response?.task?.current_run?.semantic_explanation);
+      const capability = asString(
+        semantic?.selected_capability ||
+          response?.task?.current_run?.intent ||
+          response?.orchestrator?.intent,
+      );
+      const routeHint = asString(semantic?.planner_route_hint);
+      const status = asString(
+        response?.task?.current_run?.background?.run_status ||
+          response?.task?.current_run?.status,
+      ).toLowerCase();
+      return (
+        capability === "inventory_provider_serial_validation" &&
+        routeHint === "inventory.serial.validation.provider_file" &&
+        ["queued", "running", "resumed"].includes(status)
+      );
+    }) ?? null;
+
+  if (latestActiveBackgroundMessage) {
+    return buildDashboardSnapshotFromMessage(latestActiveBackgroundMessage);
+  }
+
   const latestStructuredMessage =
     [...assistantMessages].reverse().find((message) => {
       const payload = getNormalizedPayload(message);

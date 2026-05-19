@@ -25,6 +25,12 @@ class ToolRegistryServiceTests(SimpleTestCase):
         self.assertEqual(str(tool.execution_policy.runtime_authority), "query_execution_planner")
         self.assertEqual(str(tool.execution_policy.mode), "sql_assisted")
 
+    def test_provider_serial_validation_supports_background(self):
+        tool = self.service.get_tool_for_capability("inventory_provider_serial_validation")
+
+        self.assertIsNotNone(tool)
+        self.assertTrue(bool(tool.execution_policy.supports_background))
+
     def test_registry_converts_selected_tools_to_openai_function_schema(self):
         tools = self.service.list_openai_function_tools(
             tool_ids=[

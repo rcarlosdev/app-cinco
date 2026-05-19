@@ -82,6 +82,33 @@ class QueryExecutionPlanner:
             resolved_query=resolved_query,
         )
         capability_available = bool(capability_id and self._is_capability_rollout_enabled(capability_id))
+        if self._should_prefer_capability_strategy(
+            domain_code=domain_code,
+            template_id=template_id,
+            capability_id=capability_id,
+            resolved_query=resolved_query,
+            capability_available=capability_available,
+        ):
+            return QueryExecutionPlan(
+                strategy="capability",
+                reason="governed_handler_preferred_before_sql",
+                domain_code=domain_code,
+                capability_id=capability_id,
+                constraints=constraints,
+                policy={"allowed": True, "reason": "capability_first"},
+                metadata={
+                    "template_id": template_id,
+                    "operation": resolved_query.intent.operation,
+                    "semantic_trace": semantic_trace,
+                    **raw_query_fallback_meta,
+                    **self._build_analytics_router_metadata(
+                        domain_code=domain_code,
+                        capability_id=capability_id,
+                        pilot_analytics_candidate=False,
+                        decision="handler_modern",
+                    ),
+                },
+            )
         pilot_analytics_candidate = self.join_aware_sql_service.should_handle(
             resolved_query=resolved_query
         )
@@ -285,6 +312,25 @@ class QueryExecutionPlanner:
                 **analytics_router_metadata,
             },
         )
+
+    @staticmethod
+    def _should_prefer_capability_strategy(
+        *,
+        domain_code: str,
+        template_id: str,
+        capability_id: str | None,
+        resolved_query: ResolvedQuerySpec,
+        capability_available: bool,
+    ) -> bool:
+        if not capability_available:
+            return False
+        if str(domain_code or "").strip().lower() != "inventario_logistica":
+            return False
+        if str(template_id or "").strip().lower() != "inventory_provider_serial_validation":
+            return False
+        semantic_context = dict(resolved_query.semantic_context or {})
+        attachment_summary = dict(semantic_context.get("runtime_attachment_summary") or {})
+        return bool(attachment_summary.get("present") or int(attachment_summary.get("count") or 0) > 0)
 
     def _normalize_fallback_reason(
         self,
@@ -623,6 +669,50 @@ class QueryExecutionPlanner:
                 },
             )
             return {"ok": False, "error": f"sql_execution_error:{exc}"}
+
+    def execute_governed_select(
+        self,
+        *,
+        db_alias: str,
+        query: str,
+        params: list[Any] | tuple[Any, ...] | None = None,
+        allowed_tables: list[str],
+        allowed_columns: list[str],
+        declared_columns: list[str] | None = None,
+        allowed_relations: list[str] | None = None,
+        declared_relations: list[str] | None = None,
+        max_limit: int = 50000,
+    ) -> dict[str, Any]:
+        validation = self.query_policy.validate_sql_query(
+            query=query,
+            allowed_tables=allowed_tables,
+            allowed_columns=allowed_columns,
+            allowed_relations=allowed_relations,
+            declared_columns=declared_columns,
+            declared_relations=declared_relations,
+            max_limit=max_limit,
+        )
+        if not validation.allowed:
+            return {
+                "ok": False,
+                "error": f"governed_sql_invalid:{validation.reason}",
+                "validation": validation.metadata,
+            }
+
+        try:
+            with connections[str(db_alias or "").strip() or "default"].cursor() as cursor:
+                cursor.execute(str(query or "").strip(), list(params or []))
+                rows = cursor.fetchall()
+                columns = [str(getattr(col, "name", col[0]) or "") for col in (cursor.description or [])]
+            return {
+                "ok": True,
+                "columns": columns,
+                "rows": [{columns[idx]: row[idx] for idx in range(len(columns))} for row in rows],
+                "rowcount": int(len(rows)),
+                "validation": validation.metadata,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": f"governed_sql_execution_error:{exc}"}
 
     def _execute_supplemental_inventory_queries(
         self,
@@ -5929,14 +6019,12 @@ class QueryExecutionPlanner:
                     float((row or {}).get("seriales_total") or 0) for row in rows if isinstance(row, dict)
                 )
                 distinct_dimensions = {
-                    self._inventory_grouped_dimension_value(
-                        row or {},
-                        dimension_field=dimension_field,
-                    )
+                    str((row or {}).get(dimension_field) or "").strip()
                     for row in rows
                     if isinstance(row, dict)
+                    and str((row or {}).get(dimension_field) or "").strip()
+                    and float((row or {}).get("saldo") or 0) > 0
                 }
-                distinct_dimensions.discard("SIN_DATO")
                 matching_codes = {
                     str((row or {}).get("codigo") or "").strip()
                     for row in rows

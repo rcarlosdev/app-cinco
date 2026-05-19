@@ -3,6 +3,7 @@ import type {
   IADevAction,
   IADevChartPayload,
   IADevChatResponse,
+  IADevDashboardComposition,
   IADevMemoryCandidate,
   IADevMemoryProposal,
   IADevSemanticExplanation,
@@ -39,6 +40,15 @@ export type NormalizedTable = {
   exportLimit: number;
   truncated: boolean;
   limit: number;
+  exportArtifact: {
+    available: boolean;
+    format: string;
+    artifactId: string;
+    filename: string;
+    recordCount: number;
+    endpointHint: string;
+    expiresInSeconds: number;
+  } | null;
 };
 
 export type NormalizedHighlight = {
@@ -69,6 +79,7 @@ export type NormalizedAssistantPayload = {
   blockReason: string;
   progressSource: string;
   semanticExplanation: IADevSemanticExplanation | null;
+  dashboardComposition: IADevDashboardComposition | null;
 };
 
 export type ChatMessageModel = {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL } from "@/lib/apiConfig";
 import {
   sendIADevMessage,
+  type IADevChatAttachment,
   type IADevChatResponse,
 } from "@/services/ia-dev.service";
 import type { ChatSubmitStreamCallbacks } from "@/modules/programacion/ia-dev/chat/types";
@@ -17,6 +18,7 @@ type ConnectionState =
 type SendMessageParams = {
   message: string;
   sessionId?: string | null;
+  attachments?: IADevChatAttachment[];
   callbacks?: ChatSubmitStreamCallbacks;
 };
 
@@ -495,6 +497,7 @@ export const useIADevChatTransport = () => {
     async ({
       message,
       sessionId,
+      attachments,
       callbacks,
     }: SendMessageParams): Promise<IADevChatResponse> => {
       callbacks?.onStart?.();
@@ -504,6 +507,7 @@ export const useIADevChatTransport = () => {
       const response = await sendIADevMessage({
         message,
         session_id: sessionId || undefined,
+        attachments,
       });
       stopPendingPlayback();
       await playbackResolvedProgress(response, callbacks?.onProgress);
@@ -517,11 +521,22 @@ export const useIADevChatTransport = () => {
     async ({
       message,
       sessionId,
+      attachments,
       callbacks,
     }: SendMessageParams): Promise<IADevChatResponse> => {
       const ws = wsRef.current;
-      if (!webSocketUrl || !ws || ws.readyState !== WebSocket.OPEN) {
-        return sendUsingHttpFallback({ message, sessionId, callbacks });
+      if (
+        attachments?.length ||
+        !webSocketUrl ||
+        !ws ||
+        ws.readyState !== WebSocket.OPEN
+      ) {
+        return sendUsingHttpFallback({
+          message,
+          sessionId,
+          attachments,
+          callbacks,
+        });
       }
 
       const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

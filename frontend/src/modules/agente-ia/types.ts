@@ -2,6 +2,7 @@ import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types"
 import type {
   IADevChartPayload,
   IADevChatResponse,
+  IADevDashboardComposition,
   IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 import type {
@@ -9,6 +10,8 @@ import type {
   NormalizedKPI,
   NormalizedTable,
 } from "@/modules/programacion/ia-dev/chat/types";
+
+export type AgenteIAViewMode = "user" | "dev";
 
 export type DashboardWidgetType =
   | "kpi"
@@ -46,6 +49,45 @@ export type DashboardTimelineStep = {
   step: string;
   state: string;
   detail?: string;
+};
+
+export type DashboardBackgroundJob = {
+  status: string;
+  backgroundRunId: string;
+  jobId: string;
+  rowsProcessed: number;
+  totalEstimated: number;
+  percentage: number;
+  phase: string;
+  phaseLabel?: string;
+  elapsedSeconds: number;
+  etaSeconds?: number;
+  currentChunk: number;
+  totalChunks: number;
+  activeChunk?: number;
+  serialsUniqueTotal?: number;
+  serialsProcessed?: number;
+  serialsPending?: number;
+  stageSerialsTotal?: number;
+  stageSerialsProcessed?: number;
+  stageSerialsPending?: number;
+  tableLabel?: string;
+  tableSerialsTotal?: number;
+  tableSerialsPending?: number;
+  tableChunkTotal?: number;
+  foundSoFar: number;
+  notFoundSoFar: number;
+  movilSoFar: number;
+  enrichedResponsibleSoFar: number;
+  foundInBaseActual?: number;
+  foundInAsociadosActual?: number;
+  foundInHistorico?: number;
+  attachmentName?: string;
+  artifactId?: string;
+  resultKind?: string;
+  resultLabel?: string;
+  failureReason?: string;
+  updatedAt?: number;
 };
 
 export type DashboardTableTab = {
@@ -114,6 +156,7 @@ export type DashboardSnapshot = {
   taskStatusTone: DashboardTaskStatusTone;
   taskPreparationLabel: string;
   taskTimeline: DashboardTimelineStep[];
+  backgroundJob: DashboardBackgroundJob | null;
   toolsUsed: DashboardSupportItem[];
   capabilitiesUsed: DashboardSupportItem[];
   approvals: DashboardSupportItem[];
@@ -126,6 +169,7 @@ export type DashboardSnapshot = {
   isTerminal: boolean;
   hasStructuredContent: boolean;
   semanticExplanation: IADevSemanticExplanation | null;
+  dashboardComposition: IADevDashboardComposition | null;
   lifecycleStage: DashboardLifecycleStage;
   lifecycleLabel: string;
   stageDetail: string;

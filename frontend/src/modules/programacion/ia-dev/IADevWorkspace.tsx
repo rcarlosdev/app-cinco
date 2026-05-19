@@ -1,15 +1,18 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import {
   Bot,
   ChevronsLeft,
   ChevronsRight,
+  ClipboardList,
   Cpu,
   Database,
   FastForward,
+  GitBranch,
   GripHorizontal,
+  LayoutPanelLeft,
   Maximize2,
   MessageSquare,
   Minimize2,
@@ -28,10 +31,8 @@ import {
 } from "lucide-react";
 import IADevFlowCanvas from "./flow/IADevFlowCanvas";
 import IADevMemoryPanel from "./components/IADevMemoryPanel";
-import ChatComposer from "./chat/components/ChatComposer";
-import ChatMessageItem from "./chat/components/ChatMessage";
 import ScrollToBottomButton from "./chat/components/ScrollToBottomButton";
-import { type ChatMessageModel } from "./chat/types";
+import { type ChatAttachmentSummary, type ChatMessageModel } from "./chat/types";
 import { mergeStreamingResponse } from "./chat/utils/mergeStreamingResponse";
 import { normalizeChatPayload } from "./chat/utils/normalizeChatPayload";
 import { usePromptHistory } from "./chat/hooks/usePromptHistory";
@@ -41,26 +42,43 @@ import {
   loadWorkspaceLayout,
   saveWorkspaceLayout,
 } from "./persistence/layoutStorage";
+import MessageInput from "@/modules/agente-ia/components/MessageInput";
+import MessageList from "@/modules/agente-ia/components/MessageList";
+import DashboardPanel from "@/modules/agente-ia/components/DashboardPanel";
+import TaskStatusBadge from "@/modules/agente-ia/components/TaskStatusBadge";
+import {
+  buildDashboardSnapshot,
+  buildDashboardSnapshotFromMessage,
+} from "@/modules/agente-ia/utils/buildDashboardSnapshot";
 import {
   createIADevTicket,
   getIADevHealth,
+  getIADevTaskStatus,
   resetIADevMemory,
   type IADevAction,
+  type IADevChatAttachment,
   type IADevChatResponse,
   type IADevMemoryCandidate,
   type IADevMemoryProposal,
 } from "@/services/ia-dev.service";
 
 type ResizeSide = "left" | "right" | null;
+type WorkspaceCenterView = "flow" | "dashboard";
+type ComposerAttachment = ChatAttachmentSummary & {
+  file: File;
+  lastModified: number;
+};
 
 const LEFT_RAIL_WIDTH = 56;
 const LEFT_COLLAPSE_THRESHOLD = 72;
 const RIGHT_COLLAPSE_THRESHOLD = 150;
 const DEFAULT_LEFT_WIDTH = 300;
-const DEFAULT_RIGHT_WIDTH = 360;
+const DEFAULT_RIGHT_WIDTH = 420;
 const PANEL_STEP = 32;
 const TERMINAL_MIN_HEIGHT = 105;
 const TERMINAL_DEFAULT_HEIGHT = 220;
+const DEFAULT_BACKGROUND_POLL_MS = 1000;
+const BACKGROUND_POLL_ERROR_RETRY_MS = 5000;
 
 const DATABASES = [
   {
@@ -98,6 +116,14 @@ const AVAILABLE_AGENTS = [
   "audit_agent",
 ];
 
+const ACTIVE_BACKGROUND_STATUSES = new Set([
+  "queued",
+  "running",
+  "resumed",
+  "awaiting_approval",
+  "paused",
+]);
+
 const BASE_ACTIVE_NODE_IDS: string[] = [];
 
 const getAreaFromDomain = (domain?: string | null) => {
@@ -112,15 +138,129 @@ const clamp = (value: number, min: number, max: number) =>
 const createMessageId = (role: "user" | "assistant") =>
   `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const ResizeHandle = ({ onMouseDown }: { onMouseDown: () => void }) => (
-  <button
-    aria-label="Resize panel"
-    onMouseDown={onMouseDown}
-    className="group relative w-2 shrink-0 cursor-col-resize bg-gray-50 transition hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-800"
-  >
-    <span className="group-hover:bg-brand-500 dark:group-hover:bg-brand-400 absolute top-1/2 left-1/2 h-14 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-300 dark:bg-gray-700" />
-  </button>
-);
+const createAttachmentId = (file: File) =>
+  `attachment-${file.name}-${file.size}-${file.lastModified}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+
+const inferAttachmentKind = (file: File): ChatAttachmentSummary["kind"] =>
+  file.type.startsWith("image/") ? "image" : "document";
+
+const toAttachmentSummary = (
+  attachment: ComposerAttachment,
+): ChatAttachmentSummary => ({
+  id: attachment.id,
+  name: attachment.name,
+  mimeType: attachment.mimeType,
+  size: attachment.size,
+  kind: attachment.kind,
+});
+
+const fileToBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const [, base64 = ""] = result.split(",", 2);
+      if (!base64) {
+        reject(new Error("attachment_base64_missing"));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => {
+      reject(reader.error || new Error("attachment_read_failed"));
+    };
+    reader.readAsDataURL(file);
+  });
+
+const buildTransportAttachments = async (
+  attachments: ComposerAttachment[],
+): Promise<IADevChatAttachment[]> =>
+  Promise.all(
+    attachments.map(async (attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      mime_type: attachment.mimeType,
+      size: attachment.size,
+      kind: attachment.kind,
+      last_modified: attachment.lastModified,
+      content_base64: await fileToBase64(attachment.file),
+    })),
+  );
+
+const getSuggestionQuery = (action: IADevAction) => {
+  const payload = action.payload ?? {};
+  const candidates = [
+    payload.query,
+    payload.message,
+    payload.suggestion,
+    payload.consulta,
+    payload.prompt,
+    action.label,
+  ];
+
+  return (
+    candidates
+      .map((candidate) =>
+        typeof candidate === "string" ? candidate.trim() : "",
+      )
+      .find(Boolean) ?? ""
+  );
+};
+
+const extractBackgroundRunId = (message: ChatMessageModel) => {
+  const response = message.response;
+  const background =
+    response?.task?.current_run?.background ||
+    (response?.task?.current_run?.final_state?.background_run_id
+      ? { background_run_id: response.task.current_run.final_state.background_run_id }
+      : null);
+  const semantic = response?.task?.current_run?.semantic_explanation?.background_status;
+  return (
+    (typeof background?.background_run_id === "string"
+      ? background.background_run_id
+      : "") ||
+    (typeof semantic?.background_run_id === "string"
+      ? semantic.background_run_id
+      : "")
+  ).trim();
+};
+
+const extractBackgroundStatus = (message: ChatMessageModel) => {
+  const status =
+    message.response?.task?.current_run?.background?.run_status ||
+    message.response?.task?.current_run?.status ||
+    message.normalized?.semanticExplanation?.background_status?.status ||
+    "";
+  return String(status).trim().toLowerCase();
+};
+
+const extractBackgroundPollIntervalMs = (message: ChatMessageModel) => {
+  const background = message.response?.task?.current_run?.background;
+  const polling =
+    (background?.polling as Record<string, unknown> | undefined) ||
+    (message.response?.task?.current_run?.semantic_explanation
+      ?.background_status as Record<string, unknown> | undefined);
+  const candidates = [polling?.next_poll_after_ms, polling?.poll_interval_ms];
+  for (const candidate of candidates) {
+    const value =
+      typeof candidate === "number"
+        ? candidate
+        : typeof candidate === "string"
+          ? Number(candidate)
+          : NaN;
+    if (Number.isFinite(value) && value > 0) {
+      return Math.max(1000, Math.min(value, 15000));
+    }
+  }
+  return DEFAULT_BACKGROUND_POLL_MS;
+};
+
+const isPollableBackgroundMessage = (message: ChatMessageModel) =>
+  message.role === "assistant" &&
+  Boolean(extractBackgroundRunId(message)) &&
+  ACTIVE_BACKGROUND_STATUSES.has(extractBackgroundStatus(message));
 
 type ProcessRun = {
   id: string;
@@ -135,9 +275,26 @@ type ProcessRun = {
   activeNodes: string[];
 };
 
+const ResizeHandle = ({ onMouseDown }: { onMouseDown: () => void }) => (
+  <button
+    aria-label="Resize panel"
+    onMouseDown={onMouseDown}
+    className="group relative w-2 shrink-0 cursor-col-resize bg-gray-50 transition hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-800"
+  >
+    <span className="group-hover:bg-brand-500 absolute top-1/2 left-1/2 h-14 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-300 dark:bg-gray-700 dark:group-hover:bg-brand-400" />
+  </button>
+);
+
 const IADevWorkspace = () => {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const centerSectionRef = useRef<HTMLElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const undoStackRef = useRef<string[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+  const backgroundPollersRef = useRef<Map<string, { cancel: () => void }>>(
+    new Map(),
+  );
+
   const initialWorkspaceLayout = useMemo(() => loadWorkspaceLayout(), []);
   const [leftOpen, setLeftOpen] = useState(
     initialWorkspaceLayout?.leftOpen ?? true,
@@ -152,7 +309,7 @@ const IADevWorkspace = () => {
     initialWorkspaceLayout?.rightWidth ?? DEFAULT_RIGHT_WIDTH,
   );
   const [resizeSide, setResizeSide] = useState<ResizeSide>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [centerView, setCenterView] = useState<WorkspaceCenterView>("flow");
   const { pushPrompt, navigate, resetNavigation } = usePromptHistory();
   const {
     sendMessage,
@@ -171,8 +328,9 @@ const IADevWorkspace = () => {
   });
 
   const [chatInput, setChatInput] = useState("");
-  const undoStackRef = useRef<string[]>([]);
-  const redoStackRef = useRef<string[]>([]);
+  const [composerAttachments, setComposerAttachments] = useState<
+    ComposerAttachment[]
+  >([]);
   const [messages, setMessages] = useState<ChatMessageModel[]>([
     {
       id: createMessageId("assistant"),
@@ -218,6 +376,9 @@ const IADevWorkspace = () => {
     null,
   );
   const [composerResetSignal, setComposerResetSignal] = useState(0);
+  const [selectedDashboardMessageId, setSelectedDashboardMessageId] = useState<
+    string | null
+  >(null);
 
   const setChatInputTracked = (nextValue: string) => {
     setChatInput((prev) => {
@@ -254,6 +415,41 @@ const IADevWorkspace = () => {
     redoStackRef.current = [];
   };
 
+  const clearComposerAttachments = () => {
+    setComposerAttachments([]);
+  };
+
+  const addComposerFiles = (files: File[]) => {
+    setComposerAttachments((prev) => {
+      const next = [...prev];
+      files.forEach((file) => {
+        const existing = next.find(
+          (attachment) =>
+            attachment.name === file.name &&
+            attachment.size === file.size &&
+            attachment.lastModified === file.lastModified,
+        );
+        if (existing) return;
+        next.push({
+          id: createAttachmentId(file),
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          kind: inferAttachmentKind(file),
+          file,
+          lastModified: file.lastModified,
+        });
+      });
+      return next;
+    });
+  };
+
+  const removeComposerAttachment = (attachmentId: string) => {
+    setComposerAttachments((prev) =>
+      prev.filter((attachment) => attachment.id !== attachmentId),
+    );
+  };
+
   const visibleMessages = useMemo(
     () => messages.slice(-messageWindowSize),
     [messageWindowSize, messages],
@@ -271,6 +467,78 @@ const IADevWorkspace = () => {
   const selectedTrace = selectedRun?.trace ?? [];
   const maxStepIndex = Math.max(0, selectedTrace.length - 1);
   const currentStep = selectedTrace[selectedStepIndex] ?? null;
+
+  const dashboardEntries = useMemo(() => {
+    const assistantMessages = messages.filter(
+      (message) =>
+        message.role === "assistant" &&
+        message.content.trim() &&
+        message.response != null,
+    );
+
+    return assistantMessages.map((message, index) => {
+      const snapshot = buildDashboardSnapshotFromMessage(message);
+      const label = `Respuesta ${index + 1}`;
+      const shortLabel = snapshot.hasStructuredContent
+        ? `${label} · dashboard`
+        : `${label} · ${snapshot.lifecycleLabel.toLowerCase()}`;
+
+      return {
+        messageId: message.id,
+        label,
+        shortLabel,
+        snapshot,
+      };
+    });
+  }, [messages]);
+
+  const latestDashboardEntry = dashboardEntries[dashboardEntries.length - 1] ?? null;
+  const resolvedSelectedDashboardMessageId = useMemo(() => {
+    if (
+      selectedDashboardMessageId &&
+      dashboardEntries.some(
+        (entry) => entry.messageId === selectedDashboardMessageId,
+      )
+    ) {
+      return selectedDashboardMessageId;
+    }
+    return latestDashboardEntry?.messageId ?? null;
+  }, [dashboardEntries, latestDashboardEntry?.messageId, selectedDashboardMessageId]);
+
+  const dashboardSnapshot = useMemo(
+    () => buildDashboardSnapshot(messages, resolvedSelectedDashboardMessageId),
+    [messages, resolvedSelectedDashboardMessageId],
+  );
+  const liveDashboardSnapshot = latestDashboardEntry?.snapshot ?? null;
+  const selectedDashboardIndex = dashboardEntries.findIndex(
+    (entry) => entry.messageId === resolvedSelectedDashboardMessageId,
+  );
+  const selectedDashboardLabel =
+    dashboardEntries.find(
+      (entry) => entry.messageId === resolvedSelectedDashboardMessageId,
+    )?.label || "Consulta actual";
+  const semanticHint =
+    dashboardSnapshot.semanticExplanation?.understood_as?.trim() || "";
+  const clarificationQuestion = dashboardSnapshot.clarificationQuestion || "";
+
+  const effectiveChatStatus = useMemo(() => {
+    if (transportError) {
+      return "No fue posible conectar con el servicio en este momento.";
+    }
+    if (streamingMessageId) {
+      return dashboardSnapshot.taskPreparationLabel;
+    }
+    if (chatStatus.trim()) {
+      return chatStatus;
+    }
+    return "Listo para consultas analiticas.";
+  }, [
+    chatStatus,
+    dashboardSnapshot.taskPreparationLabel,
+    streamingMessageId,
+    transportError,
+  ]);
+
   const resolveStepActiveNodes = (
     run: ProcessRun | null,
     stepIndex: number,
@@ -381,6 +649,87 @@ const IADevWorkspace = () => {
         prev >= RIGHT_COLLAPSE_THRESHOLD ? prev : DEFAULT_RIGHT_WIDTH;
       return clamp(base + PANEL_STEP, 0, getMaxRightWidth());
     });
+  };
+
+  const registerRunFromResponse = useCallback(
+    (
+      runId: string,
+      query: string,
+      result: IADevChatResponse,
+      createdAt?: number,
+    ) => {
+      const channels = Array.from(
+        new Set([
+          `agent:${result.orchestrator.selected_agent || "analista_agent"}`,
+          `domain:${result.orchestrator.domain || "general"}`,
+          ...(result.orchestrator.used_tools ?? []).map(
+            (tool) => `tool:${tool}`,
+          ),
+          ...(result.trace ?? []).map((step) => `phase:${step.phase}`),
+        ]),
+      );
+
+      const processRun: ProcessRun = {
+        id: runId,
+        createdAt: createdAt ?? Date.now(),
+        query,
+        reply: result.reply,
+        agent: result.orchestrator.selected_agent || "analista_agent",
+        domain: result.orchestrator.domain || "general",
+        usedTools: result.orchestrator.used_tools ?? [],
+        channels,
+        trace: result.trace ?? [],
+        activeNodes: result.active_nodes ?? [],
+      };
+
+      setRunHistory((prev) => {
+        const nextBase = prev.filter((item) => item.id !== runId);
+        const next = [...nextBase, processRun].slice(-30);
+        const nextIndex = next.findIndex((item) => item.id === runId);
+        setSelectedRunIndex(nextIndex);
+        return next;
+      });
+      setSelectedStepIndex(0);
+      setIsPlaybackRunning(false);
+      setActiveNodeIds(result.active_nodes ?? BASE_ACTIVE_NODE_IDS);
+      setActiveAgent(result.orchestrator.selected_agent || "analista_agent");
+      setActiveArea(getAreaFromDomain(result.orchestrator.domain || "general"));
+    },
+    [],
+  );
+
+  const selectDashboardMessage = (messageId: string) => {
+    setSelectedDashboardMessageId(messageId);
+    setCenterView("dashboard");
+  };
+
+  const copyTextToClipboard = async (text: string, successStatus: string) => {
+    const normalized = text.trim();
+    if (!normalized || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(normalized);
+      setChatStatus(successStatus);
+    } catch {
+      setChatStatus("No fue posible copiar el contenido.");
+    }
+  };
+
+  const copyAssistantMessageById = (messageId: string) => {
+    const entry = dashboardEntries.find((item) => item.messageId === messageId);
+    const text =
+      entry?.snapshot.executiveSummary ||
+      entry?.snapshot.summary ||
+      messages.find((message) => message.id === messageId)?.content ||
+      "";
+    void copyTextToClipboard(text, "Respuesta copiada al portapapeles.");
+  };
+
+  const prepareRelatedQuery = () => {
+    const base = dashboardSnapshot.executiveSummary || dashboardSnapshot.summary;
+    setChatInputTracked(`Quiero profundizar sobre esto: ${base}`);
   };
 
   useEffect(() => {
@@ -604,12 +953,161 @@ const IADevWorkspace = () => {
     };
   }, [resizingTerminal, terminalDetached]);
 
+  useEffect(() => {
+    const pollableMessages = messages.filter(isPollableBackgroundMessage);
+    const activeRunIds = new Set(pollableMessages.map(extractBackgroundRunId));
+
+    backgroundPollersRef.current.forEach((poller, backgroundRunId) => {
+      if (activeRunIds.has(backgroundRunId)) return;
+      poller.cancel();
+      backgroundPollersRef.current.delete(backgroundRunId);
+    });
+
+    pollableMessages.forEach((message) => {
+      const backgroundRunId = extractBackgroundRunId(message);
+      if (!backgroundRunId || backgroundPollersRef.current.has(backgroundRunId)) {
+        return;
+      }
+
+      let cancelled = false;
+      let inFlight = false;
+      let timeoutId: number | null = null;
+      let consecutiveErrors = 0;
+      let activeController: AbortController | null = null;
+
+      const cancel = () => {
+        cancelled = true;
+        activeController?.abort();
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+      };
+
+      const scheduleNext = (delayMs: number) => {
+        if (cancelled) return;
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+        timeoutId = window.setTimeout(() => {
+          void poll();
+        }, delayMs);
+      };
+
+      const poll = async () => {
+        if (cancelled || inFlight) return;
+        inFlight = true;
+        const controller = new AbortController();
+        activeController = controller;
+        try {
+          const result = await getIADevTaskStatus(
+            { background_run_id: backgroundRunId },
+            { signal: controller.signal },
+          );
+          if (cancelled) return;
+
+          consecutiveErrors = 0;
+          const normalizedPayload = normalizeChatPayload(result);
+          const assistantReply = result.reply || result.task?.current_run?.reply || "";
+          const nextStatus = String(
+            result.task?.current_run?.background?.run_status ||
+              result.task?.current_run?.status ||
+              "",
+          )
+            .trim()
+            .toLowerCase();
+
+          setMessages((prev) =>
+            prev.map((item) =>
+              item.id === message.id
+                ? {
+                    ...item,
+                    content: assistantReply || item.content,
+                    status: ACTIVE_BACKGROUND_STATUSES.has(nextStatus)
+                      ? ("streaming" as const)
+                      : ("final" as const),
+                    response: result,
+                    normalized: normalizedPayload,
+                    actions: result.actions ?? item.actions ?? [],
+                    memoryCandidates:
+                      result.memory_candidates ?? item.memoryCandidates ?? [],
+                    pendingProposals:
+                      result.pending_proposals ?? item.pendingProposals ?? [],
+                  }
+                : item,
+            ),
+          );
+
+          setSessionId(result.session_id);
+          setLatestMemoryCandidates(result.memory_candidates ?? []);
+          setLatestPendingProposals(result.pending_proposals ?? []);
+          setLatestMemoryActions(result.actions ?? []);
+          registerRunFromResponse(message.id, "Seguimiento background", result, message.createdAt);
+
+          if (result.data_sources?.ai_dictionary) {
+            setAiDictionaryStatus(result.data_sources.ai_dictionary);
+          }
+
+          if (ACTIVE_BACKGROUND_STATUSES.has(nextStatus)) {
+            scheduleNext(extractBackgroundPollIntervalMs(message));
+          } else {
+            backgroundPollersRef.current.delete(backgroundRunId);
+            notifyContentChanged("stream-end", { behavior: "smooth" });
+          }
+        } catch (error) {
+          if (cancelled || (error instanceof DOMException && error.name === "AbortError")) {
+            return;
+          }
+          consecutiveErrors += 1;
+          scheduleNext(BACKGROUND_POLL_ERROR_RETRY_MS * Math.min(consecutiveErrors, 3));
+        } finally {
+          inFlight = false;
+        }
+      };
+
+      backgroundPollersRef.current.set(backgroundRunId, { cancel });
+      scheduleNext(extractBackgroundPollIntervalMs(message));
+    });
+
+    const pollers = backgroundPollersRef.current;
+    return () => {
+      if (messages.length > 0) return;
+      pollers.forEach((poller) => poller.cancel());
+      pollers.clear();
+    };
+  }, [messages, notifyContentChanged, registerRunFromResponse]);
+
+  useEffect(() => {
+    const pollers = backgroundPollersRef.current;
+    return () => {
+      pollers.forEach((poller) => poller.cancel());
+      pollers.clear();
+    };
+  }, []);
+
   const submitChat = async (overridePrompt?: string) => {
     const value = (overridePrompt ?? chatInput).trim();
     if (!value || isSubmitting) return;
 
     const userMessageId = createMessageId("user");
     const assistantMessageId = createMessageId("assistant");
+    const attachmentsForSubmission = composerAttachments.map((attachment) => ({
+      ...attachment,
+    }));
+    const userMessageAttachments = attachmentsForSubmission.map((attachment) =>
+      toAttachmentSummary(attachment),
+    );
+
+    let transportAttachments: IADevChatAttachment[] = [];
+    if (attachmentsForSubmission.length > 0) {
+      try {
+        transportAttachments = await buildTransportAttachments(
+          attachmentsForSubmission,
+        );
+      } catch {
+        setChatStatus("No fue posible preparar los adjuntos para enviarlos.");
+        return;
+      }
+    }
 
     setMessages((prev) => [
       ...prev,
@@ -619,6 +1117,7 @@ const IADevWorkspace = () => {
         content: value,
         createdAt: Date.now(),
         status: "final",
+        attachments: userMessageAttachments,
       },
       {
         id: assistantMessageId,
@@ -629,6 +1128,7 @@ const IADevWorkspace = () => {
       },
     ]);
     setChatInput("");
+    clearComposerAttachments();
     setComposerResetSignal((prev) => prev + 1);
     resetChatInputHistory();
     pushPrompt(value);
@@ -647,6 +1147,7 @@ const IADevWorkspace = () => {
       const result = await sendMessage({
         message: value,
         sessionId: sessionId ?? undefined,
+        attachments: transportAttachments,
         callbacks: {
           onStart: () => {
             notifyContentChanged("stream-start", { behavior: "smooth" });
@@ -688,6 +1189,13 @@ const IADevWorkspace = () => {
 
       setSessionId(result.session_id);
       const normalizedPayload = normalizeChatPayload(result);
+      const nextStatus = String(
+        result.task?.current_run?.background?.run_status ||
+          result.task?.current_run?.status ||
+          "",
+      )
+        .trim()
+        .toLowerCase();
 
       setMessages((prev) =>
         prev.map((message) =>
@@ -695,7 +1203,9 @@ const IADevWorkspace = () => {
             ? {
                 ...message,
                 content: result.reply || message.content,
-                status: "final",
+                status: ACTIVE_BACKGROUND_STATUSES.has(nextStatus)
+                  ? ("streaming" as const)
+                  : ("final" as const),
                 response: result,
                 normalized: normalizedPayload,
                 actions: result.actions ?? [],
@@ -708,36 +1218,7 @@ const IADevWorkspace = () => {
       setLatestMemoryCandidates(result.memory_candidates ?? []);
       setLatestPendingProposals(result.pending_proposals ?? []);
       setLatestMemoryActions(result.actions ?? []);
-
-      const channels = Array.from(
-        new Set([
-          `agent:${result.orchestrator.selected_agent || "analista_agent"}`,
-          `domain:${result.orchestrator.domain || "general"}`,
-          ...(result.orchestrator.used_tools ?? []).map(
-            (tool) => `tool:${tool}`,
-          ),
-          ...(result.trace ?? []).map((step) => `phase:${step.phase}`),
-        ]),
-      );
-      const processRun: ProcessRun = {
-        id: `${Date.now()}`,
-        createdAt: Date.now(),
-        query: value,
-        reply: result.reply,
-        agent: result.orchestrator.selected_agent || "analista_agent",
-        domain: result.orchestrator.domain || "general",
-        usedTools: result.orchestrator.used_tools ?? [],
-        channels,
-        trace: result.trace ?? [],
-        activeNodes: result.active_nodes ?? [],
-      };
-      setRunHistory((prev) => {
-        const next = [...prev, processRun].slice(-30);
-        setSelectedRunIndex(next.length - 1);
-        return next;
-      });
-      setSelectedStepIndex(0);
-      setIsPlaybackRunning(false);
+      registerRunFromResponse(assistantMessageId, value, result);
 
       setChatStatus(
         `Sesion ${result.session_id.slice(0, 8)} activa | ${transportLabel}`,
@@ -745,6 +1226,7 @@ const IADevWorkspace = () => {
       if (result.data_sources?.ai_dictionary) {
         setAiDictionaryStatus(result.data_sources.ai_dictionary);
       }
+      setSelectedDashboardMessageId(assistantMessageId);
       notifyContentChanged("stream-end", { behavior: "smooth" });
     } catch (error) {
       const detail =
@@ -784,6 +1266,7 @@ const IADevWorkspace = () => {
     try {
       setIsSubmitting(true);
       setChatInput("");
+      clearComposerAttachments();
       setComposerResetSignal((prev) => prev + 1);
       resetChatInputHistory();
       await resetIADevMemory(sessionId);
@@ -795,12 +1278,9 @@ const IADevWorkspace = () => {
       );
       setChatStatus(`Sesion ${sessionId.slice(0, 8)} reiniciada`);
     } catch {
-      appendAssistantMessage(
-        "No fue posible reiniciar memoria en este momento.",
-        {
-          status: "error",
-        },
-      );
+      appendAssistantMessage("No fue posible reiniciar memoria en este momento.", {
+        status: "error",
+      });
       setChatStatus("No se pudo reiniciar la memoria");
     } finally {
       setIsSubmitting(false);
@@ -816,31 +1296,16 @@ const IADevWorkspace = () => {
       return;
     }
     if (action.type === "render_chart") {
-      setChatStatus(
-        "La visualizacion ya se muestra integrada en la respuesta.",
-      );
+      setCenterView("dashboard");
+      setChatStatus("La visualizacion operativa ya se muestra en el dashboard.");
       return;
     }
     if (action.type !== "create_ticket") {
-      const payload = action.payload ?? {};
-      const query =
-        [
-          payload.query,
-          payload.message,
-          payload.suggestion,
-          payload.consulta,
-          payload.prompt,
-          action.label,
-        ]
-          .map((candidate) =>
-            typeof candidate === "string" ? candidate.trim() : "",
-          )
-          .find(Boolean) ?? "";
+      const query = getSuggestionQuery(action);
       if (!query) return;
       await submitChat(query);
       return;
     }
-    if (action.type !== "create_ticket") return;
 
     const title = action.payload?.title?.trim() || "Solicitud desde IA DEV";
     const description =
@@ -862,12 +1327,9 @@ const IADevWorkspace = () => {
       );
       setChatStatus(`Ticket ${created.ticket.ticket_id} creado`);
     } catch {
-      appendAssistantMessage(
-        "No fue posible crear el ticket en este momento.",
-        {
-          status: "error",
-        },
-      );
+      appendAssistantMessage("No fue posible crear el ticket en este momento.", {
+        status: "error",
+      });
       setChatStatus("Error al crear ticket");
     } finally {
       setIsSubmitting(false);
@@ -1255,12 +1717,38 @@ const IADevWorkspace = () => {
             ref={centerSectionRef}
             className="flex min-w-0 flex-1 flex-col"
           >
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white/90">
-                <Bot size={16} />
-                Flujo Multi-Agente (React Flow)
+                {centerView === "flow" ? <GitBranch size={16} /> : <ClipboardList size={16} />}
+                {centerView === "flow"
+                  ? "Flujo Multi-Agente (React Flow)"
+                  : "Dashboard Operativo"}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100 p-1 dark:border-gray-700 dark:bg-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setCenterView("flow")}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      centerView === "flow"
+                        ? "bg-white text-gray-900 shadow-sm dark:bg-gray-900 dark:text-white"
+                        : "text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                    }`}
+                  >
+                    React Flow
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCenterView("dashboard")}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      centerView === "dashboard"
+                        ? "bg-white text-gray-900 shadow-sm dark:bg-gray-900 dark:text-white"
+                        : "text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                    }`}
+                  >
+                    Dashboard
+                  </button>
+                </div>
                 {!leftOpen && (
                   <button
                     onClick={openLeftPanel}
@@ -1284,13 +1772,61 @@ const IADevWorkspace = () => {
 
             <div className="relative flex min-h-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1 p-4">
-                <IADevFlowCanvas
-                  activeNodeIds={activeNodeIds}
-                  serviceAreas={SERVICE_AREAS.map((area) => area.id)}
-                  availableAgents={AVAILABLE_AGENTS}
-                  activeArea={activeArea}
-                  activeAgent={activeAgent}
-                />
+                {centerView === "flow" ? (
+                  <IADevFlowCanvas
+                    activeNodeIds={activeNodeIds}
+                    serviceAreas={SERVICE_AREAS.map((area) => area.id)}
+                    availableAgents={AVAILABLE_AGENTS}
+                    activeArea={activeArea}
+                    activeAgent={activeAgent}
+                  />
+                ) : (
+                  <div className="h-full overflow-hidden rounded-[24px] border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950">
+                    <DashboardPanel
+                      mode="dev"
+                      snapshot={dashboardSnapshot}
+                      liveSnapshot={liveDashboardSnapshot}
+                      historyEntries={dashboardEntries.map((entry) => ({
+                        messageId: entry.messageId,
+                        label: entry.label,
+                        shortLabel: entry.shortLabel,
+                      }))}
+                      selectedMessageId={resolvedSelectedDashboardMessageId}
+                      selectedMessageLabel={selectedDashboardLabel}
+                      canSelectPrevious={selectedDashboardIndex > 0}
+                      canSelectNext={
+                        selectedDashboardIndex >= 0 &&
+                        selectedDashboardIndex < dashboardEntries.length - 1
+                      }
+                      onSelectPrevious={() => {
+                        if (selectedDashboardIndex <= 0) return;
+                        selectDashboardMessage(
+                          dashboardEntries[selectedDashboardIndex - 1].messageId,
+                        );
+                      }}
+                      onSelectNext={() => {
+                        if (
+                          selectedDashboardIndex < 0 ||
+                          selectedDashboardIndex >= dashboardEntries.length - 1
+                        ) {
+                          return;
+                        }
+                        selectDashboardMessage(
+                          dashboardEntries[selectedDashboardIndex + 1].messageId,
+                        );
+                      }}
+                      onSelectMessage={selectDashboardMessage}
+                      onLoadDemo={() => undefined}
+                      onCopyReport={() => {
+                        void copyTextToClipboard(
+                          dashboardSnapshot.executiveSummary ||
+                            dashboardSnapshot.summary,
+                          "Informe copiado al portapapeles.",
+                        );
+                      }}
+                    />
+                  </div>
+                )}
 
                 {terminalDetached && (
                   <div className="pointer-events-none absolute inset-x-4 bottom-4 z-30 flex justify-end">
@@ -1334,7 +1870,7 @@ const IADevWorkspace = () => {
 
           {rightOpen ? (
             <aside
-              className="flex shrink-0 flex-col border-l border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
+              className="flex shrink-0 flex-col border-l border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950"
               style={{ width: rightWidth }}
             >
               <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2 dark:border-gray-800">
@@ -1377,21 +1913,54 @@ const IADevWorkspace = () => {
                 </div>
               </div>
 
-              <div className="border-b border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-gray-500 dark:text-gray-300">
-                    {chatStatus || "Listo para consultas analiticas."}
+              <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-800">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-950 dark:text-white">
+                      <Bot size={16} />
+                      Chat conversacional
+                    </div>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      El chat hereda las capacidades del panel avanzado y deja el dashboard listo para inspeccionarlo a la izquierda.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <TaskStatusBadge
+                      label={dashboardSnapshot.taskStatusLabel}
+                      tone={dashboardSnapshot.taskStatusTone}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCenterView("dashboard")}
+                      className="rounded-full border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                    >
+                      Abrir dashboard
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <p className="truncate text-sm text-gray-500 dark:text-gray-400">
+                    {effectiveChatStatus}
                   </p>
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
                     <Cpu size={10} />
                     {transportLabel}
                   </span>
                 </div>
-                {streamingMessageId && (
-                  <p className="text-brand-600 dark:text-brand-300 mt-1 text-[11px]">
-                    IA escribiendo en streaming...
-                  </p>
-                )}
+
+                {semanticHint ? (
+                  <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-100">
+                    {semanticHint}
+                  </div>
+                ) : null}
+
+                {clarificationQuestion ? (
+                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                    <span className="font-semibold">Hace falta una precision:</span>{" "}
+                    {clarificationQuestion}
+                  </div>
+                ) : null}
               </div>
 
               <IADevMemoryPanel
@@ -1403,8 +1972,8 @@ const IADevWorkspace = () => {
               />
 
               <div className="relative min-h-0 flex-1">
-                <div ref={chatScrollRef} className="h-full overflow-auto p-3">
-                  <div className="space-y-3">
+                <div ref={chatScrollRef} className="h-full overflow-auto px-4 py-4">
+                  <div className="space-y-4 pb-6">
                     {hasCollapsedMessages && (
                       <div className="flex justify-center">
                         <button
@@ -1414,7 +1983,7 @@ const IADevWorkspace = () => {
                               Math.min(messages.length, prev + 80),
                             )
                           }
-                          className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                          className="rounded-full border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
                         >
                           Cargar mensajes anteriores (
                           {messages.length - visibleMessages.length})
@@ -1422,16 +1991,18 @@ const IADevWorkspace = () => {
                       </div>
                     )}
 
-                    {visibleMessages.map((message) => (
-                      <ChatMessageItem
-                        key={message.id}
-                        message={message}
-                        isBusy={isSubmitting}
-                        onActionClick={(action) => {
-                          void handleActionClick(action);
-                        }}
-                      />
-                    ))}
+                    <MessageList
+                      mode="dev"
+                      messages={visibleMessages}
+                      isBusy={isSubmitting}
+                      activeDashboardMessageId={resolvedSelectedDashboardMessageId}
+                      onActionClick={(action) => {
+                        void handleActionClick(action);
+                      }}
+                      onShowDashboard={selectDashboardMessage}
+                      onCopyMessage={copyAssistantMessageById}
+                      onPrepareRelatedQuery={prepareRelatedQuery}
+                    />
                   </div>
                 </div>
 
@@ -1443,12 +2014,18 @@ const IADevWorkspace = () => {
                 )}
               </div>
 
-              <ChatComposer
+              <MessageInput
                 value={chatInput}
+                attachments={composerAttachments.map((attachment) =>
+                  toAttachmentSummary(attachment),
+                )}
                 disabled={isSubmitting}
                 isGenerating={Boolean(streamingMessageId)}
                 resetSignal={composerResetSignal}
                 onChange={setChatInputTracked}
+                onFilesAdded={addComposerFiles}
+                onRemoveAttachment={removeComposerAttachment}
+                onClearAttachments={clearComposerAttachments}
                 onSubmit={() => {
                   void submitChat();
                 }}

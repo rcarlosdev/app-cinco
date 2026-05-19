@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from apps.ia_dev.application.context.run_context import RunContext
@@ -20,10 +21,14 @@ from apps.ia_dev.application.taxonomia_dominios import (
 )
 from apps.ia_dev.domains.ausentismo.handler import AusentismoHandler
 from apps.ia_dev.domains.empleados.handler import EmpleadosHandler
+from apps.ia_dev.domains.inventario_logistica.handler import InventarioLogisticaHandler
 from apps.ia_dev.domains.transport.handler import TransportHandler
 
 
 class RuntimeCapabilityAdapter:
+    LARGE_ATTACHMENT_BACKGROUND_CAPABILITIES = {"inventory_provider_serial_validation"}
+    LARGE_ATTACHMENT_BACKGROUND_THRESHOLD_BYTES = 1_000_000
+
     def __init__(
         self,
         *,
@@ -34,6 +39,7 @@ class RuntimeCapabilityAdapter:
         runtime_hardening_service: RuntimeHardeningService | None = None,
         attendance_handler: AusentismoHandler | None = None,
         empleados_handler: EmpleadosHandler | None = None,
+        inventario_handler: InventarioLogisticaHandler | None = None,
         transport_handler: TransportHandler | None = None,
     ):
         self.catalog = catalog or CapabilityCatalog()
@@ -43,6 +49,7 @@ class RuntimeCapabilityAdapter:
         self.runtime_hardening_service = runtime_hardening_service or RuntimeHardeningService()
         self._attendance_handler = attendance_handler
         self._empleados_handler = empleados_handler
+        self._inventario_handler = inventario_handler
         self._transport_handler = transport_handler
 
     def build_bootstrap_plan(
@@ -288,6 +295,10 @@ class RuntimeCapabilityAdapter:
             arguments={
                 "message": message,
                 "session_id": session_id,
+                "background": self._should_force_background_for_large_attachment(
+                    capability_id=capability_id,
+                    run_context=run_context,
+                ),
             },
             execution_plan=execution_plan.as_dict() if execution_plan else {},
             approval_pending=False,
@@ -343,14 +354,67 @@ class RuntimeCapabilityAdapter:
                 },
             }
         if bool(background_decision.get("enabled")):
+            queued_partial_evidence = {
+                "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                "capability_id": capability_id,
+                "phase": "queued",
+                "rows_processed": 0,
+                "total_estimated": 0,
+                "percentage": 0,
+            }
+            if capability_id == "inventory_provider_serial_validation":
+                attachments = [
+                    dict(item)
+                    for item in list(run_context.metadata.get("attachments") or [])
+                    if isinstance(item, dict)
+                ]
+                first_attachment = dict(attachments[0] or {}) if attachments else {}
+                attachment_size = int(
+                    first_attachment.get("size")
+                    or max(0, (len(str(first_attachment.get("content_base64") or "").strip()) * 3) // 4)
+                    or 0
+                )
+                resolved_query_payload = resolved_query.as_dict() if resolved_query else {}
+                execution_plan_payload = execution_plan.as_dict() if execution_plan else {}
+                background_request = {
+                    "capability_id": capability_id,
+                    "message": message,
+                    "session_id": session_id,
+                    "previous_year": 0,
+                    "chunk_size": 1000,
+                    "attachment": first_attachment,
+                    "attachment_name": str(first_attachment.get("name") or ""),
+                    "attachment_size_bytes": attachment_size,
+                    "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
+                    "resolved_query": resolved_query_payload,
+                    "execution_plan": execution_plan_payload,
+                    "planned_capability": dict(planned_capability or {}),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                queued_partial_evidence.update(
+                    {
+                        "phase": "archivo_encolado",
+                        "attachment_name": str(first_attachment.get("name") or ""),
+                        "attachment_size_bytes": attachment_size,
+                        "current_stage": "queued",
+                        "result_kind": "partial",
+                        "result_label": "Resultado parcial",
+                        "current_chunk": 0,
+                        "total_chunks": 0,
+                        "found_so_far": 0,
+                        "not_found_so_far": 0,
+                        "movil_so_far": 0,
+                        "enriched_responsible_so_far": 0,
+                    }
+                )
+                runtime_state = dict(run_context.metadata.get("background_runtime") or {})
+                runtime_state["request"] = background_request
+                run_context.metadata["background_runtime"] = runtime_state
             background_state = self.background_runtime_service.queue_run(
                 run_context=run_context,
                 tool_id=str((tool_definition.tool_id if tool_definition else capability_id) or ""),
                 policy_reason=str(background_decision.get("reason") or ""),
-                partial_evidence={
-                    "tool_id": str((tool_definition.tool_id if tool_definition else capability_id) or ""),
-                    "capability_id": capability_id,
-                },
+                partial_evidence=queued_partial_evidence,
                 timeout_seconds=int(((execution_plan.metadata if execution_plan else {}) or {}).get("timeout_seconds") or 0),
             )
             if observability is not None and hasattr(observability, "record_event"):
@@ -722,4 +786,26 @@ class RuntimeCapabilityAdapter:
             if self._empleados_handler is None:
                 self._empleados_handler = EmpleadosHandler()
             return self._empleados_handler
+        if capability_id.startswith("inventory_"):
+            if self._inventario_handler is None:
+                self._inventario_handler = InventarioLogisticaHandler()
+            return self._inventario_handler
         return None
+
+    def _should_force_background_for_large_attachment(
+        self,
+        *,
+        capability_id: str,
+        run_context: RunContext,
+    ) -> bool:
+        if capability_id not in self.LARGE_ATTACHMENT_BACKGROUND_CAPABILITIES:
+            return False
+        attachments = list(run_context.metadata.get("attachments") or [])
+        if not attachments:
+            return False
+        first_attachment = dict(attachments[0] or {})
+        content_base64 = str(first_attachment.get("content_base64") or "").strip()
+        if not content_base64:
+            return False
+        estimated_bytes = max(0, (len(content_base64) * 3) // 4)
+        return estimated_bytes >= self.LARGE_ATTACHMENT_BACKGROUND_THRESHOLD_BYTES

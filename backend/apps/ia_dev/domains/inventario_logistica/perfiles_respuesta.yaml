@@ -201,3 +201,32 @@ perfiles_respuesta:
       - bodega
       - movimiento
       - estado
+  - id: inventory.serial.validation.provider_file.detail
+    expected_output: validacion_seriales_proveedor
+    grain: serial_proveedor_validado
+    columnas:
+      - fila_archivo
+      - serial_proveedor
+      - material_proveedor
+      - denominacion_proveedor
+      - familia_proveedor
+      - encontrado
+      - fuente
+      - estado
+      - estado_contiene_movil
+      - movil_asociado
+      - cedula_persona
+      - nombre
+      - apellido
+      - empleado
+      - bodega
+      - codigo_interno
+      - descripcion_interna
+      - ultima_fecha_encontrada
+      - duplicado_en_archivo
+      - ocurrencias_archivo
+      - solo_historico
+      - fuentes_coincidencia
+      - tablas_consultadas
+      - tablas_historicas_no_existian
+      - observacion_operativa

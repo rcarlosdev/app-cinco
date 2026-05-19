@@ -114,6 +114,12 @@ Recomendacion operativa:
 
 En `/ia-dev/chat/` el runtime ya puede exponer `task.current_run.semantic_explanation`.
 
+Capacidad operativa adicional estable:
+
+- `/ia-dev/chat/` acepta `attachments` cuando una capability gobernada requiere evidencia tabular externa
+- los adjuntos viajan como metadata saneada del runtime y no deben reconstruirse manualmente desde logs
+- la validacion de seriales externos de proveedor usa esta ruta, sigue siendo read-only y ahora debe pasar a `Background Runtime` cuando el adjunto supera el umbral operativo de archivo grande
+
 Uso operativo recomendado:
 
 - usar este bloque para soporte funcional y explicacion al usuario final
@@ -134,6 +140,55 @@ Regla:
 
 - si `semantic_explanation` contradice una traza cruda, manda el estado gobernado persistido y saneado
 - no exponer prompts, chain-of-thought ni SQL sensible para soporte de primer nivel
+
+Runbook corto para `inventory_provider_serial_validation`:
+
+1. Confirmar en `semantic_explanation` o `evidence`:
+   - `candidate_capability = inventory_provider_serial_validation`
+   - `planner_route_hint = inventory.serial.validation.provider_file`
+2. Revisar en la respuesta:
+   - `tablas_consultadas`
+   - `tablas_historicas_no_existian`
+   - `historical_tables_missing`
+3. Si no hubo exito, validar primero limitaciones declaradas:
+   - `attachment_required`
+   - `provider_file_empty`
+   - `serial_column_not_detected`
+   - `attachment_too_large`
+4. Si el usuario reporta responsables inventados, revisar que el serial realmente haya quedado en estado que contiene `MOVIL`.
+5. Si el adjunto del proveedor supera aproximadamente `1_000_000` bytes decodificados:
+   - esperar `background_execution_queued:inventory_provider_serial_validation`
+   - revisar `task.current_run.background`
+   - usar `background_run_id` o `task_id` para progreso y reanudacion
+   - mientras `run_status` este en `queued`, `running` o `resumed`, `GET /ia-dev/chat/task-status/` devolvera solo progreso liviano
+   - validar en `task.current_run.evidence.background_progress`:
+     - `rows_processed`
+     - `total_estimated`
+     - `percentage`
+     - `phase`
+     - `current_chunk`
+     - `total_chunks`
+     - `found_so_far`
+     - `not_found_so_far`
+     - `movil_so_far`
+     - `enriched_responsible_so_far`
+     - `attachment_name`
+     - `artifact_id`
+     - `updated_at`
+   - no esperar `response_snapshot` completo ni tablas pesadas durante ejecucion activa
+   - si aparece `artifact_id` antes del cierre, corresponde a un artifact parcial real y descargable
+6. Para validacion operativa progresiva con archivo real usar:
+   - `python manage.py validate_provider_serial_file --attachment-path "<ruta>" --output "<salida.json>"`
+
+Estrategia runtime vigente para performance:
+
+- primero consultar tablas actuales para todos los seriales
+- despues consultar historicos solo para seriales todavia no resueltos
+- enrichment de personal solo para coincidencias cuyo estado contiene `MOVIL`
+- el lookup ahora intenta primero igualdad directa por lote
+- la normalizacion costosa `UPPER(TRIM(CAST(... AS CHAR)))` queda solo como fallback para faltantes del lote exacto
+- el checkpoint evita recomputar KPIs globales completos por chunk
+- la acumulacion completa se reserva para artifact parcial/final y snapshot terminal
 
 ## Refuerzo operativo P7: Capability Packs en superficie saneada
 

@@ -14,6 +14,7 @@ class TaskStateService:
         "executing",
         "queued",
         "running",
+        "partial",
         "awaiting_approval",
         "paused",
         "resumed",

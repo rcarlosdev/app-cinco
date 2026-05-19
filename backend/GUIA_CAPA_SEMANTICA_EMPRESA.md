@@ -152,6 +152,7 @@ Familias base ya modeladas para `inventario_logistica`:
 10. `materiales criticos + bodega|empleado|movil`
 11. `consumo vs facturacion + OT`
 12. `SAP|actas|documentos` como limitacion declarada, no como dato inventado
+13. `archivo externo de proveedor|contratante + seriales|CPE + validacion|cruce contra inventario propio`
 
 Cada familia debe terminar en:
 
@@ -161,6 +162,38 @@ Cada familia debe terminar en:
 - reglas de negocio aplicables
 - limitaciones conocidas
 - salida esperada
+
+Para la familia `validacion de seriales externos` la regla estable es:
+
+- la columna de serial se detecta por semantica y validacion de valores, no por nombre fijo
+- no se hardcodea nombre exacto de archivo
+- no se hardcodea solo `Numero de serie`
+- `sn` o `mac` solo cuentan como serial si la evidencia del encabezado y los valores lo soporta
+- la consulta no nace de SQL libre de GPT
+- la existencia de tablas historicas se valida primero en metadata gobernada operativa
+- la consolidacion prioriza base actual sobre historica
+- `MOVIL` solo aplica si el estado realmente contiene esa cadena
+- responsable solo se enriquece cuando existe estado `MOVIL` y evidencia cruzable
+
+### Regla estable 2026-05-18: `inventory_provider_serial_validation`
+
+- para validacion de seriales de proveedor:
+  - `cedula_original` y `edit_original` deben conservarse como evidencia separada
+  - `responsable_candidate_source` solo puede ser:
+    - `cedula`
+    - `edit`
+    - `historial`
+    - `no_resuelto`
+- para estados que contienen `MOVIL`:
+  - primero intentar `cedula` actual si parece identificador de persona y cruza con personal
+  - luego intentar `edit` actual
+  - despues usar `historial` solo si aporta match real
+- para estados `ASOCIADO MOVIL`, `MOVIL ASOCIADO` o equivalentes:
+  - no asumir que `cedula` actual es persona
+  - revisar explicitamente `edit` como posible cedula real
+  - si `cedula` actual es tecnica y `edit` cruza con personal, la fuente semantica estable es `edit`
+- `responsable_enriched=true` exige match real contra `bd_c3nc4s1s.cinco_base_de_personal`
+- si solo existe identificador tecnico o no hay match real, la salida debe declarar limitacion y no afirmar responsable enriquecido
 
 ## Rol De GPT/OpenAI En La Capa Semantica
 
@@ -195,11 +228,13 @@ GPT/OpenAI puede intervenir solo como apoyo controlado en la capa semantica.
 - no generar SQL libre
 - no inventar tablas
 - no inventar columnas
+- no inventar KPIs
 - no decidir `execute=True`
 - no saltarse `ai_dictionary`
 - no relajar validadores
 - no ocultar saldos cero o negativos
 - no activar `legacy` o `fallback` como implementacion
+- no decidir renderizado final sin validacion
 
 ### Como usa `ai_dictionary` y memorias
 
@@ -227,6 +262,48 @@ GPT/OpenAI puede intervenir solo como apoyo controlado en la capa semantica.
 - reforzar scoring de ambiguedad antes de invocar apoyo LLM
 - ampliar la matriz semantica a otras familias de logistica
 - sincronizar mas reglas confirmadas a `dd_reglas` cuando exista ruta gobernada de escritura
+
+## Regla Arquitectonica Persistida 2026-05-18: dashboard empresarial gobernado por patrones
+
+El dashboard empresarial no debe generalizarse mediante heuristicas visuales sueltas, prompts por consulta ni renderizado libre decidido por GPT.
+
+Regla estable:
+
+- la expansion de dashboards empresariales debe hacerse ampliando gradualmente `dashboard_composition patterns` gobernados por evidencia
+- el crecimiento debe ser incremental por patron semantico validado, no por frase puntual del usuario
+- el backend semantico y el `DashboardCompositionPlanner` gobiernan la composicion
+- el frontend solo renderiza composicion validada
+- GPT/OpenAI puede interpretar intencion, priorizar informacion, narrar resultados y explicar decisiones
+- GPT/OpenAI no gobierna datos, no inventa KPIs, no inventa columnas, no genera SQL libre, no decide renderizado final sin validacion y no reemplaza el `DashboardCompositionPlanner`
+
+Contrato minimo obligatorio de cada nuevo `dashboard_composition pattern`:
+
+- `domain`
+- intencion semantica soportada
+- tipo de evidencia
+- metrica principal
+- dimensiones validas
+- KPIs permitidos
+- rankings utiles
+- graficos recomendados
+- tablas `drill-down`
+- contrato de evidencia
+- condiciones de validacion
+- fallback `legacy` si no aplica
+
+Patron estable agregado:
+
+- `inventory.serial.validation.provider_file`
+- dominio: `inventario_logistica`
+- intencion: validacion de seriales de proveedor
+- evidencia: archivo externo + bases actuales + backups historicos + enriquecimiento personal controlado
+- metrica principal: seriales validados
+- dimensiones validas: `estado`, `fuente`, `anio`, `familia`, `material`, `movil`, `responsable`, `encontrado`
+
+Regla critica:
+
+- un pattern nuevo no debe nacer desde un prompt aislado ni desde heuristicas visuales no gobernadas
+- la composicion final debe quedar soportada por evidencia, validacion y contrato explicito
 
 ### En Archivos YAML
 
@@ -1039,6 +1116,31 @@ Metadata minima esperada:
 - `failure_reason`
 - `retry`
 - `timeout`
+
+Contrato operativo adicional para `inventory_provider_serial_validation`:
+
+- cuando el runtime quede en `queued`, `running` o `resumed`, la respuesta de polling debe ser ligera
+- la semantica visible para UI debe salir de:
+  - `task.current_run.evidence.background_progress`
+  - `task.current_run.semantic_explanation.background_status`
+  - `data.meta.background_job`
+- esa superficie debe contener solo evidencia persistida y real:
+  - `background_run_id`
+  - `status`
+  - `rows_processed`
+  - `total_estimated`
+  - `percentage`
+  - `phase`
+  - `current_chunk`
+  - `total_chunks`
+  - `found_so_far`
+  - `not_found_so_far`
+  - `movil_so_far`
+  - `enriched_responsible_so_far`
+  - `attachment_name`
+  - `artifact_id`
+  - `updated_at`
+- si el estado ya es terminal, el runtime puede volver a exponer el snapshot completo
 
 3. el resume no es autoridad nueva.
 

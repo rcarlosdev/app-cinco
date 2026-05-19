@@ -3,7 +3,7 @@
 import { Bot, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import BusinessReportPanel from "@/modules/agente-ia/components/BusinessReportPanel";
 import TaskStatusBadge from "@/modules/agente-ia/components/TaskStatusBadge";
-import type { DashboardSnapshot } from "@/modules/agente-ia/types";
+import type { AgenteIAViewMode, DashboardSnapshot } from "@/modules/agente-ia/types";
 
 type DashboardHistoryEntry = {
   messageId: string;
@@ -12,6 +12,7 @@ type DashboardHistoryEntry = {
 };
 
 type DashboardPanelProps = {
+  mode?: AgenteIAViewMode;
   snapshot: DashboardSnapshot;
   liveSnapshot: DashboardSnapshot | null;
   historyEntries: DashboardHistoryEntry[];
@@ -26,10 +27,8 @@ type DashboardPanelProps = {
   onCopyReport: () => void;
 };
 
-const formatBadge = (value: string) =>
-  value.replace(/[_-]+/g, " ").trim() || "general";
-
 const DashboardPanel = ({
+  mode = "dev",
   snapshot,
   liveSnapshot,
   historyEntries,
@@ -52,58 +51,36 @@ const DashboardPanel = ({
     selectedMessageId !== liveSnapshot?.messageId;
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,rgba(15,23,42,0.045),transparent_45%),linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,1))] dark:bg-none dark:bg-gray-950">
+    <section className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.08),transparent_42%),linear-gradient(180deg,rgba(248,250,252,0.98),rgba(255,255,255,1))] dark:bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.12),transparent_35%),linear-gradient(180deg,#020617_0%,#0f172a_100%)]">
       <header className="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-950 dark:text-white">
               <Bot size={16} />
-              Panel operativo del runtime
+              {mode === "user" ? "Resultados" : "Panel de analisis"}
             </div>
             <p className="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-              Evidencia, explicacion y dashboard desacoplados del flujo conversacional.
+              {mode === "user"
+                ? "Resumen, hallazgos y detalle util relacionado con la respuesta actual."
+                : "Evidencia, metricas y contexto operativo de cada respuesta."}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <TaskStatusBadge
-              label={snapshot.taskStatusLabel}
-              tone={snapshot.taskStatusTone}
-            />
-            <span className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-              intencion: {formatBadge(snapshot.intent)}
-            </span>
-            <span className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-              dominio: {formatBadge(snapshot.domain)}
-            </span>
-            <span className="rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-              ruta: {formatBadge(snapshot.selectedAgent)}
-            </span>
+            {mode === "dev" ? (
+              <TaskStatusBadge
+                label={snapshot.taskStatusLabel}
+                tone={snapshot.taskStatusTone}
+              />
+            ) : null}
+            {snapshot.isLoading ? (
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">
+                <Loader2 size={12} className="animate-spin" />
+                {mode === "user" ? "Actualizando resultados" : "Actualizando dashboard"}
+              </span>
+            ) : null}
           </div>
         </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-            Fuente activa: {selectedMessageLabel}
-          </span>
-          <span className="rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-900">
-            {snapshot.taskPreparationLabel}
-          </span>
-          {snapshot.isLoading && (
-            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">
-              <Loader2 size={12} className="animate-spin" />
-              Actualizando dashboard
-            </span>
-          )}
-        </div>
-
-        {hasLatestRuntimeNotice && isViewingHistoricalSnapshot ? (
-          <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-100">
-            <span className="font-semibold">Estado mas reciente:</span>{" "}
-            se mantiene visible {selectedMessageLabel} mientras el runtime va en{" "}
-            {liveSnapshot.lifecycleLabel.toLowerCase()}.
-          </div>
-        ) : null}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
@@ -140,16 +117,34 @@ const DashboardPanel = ({
                   }`}
                   title={entry.label}
                 >
-                  {entry.shortLabel}
+                  {mode === "user" ? entry.label : entry.shortLabel}
                 </button>
               );
             })}
           </div>
         </div>
+
+        {mode === "user" ? (
+          <div className="mt-3 rounded-2xl border border-gray-200 bg-white/85 px-3 py-2 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900/70 dark:text-gray-300">
+            <span className="font-medium text-gray-900 dark:text-white">
+              Vista actual:
+            </span>{" "}
+            {selectedMessageLabel}
+          </div>
+        ) : null}
+
+        {mode === "dev" && hasLatestRuntimeNotice && isViewingHistoricalSnapshot ? (
+          <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-100">
+            <span className="font-semibold">Estado mas reciente:</span>{" "}
+            se mantiene visible {selectedMessageLabel} mientras el runtime va en{" "}
+            {liveSnapshot.lifecycleLabel.toLowerCase()}.
+          </div>
+        ) : null}
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
         <BusinessReportPanel
+          mode={mode}
           snapshot={snapshot}
           onLoadDemo={onLoadDemo}
           onCopyReport={onCopyReport}

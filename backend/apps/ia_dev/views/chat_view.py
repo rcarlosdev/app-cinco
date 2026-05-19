@@ -1,3 +1,4 @@
+from django.http import FileResponse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,6 +10,7 @@ from apps.ia_dev.services.async_job_service import AsyncJobService
 from apps.ia_dev.services.dictionary_tool_service import DictionaryToolService
 from apps.ia_dev.services.knowledge_governance_service import KnowledgeGovernanceService
 from apps.ia_dev.services.observability_service import ObservabilityService
+from apps.ia_dev.services.runtime_artifact_service import RuntimeArtifactService
 from apps.ia_dev.services.runtime_fallback_service import RuntimeFallbackService
 from apps.ia_dev.services.runtime_governance_service import RuntimeGovernanceService
 from apps.ia_dev.services.session_memory_runtime_service import SessionMemoryRuntimeService
@@ -27,6 +29,7 @@ async_job_service = AsyncJobService()
 observability_service = ObservabilityService()
 runtime_governance_service = RuntimeGovernanceService()
 semantic_gap_review_service = SemanticGapReviewService()
+runtime_artifact_service = RuntimeArtifactService()
 
 
 def _get_chat_application_service() -> ChatApplicationService:
@@ -153,6 +156,12 @@ class IADevChatView(APIView):
         message = str(request.data.get("message", "")).strip()
         session_id = request.data.get("session_id")
         reset_memory = bool(request.data.get("reset_memory", False))
+        attachments = request.data.get("attachments")
+        normalized_attachments = [
+            dict(item)
+            for item in list(attachments or [])
+            if isinstance(item, dict)
+        ]
 
         if not message:
             return Response(
@@ -173,6 +182,7 @@ class IADevChatView(APIView):
                 observability=observability_service,
                 actor_user_key=actor_user_key,
                 response_debug_mode=response_debug_mode,
+                attachments=normalized_attachments,
             )
             runtime_meta = dict(((result.get("data_sources") or {}).get("runtime") or {}))
             legacy_runtime_fallback_used = bool(
@@ -577,6 +587,94 @@ class IADevRuntimeTaskExplorerView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response({"status": "ok", "task_explorer": payload}, status=status.HTTP_200_OK)
+
+
+class IADevChatTaskStatusView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        run_id = str(request.query_params.get("run_id", "")).strip() or None
+        resume_token = str(request.query_params.get("resume_token", "")).strip() or None
+        background_run_id = str(request.query_params.get("background_run_id", "")).strip() or None
+        if not any((run_id, resume_token, background_run_id)):
+            return Response(
+                {"detail": "run_id, resume_token o background_run_id es requerido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            payload = _get_chat_application_service().build_task_status_response(
+                run_id=run_id,
+                resume_token=resume_token,
+                background_run_id=background_run_id,
+            )
+        except ValueError as exc:
+            if str(exc) == "background_workflow_not_found":
+                return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+            raise
+        if not payload:
+            return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ensure_chat_response_contract(payload), status=status.HTTP_200_OK)
+
+
+class IADevProviderSerialArtifactDownloadView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        artifact_id = str(request.query_params.get("artifact_id", "")).strip()
+        background_run_id = str(request.query_params.get("background_run_id", "")).strip()
+        if not artifact_id:
+            return Response({"detail": "artifact_id es requerido"}, status=status.HTTP_400_BAD_REQUEST)
+        if background_run_id:
+            explorer = runtime_governance_service.build_task_trace_explorer(
+                background_run_id=background_run_id,
+                run_id=None,
+                resume_token=None,
+            )
+            if not explorer:
+                return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+            response_snapshot = dict(
+                ((runtime_governance_service._find_task_workflow(
+                    run_id=None,
+                    resume_token=None,
+                    background_run_id=background_run_id,
+                ) or {}).get("state") or {}).get("response_snapshot")
+                or {}
+            )
+            workflow_state = dict(
+                ((runtime_governance_service._find_task_workflow(
+                    run_id=None,
+                    resume_token=None,
+                    background_run_id=background_run_id,
+                ) or {}).get("state") or {})
+            )
+            table = dict((dict(response_snapshot.get("data") or {}).get("table") or {}))
+            export_artifact = dict(table.get("export_artifact") or {})
+            background = dict(workflow_state.get("background") or {})
+            partial_evidence = dict(background.get("partial_evidence") or {})
+            final_evidence = dict(background.get("final_evidence") or {})
+            allowed_artifact_ids = {
+                str(export_artifact.get("artifact_id") or "").strip(),
+                str(partial_evidence.get("artifact_id") or "").strip(),
+                str(final_evidence.get("artifact_id") or "").strip(),
+            }
+            allowed_artifact_ids.discard("")
+            if artifact_id not in allowed_artifact_ids:
+                return Response({"detail": "artifact not allowed for task"}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            artifact_path = runtime_artifact_service.resolve_artifact_path(artifact_id=artifact_id)
+        except ValueError as exc:
+            detail = str(exc)
+            if detail == "artifact_not_found":
+                return Response({"detail": detail}, status=status.HTTP_404_NOT_FOUND)
+            if detail in {"artifact_invalid", "artifact_expired"}:
+                return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return FileResponse(
+            artifact_path.open("rb"),
+            as_attachment=True,
+            filename=artifact_path.name,
+            content_type="text/csv",
+        )
 
 
 class IADevRuntimeGovernanceHealthView(APIView):

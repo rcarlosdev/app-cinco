@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.ia_dev.application.orchestration.dashboard_composition_planner import (
+    DashboardCompositionPlanner,
+)
+
 
 LIMITACIONES_DECLARADAS = {
     "external_source_pending:sap": "La fuente SAP o documental requerida no esta habilitada como fuente productiva para esta consulta.",
@@ -17,6 +21,7 @@ LIMITACIONES_DECLARADAS = {
 }
 
 LIMITACIONES_NO_NEGOCIO = {"legacy_semantic_binding_shadowed"}
+_DASHBOARD_COMPOSITION_PLANNER = DashboardCompositionPlanner()
 
 
 def _inventory_type_scope_label(*, filters: dict[str, Any], semantic_plan: dict[str, Any]) -> str:
@@ -603,6 +608,32 @@ def build_inventory_business_response(
         fallback_narrativo_usado=fallback_narrativo_usado,
         missing_evidence_reason=missing_evidence_reason,
     )
+    dashboard_composition = _DASHBOARD_COMPOSITION_PLANNER.plan(
+        user_question=str(
+            resolved_query.get("message")
+            or (dict(resolved_query.get("intent") or {}).get("raw_query"))
+            or resolved_query.get("query")
+            or ""
+        ),
+        rows=rows,
+        result_set={
+            **result_set,
+            "rowcount": main_rowcount,
+            "returned_records": int(result_set.get("returned_records") or main_rowcount),
+            "total_records": int(result_set.get("total_records") or main_rowcount),
+        },
+        semantic_explanation={
+            "domain": "inventario_logistica",
+            "intent": str(inventory.get("intent") or query_intent.get("template_id") or ""),
+            "entity": dict(semantic_plan.get("entity") or {}),
+            "filters": filters,
+            "candidate_capability": str(semantic_binding.get("candidate_capability") or ""),
+            "planner_route_hint": str(semantic_binding.get("planner_route_hint") or ""),
+        },
+        response_profile=response_profile,
+        supplemental_tables=supplemental_tables,
+    )
+    evidence_summary["dashboard_composition_generated"] = bool(dashboard_composition)
 
     return {
         "dato": dato,
@@ -613,6 +644,7 @@ def build_inventory_business_response(
         "recomendacion": recomendacion,
         "siguiente_accion": recomendacion,
         "response_profile": response_profile,
+        "dashboard_composition": dashboard_composition,
         "evidence_summary": evidence_summary,
         "metadata": {
             "domain": "inventario_logistica",
@@ -648,5 +680,6 @@ def build_inventory_business_response(
             "fallback_narrativo_usado": bool(evidence_summary.get("fallback_narrativo_usado")),
             "missing_evidence_reason": str(evidence_summary.get("missing_evidence_reason") or ""),
             "semantic_trace": dict(evidence_summary.get("semantic_trace") or {}),
+            "dashboard_composition_generated": bool(dashboard_composition),
         },
     }
