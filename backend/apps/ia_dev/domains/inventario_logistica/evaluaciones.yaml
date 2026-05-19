@@ -16,3 +16,17 @@ evaluaciones:
       - limitacion_actas_sap
       - resultado_vacio_stock_tecnico
       - fallback_sombreado_controlado
+  - id: inventario_provider_serial_validation_v1
+    suite_python: apps.ia_dev.tests.test_inventory_provider_serial_validation
+    descripcion: Validacion focalizada de seriales externos de proveedor contra inventario propio evidence-first.
+    casos_cubiertos:
+      - provider_file_numero_de_serie
+      - provider_file_columna_renombrada
+      - provider_file_serial_duplicado
+      - provider_file_match_base_actual
+      - provider_file_match_historico
+      - provider_file_no_encontrado
+      - provider_file_estado_movil_responsable
+      - provider_file_tabla_historica_inexistente
+      - provider_file_vacio
+      - provider_file_dashboard_evidence_first

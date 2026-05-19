@@ -39,15 +39,16 @@ const ChatHistoryPanel = ({
         <input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Buscar conversacion"
-          className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2 pr-3 pl-9 text-sm text-gray-700 outline-none transition focus:border-gray-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          placeholder="Buscar conversación"
+          aria-label="Buscar conversación"
+          className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2 pr-3 pl-9 text-sm text-gray-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-sky-500/10"
         />
       </label>
 
       <div className="space-y-2">
         {threads.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-            No hay conversaciones que coincidan con la busqueda.
+            No hay conversaciones que coincidan con la búsqueda.
           </div>
         ) : (
           threads.map((chat) => {
@@ -65,7 +66,7 @@ const ChatHistoryPanel = ({
                 <button
                   type="button"
                   onClick={() => onOpenChat(chat.id)}
-                  className="w-full px-3 pt-3 text-left"
+                  className="w-full px-3 pt-3 text-left focus-visible:outline-none"
                 >
                   <p className="line-clamp-2 text-sm font-semibold text-gray-900 dark:text-white">
                     {chat.title}
@@ -83,6 +84,7 @@ const ChatHistoryPanel = ({
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => onRenameChat(chat.id)}
+                    aria-label={`Renombrar conversación ${chat.title}`}
                     className="inline-flex items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1 text-[11px] text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900"
                   >
                     <Pencil size={11} />
@@ -92,6 +94,7 @@ const ChatHistoryPanel = ({
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => onDeleteChat(chat.id)}
+                    aria-label={`Borrar conversación ${chat.title}`}
                     className="inline-flex items-center gap-1 rounded-full border border-red-200 px-2.5 py-1 text-[11px] text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-500/20 dark:text-red-300 dark:hover:bg-red-500/10"
                   >
                     <Trash2 size={11} />

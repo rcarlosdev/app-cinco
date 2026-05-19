@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from django.test import SimpleTestCase
 
 from apps.ia_dev.application.context.run_context import RunContext
+from apps.ia_dev.application.contracts.chat_contracts import build_chat_response_snapshot
 from apps.ia_dev.application.runtime.approval_runtime_service import ApprovalRuntimeService
 from apps.ia_dev.application.runtime.background_runtime_service import BackgroundRuntimeService
 from apps.ia_dev.application.workflow.task_state_service import TaskStateService
@@ -62,6 +63,36 @@ class BackgroundRuntimeServiceTests(SimpleTestCase):
         self.assertEqual(int(((state.get("background") or {}).get("final_evidence") or {}).get("rows_processed") or 0), 40)
         self.assertGreaterEqual(len(list(state.get("background_trace") or [])), 4)
         self.assertEqual(len(list(state.get("checkpoints") or [])), 1)
+
+    def test_complete_run_persists_response_snapshot(self):
+        run_context = RunContext.create(message="proceso largo", session_id="sess-snapshot", reset_memory=False)
+        runtime_state = self.service.queue_run(
+            run_context=run_context,
+            tool_id="inventory_provider_serial_validation",
+            policy_reason="runtime_policy_requested",
+            partial_evidence={"phase": "queued"},
+        )
+        self.task_state.save(
+            run_id=run_context.run_id,
+            status="running",
+            original_question=run_context.message,
+            detected_domain="inventario_logistica",
+            plan={},
+            source_used={"response_flow": "handler"},
+            extra_state=runtime_state,
+        )
+        workflow = self.task_state.get(run_id=run_context.run_id)
+        response_snapshot = build_chat_response_snapshot()
+        response_snapshot["reply"] = "Resultado listo"
+
+        workflow = self.service.complete_run(
+            workflow=workflow or {},
+            final_evidence={"result": "ok"},
+            response_snapshot=response_snapshot,
+        )
+
+        state = dict((workflow or {}).get("state") or {})
+        self.assertEqual(str((state.get("response_snapshot") or {}).get("reply") or ""), "Resultado listo")
 
     def test_resume_after_approval_updates_approval_and_agent_trace(self):
         run_context = RunContext.create(message="aprobar y continuar", session_id="sess-resume", reset_memory=False)

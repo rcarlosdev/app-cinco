@@ -195,6 +195,52 @@ Validacion minima esperada:
 - expone explicacion semantica saneada
 - registra brecha cuando no puede cerrar bien
 
+## 10.1 Patron estable para capabilities gobernadas basadas en archivo externo
+
+Cuando un proceso empresarial depende de un archivo del usuario mas cruces contra bases propias, la forma oficial es:
+
+1. registrar una intencion y capability explicitas del dominio
+2. transportar el adjunto real hasta `RunContext.metadata["attachments"]`
+3. resolver la ruta por `SemanticCapabilityRegistry`
+4. ejecutar un `handler` seguro, no SQL libre desde GPT
+5. usar `QueryExecutionPlanner.execute_governed_select(...)` o tool segura equivalente
+6. descubrir tablas fisicas dinamicamente con metadata gobernada antes de consultar historicos opcionales
+7. usar chunking o batch lookup; no traer tablas completas por defecto
+8. construir `business_response` y `dashboard_composition` evidence-first
+9. declarar limitaciones estables y pruebas focalizadas anti-hardcode
+
+Patron ya confirmado:
+
+- capability: `inventory_provider_serial_validation`
+- dashboard pattern: `inventory.serial.validation.provider_file`
+- familia semantica: validacion de seriales externos contra inventario propio
+
+Restricciones vigentes para archivos grandes en esta capability:
+
+- si el adjunto supera el umbral operativo, la corrida debe pasar a background sin romper chat ni dashboard
+- el frontend debe seguir el mismo `background_run_id` aunque el usuario recargue
+- el polling activo debe pedir solo progreso liviano; no reenviar snapshots o tablas pesadas en cada tick
+- los checkpoints deben persistir contadores incrementales reales, no KPIs recomputados completos por chunk
+- si existe artifact parcial util, debe ser real, persistido y descargable con el mismo contrato de artifacts
+- el artifact final sigue siendo la fuente de descarga canonica al cerrar la corrida
+
+Estrategia recomendada de lookup para este patron:
+
+1. tablas actuales para todos los seriales del lote
+2. historicos solo para faltantes
+3. enrichment de personal solo para coincidencias relevantes `MOVIL`
+4. preferir `JOIN` o igualdad exacta por lote e index-friendly
+5. dejar normalizaciones costosas sobre columna como fallback controlado, no como ruta primaria
+
+Checklist anti-hardcode adicional para este tipo de capability:
+
+- no depender del nombre exacto del archivo
+- no depender de una sola cabecera literal
+- no inventar tablas ni columnas
+- no inventar coincidencias, responsables ni estados
+- no consultar tablas historicas inexistentes sin validacion previa
+- no responder exito sin evidencia por serial
+
 ## 11. Como Usar Continuous Runtime Learning
 
 Flujo oficial:

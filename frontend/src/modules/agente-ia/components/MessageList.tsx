@@ -8,14 +8,15 @@ import {
   ImageIcon,
   LayoutPanelLeft,
   Paperclip,
-  Sparkles,
   WandSparkles,
 } from "lucide-react";
 import type { IADevAction } from "@/services/ia-dev.service";
 import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
 import BasicMarkdown from "@/modules/agente-ia/components/BasicMarkdown";
+import type { AgenteIAViewMode } from "@/modules/agente-ia/types";
 
 type MessageListProps = {
+  mode?: AgenteIAViewMode;
   messages: ChatMessageModel[];
   isBusy: boolean;
   activeDashboardMessageId: string | null;
@@ -25,13 +26,47 @@ type MessageListProps = {
   onPrepareRelatedQuery: () => void;
 };
 
-const getAssistantText = (message: ChatMessageModel) => {
-  if (message.status === "streaming") return message.content || "Pensando...";
-  return (
+const getAssistantText = (message: ChatMessageModel, mode: AgenteIAViewMode) => {
+  if (message.status === "streaming") return "Preparando una respuesta...";
+
+  const candidate =
     message.normalized?.summary ||
     message.content ||
-    "Respuesta generada sin contenido visible."
-  );
+    "Ya tengo una respuesta lista.";
+
+  const compact = candidate.replace(/\r/g, "").trim();
+  if (!compact) {
+    return "Ya tengo una respuesta lista.";
+  }
+
+  if (/^[\[{]/.test(compact)) {
+    return mode === "user"
+      ? "Encontre resultados y el detalle esta disponible en el panel lateral."
+      : "Prepare la respuesta y el detalle estructurado esta disponible en el panel de analisis.";
+  }
+
+  const filtered = compact
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      if (/[A-Za-z]:\\|\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-/]+/.test(line)) return false;
+      if (
+        /\b(runtime|orchestrator|selected_agent|selected_tool|selected_capability|background_run_id|task_state|validation_status|fallback_reason|semantic_explanation|payload|metadata|planner|sql_assisted|legacy_fallback|trace)\b/i.test(
+          line,
+        )
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .join("\n");
+
+  if (filtered) return filtered;
+
+  return mode === "user"
+    ? "Encontre resultados y deje el detalle listo en el panel lateral."
+    : "Prepare la respuesta y el detalle ampliado esta disponible en el panel de analisis.";
 };
 
 const getActionKey = (action: IADevAction, index: number) => {
@@ -56,6 +91,7 @@ const formatAttachmentSize = (size: number) => {
 };
 
 const MessageList = ({
+  mode = "dev",
   messages,
   isBusy,
   activeDashboardMessageId,
@@ -85,7 +121,7 @@ const MessageList = ({
           return (
             <article
               key={message.id}
-              className="ml-auto max-w-[92%] rounded-[24px] rounded-br-md bg-[#111827] px-4 py-3 text-sm text-white shadow-sm"
+              className="ml-auto max-w-[92%] rounded-[24px] rounded-br-md border border-slate-900 bg-slate-900 px-4 py-3 text-sm text-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
             >
               {message.attachments && message.attachments.length > 0 ? (
                 <div className="mb-3 space-y-2">
@@ -130,6 +166,11 @@ const MessageList = ({
         );
         const showMessageTools = message.id !== "assistant-initial";
         const isActiveDashboard = activeDashboardMessageId === message.id;
+        const showDetailsButton =
+          mode === "user" &&
+          showMessageTools &&
+          (Boolean(message.normalized?.hasStructuredContent) ||
+            Boolean(message.response));
 
         return (
           <article
@@ -137,36 +178,49 @@ const MessageList = ({
             className={`mr-auto max-w-[94%] rounded-[24px] rounded-bl-md border px-4 py-3 text-sm shadow-sm ${
               message.status === "error"
                 ? "border-red-200 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-950/35 dark:text-red-200"
-                : "border-gray-200 bg-white text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
+                : "border-gray-200 bg-white/95 text-gray-700 dark:border-gray-800 dark:bg-gray-900/90 dark:text-gray-200"
             }`}
           >
             <div className="mb-3 flex items-start justify-between gap-3">
               <div className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.16em] text-gray-500 uppercase dark:text-gray-400">
                 <Bot size={12} />
-                Asistente
-                {message.status === "streaming" && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200">
-                    <Sparkles size={10} />
-                    Streaming
-                  </span>
-                )}
+                {mode === "user" ? "Asistente" : "Agente IA"}
               </div>
 
               {showMessageTools ? (
                 <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onShowDashboard(message.id)}
-                    aria-label="Mostrar dashboard asociado a esta respuesta"
-                    title="Mostrar dashboard asociado"
-                    className={`rounded-full border p-2 text-xs transition ${
-                      isActiveDashboard
-                        ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-200"
-                        : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    <LayoutPanelLeft size={14} />
-                  </button>
+                  {showDetailsButton ? (
+                    <button
+                      type="button"
+                      onClick={() => onShowDashboard(message.id)}
+                      aria-label="Ver detalles relacionados con esta respuesta"
+                      title="Ver detalles"
+                      className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                        isActiveDashboard
+                          ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-200"
+                          : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        <LayoutPanelLeft size={14} />
+                        Ver detalles
+                      </span>
+                    </button>
+                  ) : mode === "dev" ? (
+                    <button
+                      type="button"
+                      onClick={() => onShowDashboard(message.id)}
+                      aria-label="Abrir panel de analisis asociado a esta respuesta"
+                      title="Abrir panel de analisis"
+                      className={`rounded-full border p-2 text-xs transition ${
+                        isActiveDashboard
+                          ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-200"
+                          : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      <LayoutPanelLeft size={14} />
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onCopyMessage(message.id)}
@@ -180,9 +234,9 @@ const MessageList = ({
               ) : null}
             </div>
 
-            <BasicMarkdown content={getAssistantText(message)} />
+            <BasicMarkdown content={getAssistantText(message, mode)} />
 
-            {message.status !== "error" && showMessageTools && (
+            {message.status !== "error" && showMessageTools ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -190,12 +244,12 @@ const MessageList = ({
                   className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
                   <WandSparkles size={12} />
-                  Nueva consulta relacionada
+                  {mode === "user" ? "Continuar" : "Profundizar"}
                 </button>
               </div>
-            )}
+            ) : null}
 
-            {visibleActions.length > 0 && (
+            {visibleActions.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 {visibleActions.map((action, index) => {
                   const actionKey = getActionKey(action, index);
@@ -231,7 +285,7 @@ const MessageList = ({
                   );
                 })}
               </div>
-            )}
+            ) : null}
           </article>
         );
       })}

@@ -20,7 +20,7 @@ from apps.ia_dev.application.workflow.task_state_service import TaskStateService
 
 class BackgroundRuntimeService:
     SERVICE_VERSION = "background_runtime.v1"
-    DEFAULT_POLL_INTERVAL_MS = 2000
+    DEFAULT_POLL_INTERVAL_MS = 1000
     DEFAULT_MAX_RETRIES = 2
 
     def __init__(
@@ -93,13 +93,13 @@ class BackgroundRuntimeService:
         background_run_id = str(existing.get("background_run_id") or f"bg_{uuid4().hex[:16]}")
         job_id = str(existing.get("job_id") or f"job_{run_context.run_id}")
         queue_status = "queued" if run_status in {"queued", "awaiting_approval"} else "dequeued"
-        if run_status in {"cancelled", "completed", "failed", "expired"}:
+        if run_status in {"cancelled", "completed", "failed", "expired", "partial"}:
             queue_status = "finished"
         polling = BackgroundPollingMetadataContract(
             poll_interval_ms=int(((existing.get("polling") or {}).get("poll_interval_ms") or self.DEFAULT_POLL_INTERVAL_MS)),
             next_poll_after_ms=int(((existing.get("polling") or {}).get("next_poll_after_ms") or self.DEFAULT_POLL_INTERVAL_MS)),
             last_polled_at=str(((existing.get("polling") or {}).get("last_polled_at") or "")),
-            endpoint_hint=str(((existing.get("polling") or {}).get("endpoint_hint") or "/ia-dev/chat/task-status")),
+            endpoint_hint=str(((existing.get("polling") or {}).get("endpoint_hint") or "/ia-dev/chat/task-status/")),
         )
         retry = BackgroundRetryMetadataContract(
             retry_count=int(((existing.get("retry") or {}).get("retry_count") or 0)),
@@ -145,7 +145,7 @@ class BackgroundRuntimeService:
             requested_by=str(existing.get("requested_by") or "runtime"),
             requested_at=requested_at,
             started_at=str(existing.get("started_at") or (now_iso if run_status in {"running", "resumed"} else "")),
-            finished_at=str(existing.get("finished_at") or (now_iso if run_status in {"completed", "failed", "cancelled", "expired"} else "")),
+            finished_at=str(existing.get("finished_at") or (now_iso if run_status in {"completed", "failed", "cancelled", "expired", "partial"} else "")),
             tool_id=str(tool_id or existing.get("tool_id") or ""),
             policy_reason=str(policy_reason or existing.get("policy_reason") or ""),
         )
@@ -159,7 +159,9 @@ class BackgroundRuntimeService:
         background_trace: list[dict[str, Any]] | None = None,
         checkpoints: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        existing_state = dict(run_context.metadata.get("background_runtime") or {})
         runtime_state = {
+            **existing_state,
             "background": dict(background or {}),
             "background_trace": [dict(item) for item in list(background_trace or []) if isinstance(item, dict)],
             "checkpoints": [dict(item) for item in list(checkpoints or []) if isinstance(item, dict)],
@@ -364,6 +366,7 @@ class BackgroundRuntimeService:
         *,
         workflow: dict[str, Any],
         final_evidence: dict[str, Any] | None = None,
+        response_snapshot: dict[str, Any] | None = None,
         tool_execution_trace: list[dict[str, Any]] | None = None,
         agent_trace_append: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -374,6 +377,7 @@ class BackgroundRuntimeService:
             message="La corrida background finalizo.",
             progress_pct=100.0,
             final_evidence=final_evidence,
+            response_snapshot=response_snapshot,
             tool_execution_trace=tool_execution_trace,
             agent_trace_append=agent_trace_append,
         )
@@ -384,6 +388,7 @@ class BackgroundRuntimeService:
         workflow: dict[str, Any],
         failure_reason: str,
         final_evidence: dict[str, Any] | None = None,
+        response_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = dict((workflow or {}).get("state") or {})
         retry = dict((state.get("background") or {}).get("retry") or {})
@@ -396,6 +401,7 @@ class BackgroundRuntimeService:
             progress_pct=100.0,
             failure_reason=failure_reason,
             final_evidence=final_evidence,
+            response_snapshot=response_snapshot,
             background_updates={
                 "retry": {
                     **retry,
@@ -588,6 +594,7 @@ class BackgroundRuntimeService:
         final_evidence: dict[str, Any] | None = None,
         background_updates: dict[str, Any] | None = None,
         extra_state: dict[str, Any] | None = None,
+        response_snapshot: dict[str, Any] | None = None,
         tool_execution_trace: list[dict[str, Any]] | None = None,
         agent_trace_append: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -609,10 +616,10 @@ class BackgroundRuntimeService:
         background = {
             **current_background,
             "run_status": status,
-            "queue_status": "finished" if status in {"completed", "failed", "cancelled", "expired"} else "dequeued",
+            "queue_status": "finished" if status in {"completed", "failed", "cancelled", "expired", "partial"} else "dequeued",
             "failure_reason": str(failure_reason or current_background.get("failure_reason") or ""),
             "final_evidence": dict(final_evidence or current_background.get("final_evidence") or {}),
-            "finished_at": self._now_iso() if status in {"completed", "failed", "cancelled", "expired"} else str(current_background.get("finished_at") or ""),
+            "finished_at": self._now_iso() if status in {"completed", "failed", "cancelled", "expired", "partial"} else str(current_background.get("finished_at") or ""),
         }
         if background_updates:
             background.update(dict(background_updates or {}))
@@ -627,6 +634,10 @@ class BackgroundRuntimeService:
                 *[dict(item) for item in list(state.get("agent_trace") or []) if isinstance(item, dict)],
                 *[dict(item) for item in list(agent_trace_append or []) if isinstance(item, dict)],
             ]
+        if response_snapshot is not None:
+            merged_extra_state["response_snapshot"] = dict(
+                self.runtime_hardening_service.sanitize_payload(dict(response_snapshot or {}))
+            )
         merged_extra_state.update(
             {
                 "background": background,

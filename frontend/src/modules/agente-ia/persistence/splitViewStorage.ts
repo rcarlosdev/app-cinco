@@ -4,22 +4,20 @@ import type { SplitLayoutSizes } from "@/modules/agente-ia/components/SplitLayou
 
 export type SplitViewState = {
   sizes: SplitLayoutSizes;
-  activeTabletTab: "history" | "chat" | "dashboard";
   historyCollapsed: boolean;
   chatCollapsed: boolean;
   dashboardCollapsed: boolean;
   selectedDashboardMessageByChat: Record<string, string>;
 };
 
-const STORAGE_KEY = "agente-ia.split-view.v3";
+const STORAGE_KEY = "agente-ia.split-view.v5";
 
 const DEFAULT_STATE: SplitViewState = {
   sizes: {
-    history: 15,
-    chat: 30,
-    dashboard: 55,
+    history: 12,
+    chat: 40,
+    dashboard: 48,
   },
-  activeTabletTab: "chat",
   historyCollapsed: false,
   chatCollapsed: false,
   dashboardCollapsed: false,
@@ -82,11 +80,6 @@ export const loadSplitViewState = (): SplitViewState => {
 
     return {
       sizes: sanitizeSizes(parsed?.sizes),
-      activeTabletTab:
-        parsed?.activeTabletTab === "history" ||
-        parsed?.activeTabletTab === "dashboard"
-          ? parsed.activeTabletTab
-          : "chat",
       historyCollapsed: Boolean(parsed?.historyCollapsed),
       chatCollapsed: Boolean(parsed?.chatCollapsed),
       dashboardCollapsed: Boolean(parsed?.dashboardCollapsed),
@@ -106,11 +99,10 @@ export const saveSplitViewState = (state: SplitViewState) => {
     STORAGE_KEY,
     JSON.stringify({
       sizes: sanitizeSizes(state.sizes),
-        activeTabletTab: state.activeTabletTab,
-        historyCollapsed: state.historyCollapsed,
-        chatCollapsed: state.chatCollapsed,
-        dashboardCollapsed: state.dashboardCollapsed,
-        selectedDashboardMessageByChat: state.selectedDashboardMessageByChat,
+      historyCollapsed: state.historyCollapsed,
+      chatCollapsed: state.chatCollapsed,
+      dashboardCollapsed: state.dashboardCollapsed,
+      selectedDashboardMessageByChat: state.selectedDashboardMessageByChat,
     }),
   );
 };

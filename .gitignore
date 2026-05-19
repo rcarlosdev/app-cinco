@@ -112,6 +112,13 @@ docker-compose.override.yml
 tmp/
 tmp_*.json
 backend/tmp_*.json
+backend/tmp_provider_serial_validation_exports/
+backend/tmp_provider_serial_validation_runtime/
+frontend/validation-dashboard-*.png
+frontend/validation-dashboard-panel-*.png
+frontend/validation-export.csv
+frontend/validation-export.xlsx
+frontend/validation-summary.json
 frontend/tmp_*.json
 shared/
 # Permitir carpeta shared del dominio IA DEV (arquitectura DDD incremental)

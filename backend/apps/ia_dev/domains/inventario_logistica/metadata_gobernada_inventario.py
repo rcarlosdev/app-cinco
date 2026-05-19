@@ -100,6 +100,14 @@ def obtener_sinonimos_gobernados_inventario() -> list[dict[str, Any]]:
             target_type="material_family",
             target_column="serial",
         )
+    for alias in ("proveedor", "contratante", "archivo", "excel", "adjunto"):
+        agregar(
+            alias=alias,
+            canonico="validacion_seriales_proveedor",
+            scope_tipo="intencion",
+            scope_clave=f"inventario.intent.provider_serial_validation.{alias.lower()}",
+            target_type="intent",
+        )
     for alias, canonico in (
         ("deco", "DECO"),
         ("decodificador", "DECO"),
@@ -487,6 +495,53 @@ def obtener_reglas_gobernadas_inventario() -> list[dict[str, Any]]:
                 "columns": ["serial", "codigo", "descripcion", "familia", "estado", "cedula", "movil", "saldo"],
             },
             intent="serial_holder_query",
+        ),
+        regla(
+            codigo="inventario.route.provider_serial_validation",
+            descripcion="Validacion de seriales externos de proveedor se resuelve como capability gobernada con archivo adjunto y consultas seguras.",
+            rule_kind="binding",
+            priority=99,
+            condition_json={
+                "intent": "provider_serial_validation",
+                "requires_attachment": True,
+            },
+            result_json={
+                "template_id": "inventory_provider_serial_validation",
+                "candidate_capability": "inventory_provider_serial_validation",
+                "planner_route_hint": "inventory.serial.validation.provider_file",
+                "response_profile": "inventory.serial.validation.provider_file.detail",
+                "expected_output": "validacion_seriales_proveedor",
+                "grain": "serial_proveedor_validado",
+                "columns": [
+                    "fila_archivo",
+                    "serial_proveedor",
+                    "material_proveedor",
+                    "denominacion_proveedor",
+                    "familia_proveedor",
+                    "encontrado",
+                    "fuente",
+                    "estado",
+                    "estado_contiene_movil",
+                    "movil_asociado",
+                    "cedula_persona",
+                    "nombre",
+                    "apellido",
+                    "empleado",
+                    "bodega",
+                    "codigo_interno",
+                    "descripcion_interna",
+                    "ultima_fecha_encontrada",
+                    "duplicado_en_archivo",
+                    "ocurrencias_archivo",
+                    "solo_historico",
+                    "fuentes_coincidencia",
+                    "tablas_consultadas",
+                    "tablas_historicas_no_existian",
+                    "observacion_operativa",
+                ],
+                "known_limitations": ["attachment_required", "provider_file_empty", "serial_column_not_detected"],
+            },
+            intent="provider_serial_validation",
         ),
     ]
 

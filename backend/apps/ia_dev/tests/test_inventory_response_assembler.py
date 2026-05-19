@@ -8,6 +8,256 @@ from apps.ia_dev.domains.inventario_logistica.response_assembler import (
 
 
 class InventoryResponseAssemblerTests(SimpleTestCase):
+    def test_dashboard_composition_generated_for_serialized_dimension_inventory(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "message": "saldo en moviles de Deco",
+                "semantic_context": {
+                    "business_query_semantic_plan": {
+                        "inventory_family": "serializados",
+                        "grouping_dimension": ["movil"],
+                        "entity": {"type": "familia", "field": "familia", "identifier": "Deco"},
+                        "scope": {"families": ["serializados"]},
+                    },
+                    "semantic_capability_registry": {
+                        "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                        "candidate_capability": "inventory_serial_stock_by_family_grouped_dimension",
+                        "planner_route_hint": "inventory.serial.stock.dimension",
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                        "output_profile": {
+                            "columns": [
+                                "familia",
+                                "codigo",
+                                "descripcion",
+                                "movil",
+                                "cedula",
+                                "nombre",
+                                "apellido",
+                                "saldo",
+                                "seriales_total",
+                                "en_movil",
+                            ]
+                        },
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "material_family": "Deco",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+                "intent": {
+                    "template_id": "inventory_serial_stock_by_family_grouped_dimension",
+                },
+            },
+            rows=[
+                {
+                    "familia": "DECO M5",
+                    "codigo": "DEC-001",
+                    "descripcion": "Nodo Deco",
+                    "movil": "MOV-01",
+                    "cedula": "1001",
+                    "nombre": "Ana",
+                    "apellido": "Perez",
+                    "saldo": 4,
+                    "seriales_total": 4,
+                    "en_movil": 4,
+                },
+                {
+                    "familia": "DECO M5",
+                    "codigo": "DEC-001",
+                    "descripcion": "Nodo Deco",
+                    "movil": "MOV-02",
+                    "cedula": "1002",
+                    "nombre": "Luis",
+                    "apellido": "Rojas",
+                    "saldo": 3,
+                    "seriales_total": 3,
+                    "en_movil": 3,
+                },
+                {
+                    "familia": "DECO X20",
+                    "codigo": "DEC-002",
+                    "descripcion": "Router Deco",
+                    "movil": "MOV-01",
+                    "cedula": "1001",
+                    "nombre": "Ana",
+                    "apellido": "Perez",
+                    "saldo": 2,
+                    "seriales_total": 2,
+                    "en_movil": 2,
+                },
+            ],
+            result_set={"rowcount": 3, "returned_records": 3, "total_records": 3},
+        )
+
+        composition = dict(payload.get("dashboard_composition") or {})
+        self.assertEqual(
+            str(((composition.get("evidence_contract") or {}).get("planner_id") or "")),
+            "dashboard_composition.inventory.v1",
+        )
+        self.assertEqual(
+            str(((composition.get("evidence_contract") or {}).get("supported_pattern") or "")),
+            "inventory.serial.stock.dimension",
+        )
+        self.assertTrue(bool((composition.get("evidence_contract") or {}).get("validated")))
+        primary_kpis = list(composition.get("primary_kpis") or [])
+        saldo_total = next((item for item in primary_kpis if str(item.get("id") or "") == "saldo_total"), {})
+        self.assertEqual(float(saldo_total.get("value") or 0), 9.0)
+        ranked_breakdowns = list(composition.get("ranked_breakdowns") or [])
+        top_codes = next((item for item in ranked_breakdowns if str(item.get("id") or "") == "top_codes_by_saldo"), {})
+        top_code_rows = list(top_codes.get("rows") or [])
+        self.assertEqual(str((top_code_rows[0] or {}).get("codigo") or ""), "DEC-001")
+        self.assertEqual(float((top_code_rows[0] or {}).get("saldo_total") or 0), 7.0)
+        top_dimensions = next((item for item in ranked_breakdowns if str(item.get("id") or "") == "top_dimensions_by_saldo"), {})
+        top_dimension_rows = list(top_dimensions.get("rows") or [])
+        self.assertEqual(str((top_dimension_rows[0] or {}).get("movil") or ""), "MOV-01")
+        self.assertEqual(float((top_dimension_rows[0] or {}).get("saldo_total") or 0), 6.0)
+
+    def test_dashboard_composition_supports_other_family_without_hardcode(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "message": "saldo en moviles de HGU",
+                "semantic_context": {
+                    "business_query_semantic_plan": {
+                        "inventory_family": "serializados",
+                        "grouping_dimension": ["movil"],
+                    },
+                    "semantic_capability_registry": {
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "material_family": "HGU",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[
+                {
+                    "familia": "HGU GPON",
+                    "codigo": "HGU-01",
+                    "descripcion": "Equipo HGU",
+                    "movil": "MOV-09",
+                    "saldo": 5,
+                    "seriales_total": 5,
+                }
+            ],
+            result_set={"rowcount": 1},
+        )
+
+        composition = dict(payload.get("dashboard_composition") or {})
+        executive_summary = dict(composition.get("executive_summary") or {})
+        self.assertEqual(str(executive_summary.get("applied_family_filter") or ""), "HGU")
+        self.assertTrue(bool(composition))
+
+    def test_dashboard_composition_not_generated_without_saldo_column(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "semantic_capability_registry": {
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "material_family": "Deco",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[
+                {
+                    "familia": "DECO M5",
+                    "codigo": "DEC-001",
+                    "descripcion": "Nodo Deco",
+                    "movil": "MOV-01",
+                    "seriales_total": 4,
+                }
+            ],
+            result_set={"rowcount": 1},
+        )
+
+        self.assertEqual(dict(payload.get("dashboard_composition") or {}), {})
+
+    def test_dashboard_composition_not_generated_without_dimension_column(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "semantic_capability_registry": {
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {
+                            "material_family": "Deco",
+                            "grouping_dimension": "movil",
+                        },
+                    },
+                },
+            },
+            rows=[
+                {
+                    "familia": "DECO M5",
+                    "codigo": "DEC-001",
+                    "descripcion": "Nodo Deco",
+                    "saldo": 4,
+                    "seriales_total": 4,
+                }
+            ],
+            result_set={"rowcount": 1},
+        )
+
+        self.assertEqual(dict(payload.get("dashboard_composition") or {}), {})
+
+    def test_dashboard_composition_not_generated_for_empty_evidence(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "semantic_capability_registry": {
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                    },
+                },
+            },
+            rows=[],
+            result_set={"rowcount": 0},
+        )
+
+        self.assertEqual(dict(payload.get("dashboard_composition") or {}), {})
+
+    def test_dashboard_composition_does_not_invent_missing_kpis(self):
+        payload = build_inventory_business_response(
+            resolved_query={
+                "semantic_context": {
+                    "semantic_capability_registry": {
+                        "response_profile": "inventory.serial.stock.dimension.detail",
+                    },
+                    "resolved_semantic": {
+                        "final_filters": {"grouping_dimension": "movil"},
+                    },
+                },
+            },
+            rows=[
+                {
+                    "familia": "DECO M5",
+                    "codigo": "DEC-001",
+                    "descripcion": "Nodo Deco",
+                    "movil": "MOV-01",
+                    "saldo": 4,
+                }
+            ],
+            result_set={"rowcount": 1},
+        )
+
+        composition = dict(payload.get("dashboard_composition") or {})
+        primary_kpis = list(composition.get("primary_kpis") or [])
+        seriales_total = next((item for item in primary_kpis if str(item.get("id") or "") == "seriales_total"), {})
+        self.assertEqual(float(seriales_total.get("value") or 0), 0.0)
+        self.assertIn(
+            "seriales_total",
+            str((seriales_total.get("evidence") or {}).get("formula") or "").lower(),
+        )
+
     def test_employee_inventory_balance_response_preserves_evidence_profile(self):
         payload = build_inventory_business_response(
             resolved_query={

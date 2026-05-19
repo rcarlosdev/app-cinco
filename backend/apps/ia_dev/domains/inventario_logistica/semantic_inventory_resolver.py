@@ -238,6 +238,8 @@ class InventorySemanticResolver:
                 business_concept = "documentacion_no_habilitada"
             elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_serial_stock_by_family_grouped_dimension":
                 business_concept = "stock_serializado_por_dimension"
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_provider_serial_validation":
+                business_concept = "validacion_seriales_externos_contra_inventario_propio"
             else:
                 business_concept = "stock_movil"
             candidate_fields = ["cedula", "movil", "codigo", "tipo"]
@@ -268,6 +270,22 @@ class InventorySemanticResolver:
                     "base_codigo_seriales",
                     "cinco_base_de_personal",
                 ]
+            elif coincidencia_gobernada.get("capacidad_candidata") == "inventory_provider_serial_validation":
+                candidate_fields = [
+                    "serial",
+                    "estado",
+                    "cedula",
+                    "movil",
+                    "bodega",
+                    "codigo",
+                    "descripcion",
+                    "fecha",
+                ]
+                candidate_tables = [
+                    "logistica_base_seriales",
+                    "logistica_seriales_asociados",
+                    "cinco_base_de_personal",
+                ]
             return {
                 "domain": self.RUNTIME_DOMAIN_CODE,
                 "candidate_domain": self.RUNTIME_DOMAIN_CODE,
@@ -280,13 +298,21 @@ class InventorySemanticResolver:
                 "candidate_tables": candidate_tables,
                 "candidate_fields": candidate_fields,
                 "requires_db_validation": True,
-                "should_use_sql_assisted": not bool(coincidencia_gobernada.get("limitaciones")),
+                "should_use_sql_assisted": coincidencia_gobernada.get("capacidad_candidata") != "inventory_provider_serial_validation" and not bool(coincidencia_gobernada.get("limitaciones")),
                 "requires_business_validation": False,
                 "requires_external_source": bool(coincidencia_gobernada.get("limitaciones")),
                 "requires_threshold_metadata": False,
                 "missing_metadata": [],
-                "implementation_status": "external_source_pending" if coincidencia_gobernada.get("limitaciones") else "ready_for_dictionary_validation",
-                "expected_runtime_flow": "external_source_pending" if coincidencia_gobernada.get("limitaciones") else "sql_assisted",
+                "implementation_status": (
+                    "ready_for_handler_execution"
+                    if coincidencia_gobernada.get("capacidad_candidata") == "inventory_provider_serial_validation"
+                    else ("external_source_pending" if coincidencia_gobernada.get("limitaciones") else "ready_for_dictionary_validation")
+                ),
+                "expected_runtime_flow": (
+                    "handler"
+                    if coincidencia_gobernada.get("capacidad_candidata") == "inventory_provider_serial_validation"
+                    else ("external_source_pending" if coincidencia_gobernada.get("limitaciones") else "sql_assisted")
+                ),
                 "confidence": 0.94 if not coincidencia_gobernada.get("requiere_aclaracion") else 0.58,
                 "explanation": "Consulta interpretada con matcher semantico gobernado de inventario apoyado en dd_sinonimos y dd_reglas.",
                 "limitations": list(coincidencia_gobernada.get("limitaciones") or []),

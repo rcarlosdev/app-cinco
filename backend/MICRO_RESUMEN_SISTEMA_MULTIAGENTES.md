@@ -218,6 +218,69 @@ Persistir solo informacion reusable y con valor de continuidad futura.
   - `intent`
   - `entity`
   - `governed_physical_field`
+
+## Continuidad estable 2026-05-18: validacion de seriales externos de proveedor
+
+Capacidad estable incorporada en `inventario_logistica`:
+
+- `inventory_provider_serial_validation`
+- patron de dashboard: `inventory.serial.validation.provider_file`
+- concepto de negocio: `validacion_seriales_externos_contra_inventario_propio`
+
+Flujo confirmado:
+
+1. `/ia-dev/chat/` ya acepta `attachments` con contenido real en base64.
+2. `ChatApplicationService` persiste adjuntos en `RunContext.metadata["attachments"]`.
+3. `InventarioLogisticaHandler` ejecuta la capability gobernada.
+4. `ValidadorSerialesProveedorService`:
+   - lee `xlsx` o `csv`
+   - detecta columna de serial por semantica, no por nombre rigido
+   - conserva serial original y normaliza serial para busqueda
+   - detecta duplicados internos del archivo
+   - consulta primero tablas actuales y luego backups historicos existentes
+   - valida existencia de tablas historicas en `information_schema` antes de consultarlas
+   - usa `QueryExecutionPlanner.execute_governed_select(...)`
+   - chunking seguro por lotes
+   - prioriza evidencia actual sobre historica
+   - solo enriquece responsable si el estado contiene `MOVIL`
+5. `DashboardCompositionPlanner` ya soporta el patron `inventory.serial.validation.provider_file` con KPIs, rankings, charts y tablas drill-down evidence-first.
+
+Contrato estable por serial:
+
+- serial original del proveedor
+- material, denominacion y familia del proveedor cuando existan
+- encontrado si/no
+- fuente actual o historica
+- estado
+- flag `estado_contiene_movil`
+- movil y persona asociada solo si existe evidencia
+- bodega, codigo interno, descripcion interna, ultima fecha
+- trazabilidad de tablas consultadas
+- tablas historicas inexistentes
+- observacion operativa
+
+Limitaciones estables declaradas:
+
+- `attachment_required`
+- `provider_file_empty`
+- `serial_column_not_detected`
+- `attachment_too_large`
+
+Regla operativa estable de volumen:
+
+- si el adjunto de `inventory_provider_serial_validation` supera aproximadamente `1_000_000` bytes decodificados, el runtime debe encolarlo en `Background Runtime`
+- el motivo estable es volumen real de proveedor: un archivo de ~25k seriales genera payload y memoria no seguros para sync aunque la validacion funcional sea correcta
+- el seguimiento debe hacerse con `task.current_run.background`, `background_run_id` y progreso backend
+
+Comando operativo estable para validacion real por fases:
+
+- `python manage.py validate_provider_serial_file --attachment-path "<ruta>" --output "<salida.json>"`
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_provider_serial_validation --verbosity 2`
+- `python manage.py test apps.ia_dev.tests.test_runtime_capability_adapter apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver --verbosity 2`
+- `npm run typecheck` en `frontend/`
   - `grouping_dimension`
   - `inventory_family`
   - `scope`
@@ -3119,6 +3182,41 @@ Poll / resume / cancel oficial de esta fase:
   - deja `cancelled`
   - conserva evidencia parcial y trazas previas
 
+Contrato vigente para `GET /ia-dev/chat/task-status/` en `inventory_provider_serial_validation`:
+
+- si `run_status` esta en `queued`, `running` o `resumed`, la respuesta debe ser liviana
+- en ese estado no debe reenviar `response_snapshot` pesado, tablas completas ni `extra_tables`
+- el payload operativo minimo queda en `task.current_run.evidence.background_progress` y `data.meta.background_job`
+- campos minimos esperados:
+  - `background_run_id`
+  - `status`
+  - `rows_processed`
+  - `total_estimated`
+  - `percentage`
+  - `phase`
+  - `current_chunk`
+  - `total_chunks`
+  - `found_so_far`
+  - `not_found_so_far`
+  - `movil_so_far`
+  - `enriched_responsible_so_far`
+  - `attachment_name`
+  - `artifact_id`
+  - `updated_at`
+- cuando la corrida pasa a `completed`, `failed`, `partial`, `cancelled` o `expired`, el endpoint vuelve a exponer el snapshot final o parcial completo
+
+Persistencia operativa vigente para archivos grandes:
+
+- el runtime persiste `partial_evidence` por checkpoint barato
+- los contadores de progreso se mantienen incrementales y persistidos:
+  - procesados
+  - encontrados
+  - no encontrados
+  - moviles
+  - responsables enriquecidos
+- el resultado parcial real puede publicar `artifact_id` antes del cierre final
+- recargar frontend no cancela la corrida ni pierde el `background_run_id`
+
 Que quedo validado:
 
 - Caso A: consulta normal sync mantiene `task envelope`, `tool registry`, gateway y respuesta compatible.
@@ -3961,3 +4059,162 @@ Regla de continuidad nueva:
 
 - si el frontend expone adjuntos antes de que exista transporte binario real, debe comunicar esa limitacion de forma explicita
 - no se debe simular lectura real del archivo si el runtime no recibio el binario
+
+## Sesion 2026-05-18: validacion tecnica v1 de DashboardCompositionPlanner
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- `SemanticCapabilityRegistry` sigue siendo la autoridad de binding semantico.
+- `fallback_policy`, streaming backend, historial por `message_id`, tabla operativa y contrato `reply/task/data/evidence/status` no se redisenan en esta validacion.
+
+Hechos nuevos confirmados:
+
+- `dashboard_composition` ya viaja desde backend en `data.business_response.dashboard_composition`.
+- el frontend ya lo consume desde `normalizeChatPayload(...)` y lo materializa en el panel derecho historico por `message_id`.
+- la v1 evidence-first de composicion aplica solo para el patron semantico serializado:
+  - `inventory.serial.stock.dimension`
+  - perfiles soportados:
+    - `inventory.serial.stock.dimension.detail`
+    - `inventory.serial.stock.dimension.summary`
+- la composicion no depende de `DECO`; quedo validado tambien con familia distinta `HGU`.
+
+Hardening minimo aplicado:
+
+- `DashboardCompositionPlanner` ahora declara explicitamente en `evidence_contract`:
+  - `supported_pattern = inventory.serial.stock.dimension`
+  - `semantic_pattern = inventory.serial.stock.dimension`
+- el frontend ya ignora cualquier `dashboard_composition` sin `evidence_contract` valido:
+  - requiere `planner_id`
+  - requiere `validated = true`
+  - requiere patron semantico `inventory.serial.stock.dimension`
+
+Cobertura validada:
+
+- familia distinta a `DECO`
+- ausencia de `saldo`
+- ausencia de dimension
+- evidencia vacia
+- top N por agregacion correcta:
+  - por codigo
+  - por dimension
+
+Pruebas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_chat_runtime_metadata`
+- `npm run typecheck`
+- `npm run lint`
+
+Resultado:
+
+- `44 tests`: OK
+- frontend `typecheck`: OK
+- frontend `lint`: OK
+
+Regla de continuidad nueva:
+
+- el frontend no debe renderizar `dashboard_composition` si falta un `evidence_contract` valido.
+- para esta v1 no ampliar a otros dominios ni a otros patrones hasta estabilizar pruebas reales en ambiente con `inventory.serial.stock.dimension`.
+- `dashboard_composition` gobierna el dashboard gerencial cuando existe evidencia valida.
+- el primer pantallazo del dashboard gerencial debe priorizar:
+  - resumen ejecutivo
+  - KPIs principales
+  - rankings
+- las tablas quedan como `drill-down` operativo con exportacion.
+- la metadata tecnica queda colapsada por defecto.
+- el dashboard legacy queda como fallback cuando no exista `dashboard_composition` valido.
+
+Regla arquitectonica persistida:
+
+- el dashboard empresarial no debe generalizarse mediante heuristicas visuales sueltas, prompts por consulta ni renderizado libre decidido por GPT.
+- la expansion debe hacerse ampliando gradualmente `dashboard_composition patterns` gobernados por evidencia.
+- cada nuevo pattern debe definir como minimo:
+  - dominio
+  - intencion semantica soportada
+  - tipo de evidencia
+  - metrica principal
+  - dimensiones validas
+  - KPIs permitidos
+  - rankings utiles
+  - graficos recomendados
+  - tablas `drill-down`
+  - contrato de evidencia
+  - condiciones de validacion
+  - fallback legacy si no aplica
+- GPT/OpenAI puede interpretar intencion, priorizar informacion, narrar resultados y explicar decisiones.
+- GPT/OpenAI no debe gobernar datos, inventar KPIs, inventar columnas, generar SQL libre, decidir renderizado final sin validacion ni reemplazar el `DashboardCompositionPlanner`.
+- el backend semantico y el `DashboardCompositionPlanner` gobiernan la composicion.
+- el frontend renderiza la composicion validada.
+- la expansion debe ser incremental por patron, no por frase de usuario.
+
+## Sesion 2026-05-18: inventory_provider_serial_validation estable
+
+Que quedo estable:
+
+- `inventory_provider_serial_validation` ya separa semantica por filas vs unicos.
+- el lookup gobernado debe ejecutarse por descarte progresivo de seriales unicos:
+  - `base actual`
+  - `asociados actual` solo para remanentes
+  - `backup base` del mas reciente al mas antiguo solo para remanentes
+  - `backup asociados` del mas reciente al mas antiguo solo para remanentes
+- durante `queued/running/resumed` el polling debe exponer solo progreso parcial ligero:
+  - fase actual legible
+  - seriales unicos totales
+  - seriales procesados
+  - seriales pendientes
+  - encontrados acumulados por fuente
+  - MOVIL detectados
+  - responsables enriquecidos
+  - chunk actual / total chunks
+  - ETA solo si el calculo es suficientemente estable
+- la respuesta principal ya no entrega el universo completo al frontend:
+  - KPIs y dashboard primero
+  - preview inicial limitado
+  - export completo por artifact CSV
+- `dashboard_composition.evidence_contract` ya declara:
+  - `run_timestamp`
+  - `tables_consulted`
+  - `historical_years_consulted`
+  - `historical_tables_missing`
+  - advertencia de base operativa viva
+  - precedencia aplicada
+  - estrategia de payload/export
+
+Regla estable de responsable MOVIL:
+
+- solo se intenta enrichment de responsable si el `estado` contiene `MOVIL`
+- orden estable:
+  - `cedula` actual si parece cedula de persona y cruza con `cinco_base_de_personal`
+  - `edit` actual si `cedula` es tecnica/no persona o no cruza
+  - `historial` solo si la fila actual no resolvio y una coincidencia historica aporta match real
+- en `ASOCIADO MOVIL` o `MOVIL ASOCIADO`, `edit` actual tiene prioridad sobre una `cedula` tecnica actual
+- no se marca `responsable_enriched=true` sin match real en `bd_c3nc4s1s.cinco_base_de_personal`
+- si existe identificador pero no existe evidencia de personal, la narrativa estable debe decir:
+  - `Se encontro identificador asociado, pero no se pudo enriquecer responsable/persona con evidencia de personal.`
+
+KPIs estables publicados:
+
+- `total_filas_archivo`
+- `seriales_unicos`
+- `duplicados_archivo`
+- `encontrados_por_fila`
+- `encontrados_unicos`
+- `no_encontrados_por_fila`
+- `no_encontrados_unicos`
+- `coincidencias_base_actual`
+- `coincidencias_asociados_actual`
+- `coincidencias_historico`
+- `fuente_final_base_actual`
+- `fuente_final_asociados_actual`
+- `fuente_final_historico`
+- `moviles_detectados`
+- `moviles_con_responsable_enriquecido`
+- `moviles_sin_responsable_enriquecido`
+
+Payload/export estable:
+
+- preview principal limitado a `200` filas
+- `export_records` conserva el total
+- `export_truncated=true` cuando el preview no representa el universo completo
+- artifact completo generado en `backend/tmp_provider_serial_validation_exports/*.csv`
+- para archivos de proveedor grandes se mantiene recomendacion estable de `background runtime`

@@ -394,6 +394,88 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertEqual(str((plan.constraints or {}).get("template_id") or ""), "inventory_material_stock_grouped_dimension")
         self.assertEqual(str(plan.reason or ""), "inventory_material_stock_grouped_dimension")
 
+    def test_serial_family_mobile_kpis_ignore_rows_without_movil_value(self):
+        resolved = self._plan_for("saldo en moviles de Deco")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        class _FakeCursor:
+            def __init__(self):
+                self.description = [
+                    ("dimension",),
+                    ("cedula",),
+                    ("nombre",),
+                    ("apellido",),
+                    ("empleado",),
+                    ("movil",),
+                    ("estado_empleado",),
+                    ("bodega",),
+                    ("codigo",),
+                    ("descripcion",),
+                    ("familia",),
+                    ("seriales_total",),
+                    ("cedulas_asociadas",),
+                    ("en_movil",),
+                    ("en_base",),
+                    ("cobros",),
+                    ("saldo",),
+                ]
+                self._count_query = False
+
+            def execute(self, query):
+                self._count_query = "COUNT(*) AS total_records" in str(query)
+                if self._count_query:
+                    self.description = [("total_records",)]
+                return None
+
+            def fetchall(self):
+                if self._count_query:
+                    return [(3,)]
+                return [
+                    ("MOV-01", "1001", "Ana", "Perez", "Ana Perez", "MOV-01", "ACTIVO", "", "DEC-1", "Nodo Deco", "DECO HD", 2, "1001", 2, 0, 0, 2),
+                    ("MOV-02", "1002", "Luis", "Rojas", "Luis Rojas", "MOV-02", "ACTIVO", "", "DEC-2", "Router Deco", "DECO ATV", 1, "1002", 1, 0, 0, 1),
+                    ("", "811042087", "Cinco", "SAS", "CINCO SAS", "", "ACTIVO", "", "DEC-3", "Tarjeta Deco", "TARJETA DECO", 5, "811042087", 5, 0, 0, 5),
+                ]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _FakeConnection:
+            def cursor(self):
+                return _FakeCursor()
+
+        with patch("apps.ia_dev.application.semantic.query_execution_planner.connections", {"logistica_cinco": _FakeConnection()}):
+            result = self.planner.execute_sql_assisted(
+                run_context=RunContext.create(message="saldo en moviles de Deco", session_id="inv-kpi-mobile", reset_memory=False),
+                resolved_query=resolved,
+                execution_plan=plan,
+            )
+
+        payload = dict(result.get("response") or {})
+        kpis = dict((payload.get("data") or {}).get("kpis") or {})
+        business_response = dict(((payload.get("data") or {}).get("business_response") or {}))
+        composition = dict(business_response.get("dashboard_composition") or {})
+        primary_kpis = list(composition.get("primary_kpis") or [])
+        mobile_kpi = next(
+            (item for item in primary_kpis if str(item.get("id") or "") == "dimensiones_con_saldo"),
+            {},
+        )
+
+        self.assertEqual(int(kpis.get("moviles_con_saldo") or 0), 2)
+        self.assertEqual(int(kpis.get("dimensiones_con_saldo") or 0), 2)
+        self.assertEqual(int(mobile_kpi.get("value") or 0), 2)
+
     def test_saldo_bodega_operacion_hfc_routes_sql_assisted_with_filter(self):
         resolved = self._plan_for("saldo bodega operacion_hfc")
 

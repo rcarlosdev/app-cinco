@@ -5,12 +5,16 @@ import os
 import re
 import unicodedata
 import copy
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from apps.ia_dev.application.agents.agents_runtime_service import AgentsRuntimeService
 from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.agent_contract_loader import AgentContractLoader
-from apps.ia_dev.application.contracts.chat_contracts import ensure_chat_response_contract
+from apps.ia_dev.application.contracts.chat_contracts import (
+    build_chat_response_snapshot,
+    ensure_chat_response_contract,
+)
 from apps.ia_dev.application.memory.chat_memory_runtime_service import (
     ChatMemoryRuntimeService,
 )
@@ -39,6 +43,9 @@ from apps.ia_dev.application.runtime.runtime_capability_adapter import (
     RuntimeCapabilityAdapter,
 )
 from apps.ia_dev.application.runtime.background_runtime_service import BackgroundRuntimeService
+from apps.ia_dev.application.runtime.provider_serial_background_runtime import (
+    ProviderSerialBackgroundRuntime,
+)
 from apps.ia_dev.application.runtime.semantic_gap_registry_service import SemanticGapRegistryService
 from apps.ia_dev.application.runtime.tool_registry_service import ToolRegistryService
 from apps.ia_dev.application.routing.capability_catalog import CapabilityCatalog
@@ -168,6 +175,10 @@ class ChatApplicationService:
         )
         self.background_runtime_service = background_runtime_service or BackgroundRuntimeService(
             task_state_service=self.task_state_service,
+        )
+        self.provider_serial_background_runtime = ProviderSerialBackgroundRuntime(
+            task_state_service=self.task_state_service,
+            background_runtime_service=self.background_runtime_service,
         )
         self.semantic_gap_registry_service = (
             semantic_gap_registry_service or SemanticGapRegistryService()
@@ -538,6 +549,7 @@ class ChatApplicationService:
         }
         payload["response_envelope"] = envelope
         if response_debug_mode:
+            self._persist_response_snapshot(run_context=run_context, payload=payload)
             return payload
 
         forbidden_terms = {
@@ -593,6 +605,7 @@ class ChatApplicationService:
         runtime["response_policy_applied"] = True
         payload.setdefault("data_sources", {})
         payload["data_sources"]["runtime"] = runtime
+        self._persist_response_snapshot(run_context=run_context, payload=payload)
         return payload
 
     def run(
@@ -605,12 +618,18 @@ class ChatApplicationService:
         observability=None,
         actor_user_key: str | None = None,
         response_debug_mode: bool = False,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         run_context = RunContext.create(
             message=message,
             session_id=session_id,
             reset_memory=reset_memory,
         )
+        run_context.metadata["attachments"] = [
+            dict(item)
+            for item in list(attachments or [])
+            if isinstance(item, dict)
+        ]
         session_context: dict[str, Any] = {}
         if run_context.session_id and not run_context.reset_memory:
             try:
@@ -1265,6 +1284,7 @@ class ChatApplicationService:
                 **background_execution_state,
             },
         )
+        self._schedule_background_runtime_if_needed(run_context=run_context)
         self._record_runtime_resolution_event(
             observability=observability,
             run_context=run_context,
@@ -1497,6 +1517,9 @@ class ChatApplicationService:
                     "differences": [],
                     "differences_count": 0,
                 }
+            semantic_context["runtime_attachment_summary"] = self._build_runtime_attachment_summary(
+                run_context
+            )
             semantic_normalization_enabled = self._semantic_normalization_enabled()
             semantic_normalization_shadow_enabled = self._semantic_normalization_shadow_enabled()
             semantic_normalization_payload: dict[str, Any] = {}
@@ -1732,6 +1755,12 @@ class ChatApplicationService:
                     candidate_capabilities=capability_hints,
                 ),
             )
+            intent_arbitration = self._prefer_governed_attachment_capability_arbitration(
+                arbitration=intent_arbitration,
+                intent=intent,
+                candidate_capabilities=capability_hints,
+                run_context=run_context,
+            )
             intent = self._apply_intent_arbitration_to_structured_intent(
                 intent=intent,
                 arbitration=intent_arbitration,
@@ -1926,7 +1955,14 @@ class ChatApplicationService:
                 message=message,
                 intent=intent,
                 base_classification=classification_for_qi,
-                semantic_context_override=semantic_context if context_builder_enabled else None,
+                semantic_context_override=semantic_context
+                if (
+                    context_builder_enabled
+                    or bool(
+                        dict(semantic_context or {}).get("runtime_attachment_summary")
+                    )
+                )
+                else None,
             )
             if inventory_pre_router:
                 self._record_event(
@@ -2798,6 +2834,67 @@ class ChatApplicationService:
             "candidate_capabilities": capability_ids[:6],
             "has_write_capability": write_like,
         }
+
+    @staticmethod
+    def _build_runtime_attachment_summary(run_context: RunContext) -> dict[str, Any]:
+        attachments = [
+            dict(item)
+            for item in list(run_context.metadata.get("attachments") or [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "present": bool(attachments),
+            "count": len(attachments),
+            "names": [
+                str(item.get("name") or "").strip()
+                for item in attachments
+                if str(item.get("name") or "").strip()
+            ],
+            "mime_types": [
+                str(item.get("mime_type") or item.get("mimeType") or "").strip()
+                for item in attachments
+                if str(item.get("mime_type") or item.get("mimeType") or "").strip()
+            ],
+            "total_size_bytes": sum(int(item.get("size") or 0) for item in attachments),
+        }
+
+    @classmethod
+    def _prefer_governed_attachment_capability_arbitration(
+        cls,
+        *,
+        arbitration: dict[str, Any] | None,
+        intent: StructuredQueryIntent,
+        candidate_capabilities: list[dict[str, Any]] | None,
+        run_context: RunContext,
+    ) -> dict[str, Any]:
+        payload = dict(arbitration or {})
+        attachment_summary = cls._build_runtime_attachment_summary(run_context)
+        if not bool(attachment_summary.get("present")):
+            return payload
+        if (
+            str(intent.domain_code or "").strip().lower() != "inventario_logistica"
+            or str(intent.template_id or "").strip().lower() != "inventory_provider_serial_validation"
+        ):
+            return payload
+        confidence_threshold = max(float(payload.get("confidence") or 0.0), 0.68)
+        payload.update(
+            {
+                "final_intent": "analytics_query",
+                "final_domain": "inventario_logistica",
+                "should_execute_query": True,
+                "should_create_kpro": False,
+                "should_use_sql_assisted": False,
+                "should_use_handler": True,
+                "should_fallback": False,
+                "required_clarification": "",
+                "confidence": confidence_threshold,
+                "reasoning_summary": (
+                    "La solicitud trae adjunto y coincide con la capability gobernada "
+                    "inventory_provider_serial_validation; se ejecuta por handler read-only sin pedir aclaracion."
+                ),
+            }
+        )
+        return payload
 
     @staticmethod
     def _build_intent_arbitration_knowledge_signals(
@@ -4610,49 +4707,107 @@ class ChatApplicationService:
             "trace": [],
         }
 
-    @staticmethod
+    @classmethod
     def _build_background_queued_response(
+        cls,
         *,
         message: str,
         session_id: str | None,
         planned_capability: dict[str, Any],
         capability_result: dict[str, Any],
     ) -> dict[str, Any]:
-        del message
         meta = dict(capability_result.get("meta") or {})
         background = dict(meta.get("background") or {})
         polling = dict(background.get("polling") or {})
         partial_evidence = dict(background.get("partial_evidence") or {})
         tool_id = str(background.get("tool_id") or meta.get("tool_id") or "")
-        reply = (
-            "La tarea se encolo como background run para continuar sin bloquear el flujo sincrono actual. "
-            f"Tool objetivo: {tool_id or str(planned_capability.get('capability_id') or '')}. "
-            "Puedes consultar su progreso usando el background_run_id o el task_id."
+        attachment_name = str(partial_evidence.get("attachment_name") or "").strip()
+        task_status = str(background.get("run_status") or "queued").strip().lower() or "queued"
+        reply = cls._build_provider_serial_background_reply(
+            attachment_name=attachment_name,
+            status=task_status,
         )
+        background_job = {
+            "status": task_status,
+            "background_run_id": str(background.get("background_run_id") or ""),
+            "job_id": str(background.get("job_id") or ""),
+            "phase": str(partial_evidence.get("phase") or "queued"),
+            "rows_processed": int(partial_evidence.get("rows_processed") or 0),
+            "total_estimated": int(partial_evidence.get("total_rows") or partial_evidence.get("total_estimated") or 0),
+            "percentage": float(partial_evidence.get("percentage") or 0.0),
+            "result_kind": "partial",
+            "result_label": "Resultado parcial / validacion en proceso",
+            "attachment_name": attachment_name,
+        }
         return {
             "session_id": str(session_id or ""),
             "reply": reply,
+            "task": {
+                "task_id": "",
+                "current_run": {
+                    "run_id": "",
+                    "status": task_status,
+                    "domain": "inventario_logistica",
+                    "intent": "inventory_provider_serial_validation",
+                    "plan": {},
+                    "semantic_explanation": {
+                        "domain": "inventario_logistica",
+                        "intent": "inventory_provider_serial_validation",
+                        "selected_capability": "inventory_provider_serial_validation",
+                        "candidate_capability": "inventory_provider_serial_validation",
+                        "planner_route_hint": "inventory.serial.validation.provider_file",
+                        "background_status": background_job,
+                        "final_state": {
+                            "lifecycle": "background",
+                        },
+                    },
+                    "background": background,
+                    "required_tools": [tool_id] if tool_id else [],
+                    "validation": {},
+                    "evidence": {
+                        "background_progress": background_job,
+                    },
+                    "final_state": {
+                        "background_run_id": str(background.get("background_run_id") or ""),
+                        "resume_token": str(background.get("resume_token") or ""),
+                        "lifecycle": "background",
+                    },
+                    "reply": reply,
+                },
+            },
             "data": {
                 "kpis": {},
                 "series": [],
                 "labels": [],
-                "insights": [
-                    f"Background run id: {str(background.get('background_run_id') or '')}",
-                    f"Poll interval ms: {int(polling.get('poll_interval_ms') or 0)}",
-                ],
+                "insights": ["Resultado parcial / validacion en proceso"],
                 "table": {
-                    "columns": ["campo", "valor"],
-                    "rows": [[key, str(value)] for key, value in partial_evidence.items()],
-                    "rowcount": len(partial_evidence),
+                    "columns": [],
+                    "rows": [],
+                    "rowcount": 0,
+                },
+                "meta": {
+                    "background_job": background_job,
+                    "poll_interval_ms": int(polling.get("poll_interval_ms") or 0),
                 },
             },
             "actions": [],
-            "working_updates": [],
+            "working_updates": [
+                {
+                    "stage": "queued",
+                    "stage_label": "Background Runtime",
+                    "status": "in_progress",
+                    "summary": reply,
+                    "display_text": reply,
+                    "next_step": "Esperando el inicio del procesamiento por chunks.",
+                    "confidence": None,
+                    "at": str(background.get("requested_at") or ""),
+                }
+            ],
             "pending_proposals": [],
             "memory_candidates": [],
             "orchestrator": {
-                "intent": str((planned_capability.get("source") or {}).get("intent") or ""),
-                "domain": str((planned_capability.get("source") or {}).get("domain") or ""),
+                "intent": "inventory_provider_serial_validation",
+                "domain": "inventario_logistica",
                 "selected_agent": str((planned_capability.get("source") or {}).get("selected_agent") or ""),
                 "classifier_source": "background_runtime",
                 "needs_database": bool((planned_capability.get("source") or {}).get("needs_database", True)),
@@ -4661,6 +4816,533 @@ class ChatApplicationService:
             },
             "trace": [],
         }
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @classmethod
+    def _build_background_progress_summary(
+        cls,
+        *,
+        background: dict[str, Any],
+        checkpoints: list[dict[str, Any]] | None = None,
+        updated_at: Any = None,
+    ) -> dict[str, Any]:
+        partial = dict(background.get("partial_evidence") or {})
+        final = dict(background.get("final_evidence") or {})
+        checkpoint = dict(background.get("checkpoint") or {})
+        checkpoint_progress = dict(checkpoint.get("progress") or {})
+        merged = {
+            **checkpoint_progress,
+            **partial,
+            **final,
+        }
+        rows_processed = int(
+            merged.get("rows_processed")
+            or merged.get("processed_rows")
+            or checkpoint_progress.get("rows_processed")
+            or 0
+        )
+        total_estimated = int(
+            merged.get("total_estimated")
+            or merged.get("total_rows")
+            or merged.get("estimated_total_rows")
+            or 0
+        )
+        percentage_raw = merged.get("percentage")
+        if percentage_raw is None:
+            percentage_raw = merged.get("progress_pct")
+        if percentage_raw is None and total_estimated > 0:
+            percentage_raw = round((rows_processed / total_estimated) * 100, 1)
+        try:
+            percentage = float(percentage_raw or 0.0)
+        except (TypeError, ValueError):
+            percentage = 0.0
+        phase = str(
+            merged.get("phase")
+            or merged.get("stage")
+            or checkpoint.get("label")
+            or background.get("run_status")
+            or ""
+        ).strip()
+        elapsed_seconds = int(merged.get("elapsed_seconds") or 0)
+        if elapsed_seconds <= 0:
+            start = cls._parse_iso_datetime(background.get("started_at") or background.get("requested_at"))
+            end = cls._parse_iso_datetime(background.get("finished_at")) or datetime.now(timezone.utc)
+            if start is not None and end >= start:
+                elapsed_seconds = int((end - start).total_seconds())
+        eta_seconds = int(merged.get("eta_seconds") or 0)
+        if eta_seconds <= 0 and elapsed_seconds > 0 and 0.0 < percentage < 100.0:
+            eta_seconds = max(0, int((elapsed_seconds / percentage) * (100.0 - percentage)))
+        return {
+            "rows_processed": rows_processed,
+            "total_estimated": total_estimated,
+            "percentage": max(0.0, min(100.0, percentage)),
+            "phase": phase,
+            "phase_label": str(merged.get("phase_label") or "").strip(),
+            "elapsed_seconds": max(0, elapsed_seconds),
+            "eta_seconds": max(0, eta_seconds),
+            "status": str(background.get("run_status") or "").strip(),
+            "background_run_id": str(background.get("background_run_id") or "").strip(),
+            "job_id": str(background.get("job_id") or "").strip(),
+            "attachment_name": str(merged.get("attachment_name") or "").strip(),
+            "result_kind": str(merged.get("result_kind") or "").strip(),
+            "result_label": str(merged.get("result_label") or "").strip(),
+            "current_chunk": int(merged.get("current_chunk") or merged.get("chunks_processed") or 0),
+            "total_chunks": int(merged.get("total_chunks") or 0),
+            "serials_unique_total": int(merged.get("serials_unique_total") or 0),
+            "serials_processed": int(merged.get("serials_processed") or 0),
+            "serials_pending": int(merged.get("serials_pending") or 0),
+            "stage_serials_total": int(merged.get("stage_serials_total") or 0),
+            "stage_serials_processed": int(merged.get("stage_serials_processed") or 0),
+            "stage_serials_pending": int(merged.get("stage_serials_pending") or 0),
+            "found_so_far": int(merged.get("found_so_far") or merged.get("encontrados_parciales") or 0),
+            "not_found_so_far": int(merged.get("not_found_so_far") or merged.get("no_encontrados_parciales") or 0),
+            "movil_so_far": int(merged.get("movil_so_far") or merged.get("movil_detectados_parciales") or 0),
+            "enriched_responsible_so_far": int(
+                merged.get("enriched_responsible_so_far")
+                or merged.get("moviles_con_responsable_enriquecido")
+                or 0
+            ),
+            "found_in_base_actual": int(merged.get("found_in_base_actual") or 0),
+            "found_in_asociados_actual": int(merged.get("found_in_asociados_actual") or 0),
+            "found_in_historico": int(merged.get("found_in_historico") or 0),
+            "artifact_id": str(merged.get("artifact_id") or "").strip(),
+            "failure_reason": str(merged.get("failure_reason") or background.get("failure_reason") or "").strip(),
+            "updated_at": int(updated_at or 0) if str(updated_at or "").strip() else 0,
+        }
+
+    @classmethod
+    def _build_background_working_updates(
+        cls,
+        *,
+        background: dict[str, Any],
+        background_trace: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        progress = cls._build_background_progress_summary(
+            background=background,
+            checkpoints=None,
+        )
+        trace_items = [
+            dict(item)
+            for item in list(background_trace or [])
+            if isinstance(item, dict)
+        ]
+        updates = []
+        for item in trace_items[-3:]:
+            message = str(item.get("message") or "").strip()
+            status = str(item.get("status") or background.get("run_status") or "running").strip() or "running"
+            created_at = str(item.get("created_at") or background.get("requested_at") or "")
+            if not message:
+                continue
+            updates.append(
+                {
+                    "stage": str(progress.get("phase") or status or "background").strip().lower() or "background",
+                    "stage_label": "Background Runtime",
+                    "status": "done" if status in {"completed", "partial"} else "failed" if status == "failed" else "in_progress",
+                    "summary": message,
+                    "display_text": message,
+                    "next_step": (
+                        "Descargar el artifact y revisar el dashboard."
+                        if status in {"completed", "partial"}
+                        else "Esperando siguiente checkpoint."
+                    ),
+                    "confidence": None,
+                    "at": created_at,
+                }
+            )
+        return updates
+
+    def _persist_response_snapshot(
+        self,
+        *,
+        run_context: RunContext,
+        payload: dict[str, Any],
+    ) -> None:
+        task_state = dict(run_context.metadata.get("task_state") or {})
+        workflow_state = dict(task_state.get("state") or {})
+        run_id = str(workflow_state.get("run_id") or run_context.run_id or "").strip()
+        if not run_id:
+            return
+        try:
+            snapshot = ensure_chat_response_contract(copy.deepcopy(payload))
+            workflow = self.task_state_service.update_state(
+                run_id=run_id,
+                extra_state={"response_snapshot": snapshot},
+            )
+            run_context.metadata["task_state"] = dict(workflow or {})
+        except Exception:
+            logger.exception("No se pudo persistir response_snapshot del runtime")
+
+    def _schedule_background_runtime_if_needed(self, *, run_context: RunContext) -> None:
+        task_state = dict(run_context.metadata.get("task_state") or {})
+        state = dict(task_state.get("state") or {})
+        background = dict(state.get("background") or {})
+        if str(background.get("tool_id") or "").strip() != "inventory_provider_serial_validation":
+            return
+        if str(background.get("run_status") or "").strip().lower() not in {"queued", "running", "resumed"}:
+            return
+        self.provider_serial_background_runtime.schedule_if_needed(
+            run_id=str(state.get("run_id") or run_context.run_id or ""),
+        )
+
+    def build_task_status_response(
+        self,
+        *,
+        run_id: str | None = None,
+        background_run_id: str | None = None,
+        resume_token: str | None = None,
+    ) -> dict[str, Any] | None:
+        workflow = self.background_runtime_service._resolve_workflow(
+            run_id=run_id,
+            background_run_id=background_run_id,
+            resume_token=resume_token,
+        )
+        state = dict((workflow or {}).get("state") or {})
+        background = dict(state.get("background") or {})
+        if str(background.get("tool_id") or "").strip() == "inventory_provider_serial_validation":
+            self.provider_serial_background_runtime.schedule_if_needed(
+                run_id=str(state.get("run_id") or ""),
+            )
+        background_trace = [
+            dict(item) for item in list(state.get("background_trace") or []) if isinstance(item, dict)
+        ]
+        checkpoints = [
+            dict(item) for item in list(state.get("checkpoints") or []) if isinstance(item, dict)
+        ]
+        active_background_statuses = {"queued", "running", "resumed"}
+        progress = self._build_background_progress_summary(
+            background=background,
+            checkpoints=checkpoints,
+            updated_at=state.get("updated_at"),
+        )
+        background_status = str(background.get("run_status") or "").strip().lower()
+        inferred_intent = str(
+            state.get("intent")
+            or (
+                "inventory_provider_serial_validation"
+                if str(background.get("tool_id") or "").strip() == "inventory_provider_serial_validation"
+                else ""
+            )
+        ).strip()
+        if (
+            inferred_intent == "inventory_provider_serial_validation"
+            and background_status in active_background_statuses
+        ):
+            return ensure_chat_response_contract(
+                self._build_provider_serial_active_status_payload(
+                    state=state,
+                    background=background,
+                    progress=progress,
+                    background_trace=background_trace,
+                )
+            )
+        payload = ensure_chat_response_contract(dict(state.get("response_snapshot") or build_chat_response_snapshot()))
+        current_run = dict(((payload.get("task") or {}).get("current_run") or {}))
+        inferred_intent = str(
+            inferred_intent
+            or current_run.get("intent")
+            or ""
+        ).strip()
+        current_run.update(
+            {
+                "run_id": str(state.get("run_id") or current_run.get("run_id") or ""),
+                "status": str(state.get("task_status") or workflow.get("status") or current_run.get("status") or ""),
+                "domain": str(state.get("detected_domain") or current_run.get("domain") or ""),
+                "intent": inferred_intent,
+                "plan": dict(state.get("plan") or current_run.get("plan") or {}),
+                "background": background,
+                "validation": dict(state.get("validation_result") or current_run.get("validation") or {}),
+                "evidence": {
+                    **dict(current_run.get("evidence") or {}),
+                    "background_progress": progress,
+                    "partial_evidence": dict(background.get("partial_evidence") or {}),
+                    "final_evidence": dict(background.get("final_evidence") or {}),
+                },
+                "final_state": {
+                    **dict(current_run.get("final_state") or {}),
+                    "task_status": str(state.get("task_status") or workflow.get("status") or ""),
+                    "background_run_id": str(background.get("background_run_id") or ""),
+                    "resume_token": str(background.get("resume_token") or ""),
+                    "failure_reason": str(background.get("failure_reason") or ""),
+                    "lifecycle": "background" if str(background.get("background_run_id") or "").strip() else "",
+                },
+                "reply": self._resolve_background_status_reply(
+                    current_reply=str(current_run.get("reply") or payload.get("reply") or ""),
+                    background=background,
+                    progress=progress,
+                    current_intent=inferred_intent,
+                ),
+            }
+        )
+        semantic_explanation = dict(current_run.get("semantic_explanation") or {})
+        if inferred_intent == "inventory_provider_serial_validation":
+            current_run["validation"] = {
+                "status": "passed",
+                "satisfied": True,
+                "reason": "background_runtime_provider_serial_validation",
+                "needs_clarification": False,
+            }
+            semantic_explanation["domain"] = str(
+                semantic_explanation.get("domain") or current_run.get("domain") or "inventario_logistica"
+            )
+            semantic_explanation["intent"] = str(
+                semantic_explanation.get("intent") or inferred_intent
+            )
+            semantic_explanation["selected_capability"] = "inventory_provider_serial_validation"
+            semantic_explanation["candidate_capability"] = "inventory_provider_serial_validation"
+            semantic_explanation["planner_route_hint"] = (
+                str(semantic_explanation.get("planner_route_hint") or "").strip()
+                or "inventory.serial.validation.provider_file"
+            )
+            semantic_explanation["validation_status"] = {
+                "status": "passed",
+                "satisfied": True,
+                "reason": "background_runtime_provider_serial_validation",
+                "needs_clarification": False,
+            }
+            semantic_explanation["clarification_needed"] = {
+                "required": False,
+                "question": "",
+            }
+            final_state = dict(semantic_explanation.get("final_state") or {})
+            final_state["lifecycle"] = "background"
+            semantic_explanation["final_state"] = final_state
+            semantic_explanation["timeline"] = self._build_semantic_timeline(
+                status=str(current_run.get("status") or ""),
+                domain=str(current_run.get("domain") or "inventario_logistica"),
+                intent=inferred_intent,
+                selected_capability="inventory_provider_serial_validation",
+                selected_tool=str(background.get("tool_id") or self.provider_serial_background_runtime.CAPABILITY_ID),
+                validation={"satisfied": True, "reason": "background_runtime_provider_serial_validation"},
+                evidence=dict(current_run.get("evidence") or {}),
+                approvals=[],
+                background=background,
+                clarification_required=False,
+                limitation_declared=False,
+            )
+        semantic_explanation["background_status"] = {
+            **dict(semantic_explanation.get("background_status") or {}),
+            **progress,
+        }
+        current_run["semantic_explanation"] = semantic_explanation
+        task = dict(payload.get("task") or {})
+        task["task_id"] = str(state.get("task_id") or task.get("task_id") or "")
+        task["current_run"] = current_run
+        payload["task"] = task
+        data = dict(payload.get("data") or {})
+        meta = dict(data.get("meta") or {})
+        meta["background_job"] = progress
+        data["meta"] = meta
+        payload["reply"] = str(current_run.get("reply") or payload.get("reply") or "")
+        if inferred_intent == "inventory_provider_serial_validation":
+            response_envelope = dict(payload.get("response_envelope") or {})
+            response_envelope["needs_clarification"] = False
+            response_envelope["block_reason"] = ""
+            payload["response_envelope"] = response_envelope
+            orchestrator = dict(payload.get("orchestrator") or {})
+            orchestrator["intent"] = "inventory_provider_serial_validation"
+            orchestrator["domain"] = "inventario_logistica"
+            payload["orchestrator"] = orchestrator
+        if (
+            str(background.get("run_status") or "").strip().lower() in {"failed", "partial", "cancelled", "expired"}
+            and not list((dict(data.get("table") or {})).get("rows") or [])
+            and dict(background.get("partial_evidence") or {})
+        ):
+            partial_evidence = dict(background.get("partial_evidence") or {})
+            data["table"] = {
+                "columns": ["campo", "valor"],
+                "rows": [{"campo": key, "valor": str(value)} for key, value in partial_evidence.items()],
+                "rowcount": len(partial_evidence),
+            }
+        payload["data"] = data
+        payload["working_updates"] = self._build_background_working_updates(
+            background=background,
+            background_trace=background_trace,
+        ) or list(payload.get("working_updates") or [])
+        return payload
+
+    @classmethod
+    def _build_provider_serial_active_status_payload(
+        cls,
+        *,
+        state: dict[str, Any],
+        background: dict[str, Any],
+        progress: dict[str, Any],
+        background_trace: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        reply = cls._resolve_background_status_reply(
+            current_reply="",
+            background=background,
+            progress=progress,
+            current_intent="inventory_provider_serial_validation",
+        )
+        tool_id = str(background.get("tool_id") or "inventory_provider_serial_validation").strip()
+        semantic_timeline = cls._build_semantic_timeline(
+            status=str(background.get("run_status") or state.get("task_status") or "running"),
+            domain="inventario_logistica",
+            intent="inventory_provider_serial_validation",
+            selected_capability="inventory_provider_serial_validation",
+            selected_tool=tool_id,
+            validation={"satisfied": True, "reason": "background_runtime_provider_serial_validation"},
+            evidence={"background_progress": progress},
+            approvals=[],
+            background=background,
+            clarification_required=False,
+            limitation_declared=False,
+        )
+        return {
+            "session_id": str(state.get("session_id") or ""),
+            "reply": reply,
+            "task": {
+                "task_id": str(state.get("task_id") or ""),
+                "current_run": {
+                    "run_id": str(state.get("run_id") or ""),
+                    "status": str(state.get("task_status") or background.get("run_status") or "running"),
+                    "domain": "inventario_logistica",
+                    "intent": "inventory_provider_serial_validation",
+                    "plan": dict(state.get("plan") or {}),
+                    "semantic_explanation": {
+                        "domain": "inventario_logistica",
+                        "intent": "inventory_provider_serial_validation",
+                        "selected_capability": "inventory_provider_serial_validation",
+                        "candidate_capability": "inventory_provider_serial_validation",
+                        "planner_route_hint": "inventory.serial.validation.provider_file",
+                        "validation_status": {
+                            "status": "passed",
+                            "satisfied": True,
+                            "reason": "background_runtime_provider_serial_validation",
+                            "needs_clarification": False,
+                        },
+                        "clarification_needed": {"required": False, "question": ""},
+                        "background_status": progress,
+                        "final_state": {"lifecycle": "background"},
+                        "timeline": semantic_timeline,
+                    },
+                    "background": background,
+                    "required_tools": [tool_id] if tool_id else [],
+                    "validation": {
+                        "status": "passed",
+                        "satisfied": True,
+                        "reason": "background_runtime_provider_serial_validation",
+                        "needs_clarification": False,
+                    },
+                    "evidence": {
+                        "background_progress": progress,
+                    },
+                    "final_state": {
+                        "task_status": str(state.get("task_status") or background.get("run_status") or ""),
+                        "background_run_id": str(background.get("background_run_id") or ""),
+                        "resume_token": str(background.get("resume_token") or ""),
+                        "failure_reason": str(background.get("failure_reason") or ""),
+                        "lifecycle": "background",
+                    },
+                    "reply": reply,
+                },
+            },
+            "response_envelope": {
+                "progress_source": "backend",
+                "needs_clarification": False,
+                "block_reason": "",
+            },
+            "orchestrator": {
+                "intent": "inventory_provider_serial_validation",
+                "domain": "inventario_logistica",
+                "selected_agent": "inventory_agent",
+                "classifier_source": "background_runtime",
+                "needs_database": True,
+                "output_mode": "summary",
+                "used_tools": [tool_id] if tool_id else [],
+            },
+            "data": {
+                "kpis": {},
+                "series": [],
+                "labels": [],
+                "insights": ["Resultado parcial / validacion en proceso"],
+                "table": {"columns": [], "rows": [], "rowcount": 0},
+                "extra_tables": [],
+                "meta": {
+                    "background_job": progress,
+                    "poll_interval_ms": int(((background.get("polling") or {}).get("poll_interval_ms") or 0)),
+                },
+            },
+            "working_updates": cls._build_background_working_updates(
+                background=background,
+                background_trace=background_trace,
+            ),
+            "trace": [],
+            "actions": [],
+            "pending_proposals": [],
+            "memory_candidates": [],
+        }
+
+    @staticmethod
+    def _build_provider_serial_background_reply(
+        *,
+        attachment_name: str,
+        status: str,
+        progress: dict[str, Any] | None = None,
+    ) -> str:
+        normalized_status = str(status or "").strip().lower()
+        filename = str(attachment_name or "el archivo de seriales del proveedor").strip()
+        if normalized_status == "queued":
+            return (
+                f"Recibi {filename} y la validacion fue enviada a ejecucion en segundo plano por el tamano del archivo. "
+                "Ire actualizando el avance aqui y mostrare el dashboard final cuando termine."
+            )
+        progress = dict(progress or {})
+        serials_processed = int(progress.get("serials_processed") or progress.get("rows_processed") or 0)
+        serials_total = int(progress.get("serials_unique_total") or progress.get("total_estimated") or 0)
+        encontrados = int(progress.get("found_so_far") or 0)
+        pendientes = int(progress.get("serials_pending") or progress.get("not_found_so_far") or 0)
+        movil = int(progress.get("movil_so_far") or 0)
+        responsables = int(progress.get("enriched_responsible_so_far") or 0)
+        phase_label = str(progress.get("phase_label") or progress.get("phase") or "validacion").strip().lower()
+        if serials_total > 0:
+            return (
+                f"Validacion en curso en segundo plano. Ya se procesaron {serials_processed} de {serials_total} seriales unicos. "
+                f"Se han encontrado {encontrados} coincidencias, {pendientes} siguen pendientes, "
+                f"{movil} estan en estado MOVIL y {responsables} tienen responsable enriquecido. "
+                f"La fase actual es {phase_label}."
+            )
+        return (
+            f"Estoy validando {filename} en segundo plano por el tamano del archivo. "
+            "Ire actualizando el avance aqui y mostrare el dashboard final cuando termine."
+        )
+
+    @classmethod
+    def _resolve_background_status_reply(
+        cls,
+        *,
+        current_reply: str,
+        background: dict[str, Any],
+        progress: dict[str, Any],
+        current_intent: str,
+    ) -> str:
+        if current_intent != "inventory_provider_serial_validation":
+            return current_reply
+        status = str(background.get("run_status") or progress.get("status") or "").strip().lower()
+        if status not in {"queued", "running", "resumed"}:
+            return current_reply
+        current_reply = str(current_reply or "").strip()
+        if current_reply and "riesgo operativo concluyente" not in current_reply.lower():
+            return current_reply
+        return cls._build_provider_serial_background_reply(
+            attachment_name=str(progress.get("attachment_name") or "").strip(),
+            status=status,
+            progress=progress,
+        )
 
     def _apply_attendance_memory_hints(
         self,
@@ -5759,6 +6441,7 @@ class ChatApplicationService:
         background_runtime = dict(run_context.metadata.get("background_runtime") or {})
         return {
             "background": dict(background_runtime.get("background") or {}),
+            "background_request": dict(background_runtime.get("request") or {}),
             "background_trace": [
                 dict(item)
                 for item in list(background_runtime.get("background_trace") or [])
@@ -5934,6 +6617,14 @@ class ChatApplicationService:
             or validation.get("needs_clarification")
             or (payload.get("response_envelope") or {}).get("needs_clarification")
         )
+        if (
+            str(status or "").strip().lower() == "completed"
+            and bool(route_payload.get("execute_capability"))
+            and not bool(validation.get("needs_clarification"))
+            and not bool((payload.get("response_envelope") or {}).get("needs_clarification"))
+        ):
+            clarification_question = ""
+            clarification_required = False
         limitation_texts = [
             _friendly_limitation(item)
             for item in list(metadata.get("limitations") or [])
@@ -6098,6 +6789,10 @@ class ChatApplicationService:
                 "status": str(background.get("run_status") or "").strip(),
                 "background_run_id": str(background.get("background_run_id") or "").strip(),
                 "resume_token_available": bool(str(background.get("resume_token") or "").strip()),
+                **ChatApplicationService._build_background_progress_summary(
+                    background=background,
+                    checkpoints=[],
+                ),
             },
             "final_state": {
                 "task_status": str(status or "").strip(),
@@ -6162,8 +6857,14 @@ class ChatApplicationService:
             or task_state_data.get("detected_domain")
             or ""
         ).strip().lower()
+        resolved_business_intent = str(
+            business_response_metadata.get("intent")
+            or business_response_metadata.get("candidate_capability")
+            or ""
+        ).strip()
         intent = str(
-            runtime_payload.get("final_intent")
+            (resolved_business_intent if route_payload.get("execute_capability") else "")
+            or runtime_payload.get("final_intent")
             or orchestrator.get("final_intent")
             or orchestrator.get("intent")
             or intent_arbitration.get("final_intent")
@@ -6190,6 +6891,10 @@ class ChatApplicationService:
             "approval_count": len(approvals),
             "partial_evidence": dict(background.get("partial_evidence") or {}),
             "final_evidence": dict(background.get("final_evidence") or {}),
+            "background_progress": ChatApplicationService._build_background_progress_summary(
+                background=background,
+                checkpoints=checkpoints,
+            ),
             "response_profile_usado": str(
                 business_response_metadata.get("response_profile_usado")
                 or business_evidence_summary.get("response_profile_usado")
