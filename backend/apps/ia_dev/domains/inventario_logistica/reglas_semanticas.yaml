@@ -155,3 +155,20 @@ reglas:
         - inventario.entity.bodega
       ia_dev_capacidades_columna:
         - bodega
+  - id: inventario.route.provider_serial_validation
+    descripcion: La validacion de seriales externos con archivo adjunto usa la capability gobernada del dominio.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.provider_serial_validation
+      dd_sinonimos:
+        - inventario.intent.provider_serial_validation.proveedor
+        - inventario.intent.provider_serial_validation.archivo
+      ia_dev_capacidades_columna:
+        - serial
+        - estado
+        - cedula
+        - movil
+        - bodega
+        - codigo
+        - descripcion
+        - fecha

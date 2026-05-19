@@ -6,6 +6,17 @@ export type IADevChatRequest = {
   message: string;
   session_id?: string;
   reset_memory?: boolean;
+  attachments?: IADevChatAttachment[];
+};
+
+export type IADevChatAttachment = {
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  kind: "image" | "document" | string;
+  last_modified?: number;
+  content_base64: string;
 };
 
 export type IADevChartPoint = {
@@ -32,6 +43,42 @@ export type IADevChartPayload = {
   meta?: Record<string, unknown>;
 };
 
+export type IADevDashboardEvidence = {
+  source_block?: string;
+  columns_used?: string[];
+  formula?: string;
+  row_count_used?: number;
+  confidence?: number;
+  limitation?: string;
+};
+
+export type IADevDashboardCompositionItem = {
+  id?: string;
+  title?: string;
+  text?: string;
+  value?: number | string;
+  type?: string;
+  kind?: string;
+  severity?: string;
+  priority?: string;
+  rows?: Array<Record<string, unknown>>;
+  chart?: IADevChartPayload;
+  table?: IADevTablePayload;
+  evidence?: IADevDashboardEvidence;
+};
+
+export type IADevDashboardComposition = {
+  executive_summary?: Record<string, unknown>;
+  semantic_basis?: Record<string, unknown>;
+  primary_kpis?: IADevDashboardCompositionItem[];
+  ranked_breakdowns?: IADevDashboardCompositionItem[];
+  recommended_charts?: IADevDashboardCompositionItem[];
+  priority_tables?: IADevDashboardCompositionItem[];
+  business_insights?: IADevDashboardCompositionItem[];
+  operational_alerts?: IADevDashboardCompositionItem[];
+  evidence_contract?: Record<string, unknown>;
+};
+
 export type IADevTablePayload = {
   columns?: string[];
   rows?: Array<Record<string, unknown>>;
@@ -44,6 +91,17 @@ export type IADevTablePayload = {
   export_limit?: number;
   truncated?: boolean;
   limit?: number;
+  export_artifact?: IADevExportArtifact;
+};
+
+export type IADevExportArtifact = {
+  available?: boolean;
+  format?: string;
+  artifact_id?: string;
+  filename?: string;
+  record_count?: number;
+  endpoint_hint?: string;
+  expires_in_seconds?: number;
 };
 
 export type IADevAction = {
@@ -148,6 +206,7 @@ export type IADevChatResponse = {
       intent: string;
       plan: Record<string, unknown>;
       semantic_explanation?: IADevSemanticExplanation;
+      background?: Record<string, unknown>;
       required_tools: string[];
       validation: Record<string, unknown>;
       evidence: Record<string, unknown>;
@@ -189,6 +248,10 @@ export type IADevChatResponse = {
     charts?: IADevChartPayload[];
     meta?: Record<string, unknown>;
     cause_generation_meta?: Record<string, unknown>;
+    business_response?: {
+      dashboard_composition?: IADevDashboardComposition;
+      [key: string]: unknown;
+    };
   };
   data_sources?: {
     runtime?: Record<string, unknown>;
@@ -260,6 +323,12 @@ export type IADevChatResponse = {
   active_nodes?: string[];
 };
 
+export type IADevTaskStatusRequest = {
+  run_id?: string;
+  background_run_id?: string;
+  resume_token?: string;
+};
+
 export const sendIADevMessage = async (
   payload: IADevChatRequest,
 ): Promise<IADevChatResponse> => {
@@ -267,6 +336,37 @@ export const sendIADevMessage = async (
     timeout: IA_DEV_CHAT_TIMEOUT_MS,
   });
   return response.data;
+};
+
+export const getIADevTaskStatus = async (
+  params: IADevTaskStatusRequest,
+  options?: { signal?: AbortSignal },
+): Promise<IADevChatResponse> => {
+  const response = await api.get<IADevChatResponse>("/ia-dev/chat/task-status/", {
+    params,
+    signal: options?.signal,
+    timeout: 60000,
+  });
+  return response.data;
+};
+
+export const downloadIADevProviderSerialArtifact = async (params: {
+  artifactId: string;
+  backgroundRunId?: string;
+}): Promise<Blob> => {
+  const response = await api.get(
+    "/ia-dev/runtime/artifacts/provider-serial-validation/",
+    {
+      params: {
+        artifact_id: params.artifactId,
+        ...(params.backgroundRunId
+          ? { background_run_id: params.backgroundRunId }
+          : {}),
+      },
+      responseType: "blob",
+    },
+  );
+  return response.data as Blob;
 };
 
 export const resetIADevMemory = async (sessionId: string) => {

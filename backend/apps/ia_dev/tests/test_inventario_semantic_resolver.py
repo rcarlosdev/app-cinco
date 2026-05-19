@@ -45,6 +45,20 @@ class InventarioSemanticResolverTests(SimpleTestCase):
             semantic_context=semantic_context or {},
         )
 
+    def _resolve_with_attachment(self, *, message: str, operation: str = "detail"):
+        return self._resolve_with_context(
+            message=message,
+            operation=operation,
+            semantic_context={
+                "inventory_catalog_families": ["DECO", "CPE RESIDENCIAL", "ONT", "ROUTER"],
+                "runtime_attachment_summary": {
+                    "present": True,
+                    "count": 1,
+                    "names": ["seriales_proveedor.xlsx"],
+                },
+            },
+        )
+
     def _semantic_plan(self, resolved):
         return dict(resolved.semantic_context.get("business_query_semantic_plan") or {})
 
@@ -165,6 +179,41 @@ class InventarioSemanticResolverTests(SimpleTestCase):
             str(((resolved.semantic_context.get("inventory_semantic_inference") or {}).get("intent") or "")),
             "traceability_query",
         )
+
+    def test_valida_seriales_adjuntos_proveedor_resuelve_capability_gobernada(self):
+        resolved = self._resolve_with_attachment(
+            message="Valida los seriales adjuntos, dados por el proveedor",
+            operation="validate_file",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+        self.assertEqual(str(resolved.intent.operation or ""), "validate_file")
+        self.assertEqual(
+            str(((resolved.semantic_context.get("inventory_semantic_inference") or {}).get("business_concept") or "")),
+            "validacion_seriales_externos_contra_inventario_propio",
+        )
+        self.assertEqual(
+            str(((resolved.semantic_context.get("semantic_capability_registry") or {}).get("candidate_capability") or "")),
+            "inventory_provider_serial_validation",
+        )
+
+    def test_revisa_seriales_del_proveedor_con_adjunto_resuelve_capability_gobernada(self):
+        resolved = self._resolve_with_attachment(
+            message="Revisa estos seriales del proveedor",
+            operation="validate_file",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+        self.assertEqual(str(resolved.intent.operation or ""), "validate_file")
+        self.assertEqual(
+            str(((resolved.semantic_context.get("inventory_semantic_inference") or {}).get("expected_runtime_flow") or "")),
+            "handler",
+        )
+
+    def test_valida_seriales_sin_adjunto_no_fuerza_ruta_de_proveedor(self):
+        resolved = self._resolve("Valida los seriales", operation="detail")
+
+        self.assertNotEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
 
     def test_consumo_movil_sin_validar(self):
         resolved = self._resolve("equipos serializados en consumo movil sin validar")

@@ -340,6 +340,40 @@ INVENTORY_TEMPLATE_BINDINGS: dict[str, dict[str, Any]] = {
         "grain": "saldo_por_codigo",
         "columns": ["codigo", "cantidad"],
     },
+    "inventory_provider_serial_validation": {
+        "candidate_capability": "inventory_provider_serial_validation",
+        "planner_route_hint": "inventory.serial.validation.provider_file",
+        "response_profile": "inventory.serial.validation.provider_file.detail",
+        "expected_output": "validacion_seriales_proveedor",
+        "grain": "serial_proveedor_validado",
+        "columns": [
+            "fila_archivo",
+            "serial_proveedor",
+            "material_proveedor",
+            "denominacion_proveedor",
+            "familia_proveedor",
+            "encontrado",
+            "fuente",
+            "estado",
+            "estado_contiene_movil",
+            "movil_asociado",
+            "cedula_persona",
+            "nombre",
+            "apellido",
+            "empleado",
+            "bodega",
+            "codigo_interno",
+            "descripcion_interna",
+            "ultima_fecha_encontrada",
+            "duplicado_en_archivo",
+            "ocurrencias_archivo",
+            "solo_historico",
+            "fuentes_coincidencia",
+            "tablas_consultadas",
+            "tablas_historicas_no_existian",
+            "observacion_operativa",
+        ],
+    },
 }
 
 INVENTORY_INTENT_IDS_BY_TEMPLATE = {
@@ -354,6 +388,7 @@ INVENTORY_INTENT_IDS_BY_TEMPLATE = {
     "inventory_serial_stock_by_family_grouped_dimension": "inventory_stock_by_dimension",
     "inventory_traceability_by_serial": "inventory_traceability_serial",
     "inventory_document_generation_pending": "inventory_document_generation",
+    "inventory_provider_serial_validation": "inventory_provider_serial_validation",
 }
 
 

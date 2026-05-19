@@ -7,6 +7,7 @@ from typing import Any
 VALID_BACKGROUND_RUN_STATUSES = {
     "queued",
     "running",
+    "partial",
     "awaiting_approval",
     "paused",
     "resumed",

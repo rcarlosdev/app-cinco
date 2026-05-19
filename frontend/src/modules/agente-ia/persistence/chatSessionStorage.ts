@@ -6,6 +6,7 @@ import type {
   NormalizedAssistantPayload,
   NormalizedTable,
 } from "@/modules/programacion/ia-dev/chat/types";
+import type { IADevChatResponse } from "@/services/ia-dev.service";
 
 export type AgenteIAChatThread = {
   id: string;
@@ -55,6 +56,16 @@ const safeParse = <T>(raw: string | null): T | null => {
 
 const sanitizeMessage = (message: ChatMessageModel): ChatMessageModel => {
   if (message.status !== "streaming") return message;
+  const backgroundStatus = String(
+    message.response?.task?.current_run?.background?.run_status ||
+      message.response?.task?.current_run?.status ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (["queued", "running", "resumed", "awaiting_approval", "paused"].includes(backgroundStatus)) {
+    return message;
+  }
 
   const interruptedContent =
     message.content.trim() ||
@@ -94,6 +105,34 @@ const sanitizeTableForStorage = (table: NormalizedTable | null): NormalizedTable
     exportLimit: 0,
     truncated: table.truncated || table.rows.length > rows.length,
     limit: Math.min(table.limit || rows.length, rows.length),
+    exportArtifact: table.exportArtifact,
+  };
+};
+
+const sanitizeResponseForStorage = (
+  response: Partial<IADevChatResponse> | undefined,
+): Partial<IADevChatResponse> | undefined => {
+  if (!response) return undefined;
+  const data = response.data || {};
+  return {
+    session_id: response.session_id || "",
+    reply: response.reply || "",
+    task: response.task,
+    response_envelope: response.response_envelope,
+    orchestrator: response.orchestrator,
+    data: {
+      ...data,
+      table: data.table,
+      extra_tables: Array.isArray(data.extra_tables)
+        ? data.extra_tables.slice(0, MAX_PERSISTED_EXTRA_TABLES)
+        : [],
+    },
+    working_updates: Array.isArray(response.working_updates)
+      ? response.working_updates.slice(-4)
+      : [],
+    trace: Array.isArray(response.trace) ? response.trace.slice(-6) : [],
+    memory: response.memory,
+    reasoning: response.reasoning,
   };
 };
 
@@ -145,6 +184,7 @@ const sanitizeMessageForStorage = (message: ChatMessageModel): ChatMessageModel 
   createdAt: message.createdAt,
   status: message.status,
   attachments: sanitizeAttachmentsForStorage(message.attachments),
+  response: sanitizeResponseForStorage(message.response),
   normalized: sanitizeNormalizedForStorage(message.normalized),
   actions: Array.isArray(message.actions) ? message.actions.slice(0, 6) : undefined,
   error: message.error ? truncateText(message.error, 1000) : undefined,

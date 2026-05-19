@@ -8,6 +8,7 @@ procesos_operativos:
   - inventario operativo por tecnico, empleado, movil, cuadrilla o brigada
   - inventario de materiales y ferretero
   - inventario serializado de equipos y CPE
+  - validacion de seriales externos de proveedor contra bases actuales e historicas
   - kardex y movimientos por empleado o codigo
   - limitaciones documentales SAP, actas y documentos no habilitados
 entidades:
@@ -27,6 +28,9 @@ limitaciones_declaradas:
   - result_set_empty
   - aclaracion_portador_requerida
   - scope_required:operacion_hfc
+  - attachment_required
+  - provider_file_empty
+  - serial_column_not_detected
 capacidades:
   - capability_id: inventory_stock_balance_by_mobile
     template_id: inventory_material_stock_mobile
@@ -208,3 +212,18 @@ capacidades:
       - inventario_runtime_eval_v1
     limitaciones:
       - result_set_empty
+  - capability_id: inventory_provider_serial_validation
+    template_id: inventory_provider_serial_validation
+    planner_route_hint: inventory.serial.validation.provider_file
+    response_profile: inventory.serial.validation.provider_file.detail
+    tools:
+      - inventory_provider_serial_validation
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.provider_serial_validation
+    evaluaciones:
+      - inventario_provider_serial_validation_v1
+    limitaciones:
+      - attachment_required
+      - provider_file_empty
+      - serial_column_not_detected

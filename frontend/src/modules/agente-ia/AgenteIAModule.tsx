@@ -11,7 +11,12 @@ import { normalizeChatPayload } from "@/modules/programacion/ia-dev/chat/utils/n
 import { usePromptHistory } from "@/modules/programacion/ia-dev/chat/hooks/usePromptHistory";
 import { useSmartAutoScroll } from "@/modules/programacion/ia-dev/chat/hooks/useSmartAutoScroll";
 import { useIADevChatTransport } from "@/modules/programacion/ia-dev/chat/hooks/useIADevChatTransport";
-import { createIADevTicket, type IADevAction } from "@/services/ia-dev.service";
+import {
+  createIADevTicket,
+  getIADevTaskStatus,
+  type IADevAction,
+  type IADevChatAttachment,
+} from "@/services/ia-dev.service";
 import ChatPanel from "@/modules/agente-ia/components/ChatPanel";
 import DashboardPanel from "@/modules/agente-ia/components/DashboardPanel";
 import SplitLayout from "@/modules/agente-ia/components/SplitLayout";
@@ -34,7 +39,7 @@ import {
 import HistoryPanel from "@/modules/agente-ia/components/HistoryPanel";
 
 const INITIAL_ASSISTANT_MESSAGE =
-  "Hola, soy Agente IA. Escribe tu consulta para comenzar.";
+  "Hola. Estoy listo para ayudarte con tu consulta.";
 const INITIAL_CHAT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 const MAX_CHAT_HISTORY = 30;
 
@@ -67,21 +72,38 @@ const toAttachmentSummary = (
   kind: attachment.kind,
 });
 
-const buildAttachmentTransportNote = (attachments: ComposerAttachment[]) => {
-  if (attachments.length === 0) return "";
+const fileToBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const [, base64 = ""] = result.split(",", 2);
+      if (!base64) {
+        reject(new Error("attachment_base64_missing"));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => {
+      reject(reader.error || new Error("attachment_read_failed"));
+    };
+    reader.readAsDataURL(file);
+  });
 
-  const attachmentList = attachments
-    .map((attachment) => `${attachment.name} (${attachment.kind})`)
-    .join(", ");
-
-  return [
-    "",
-    "",
-    "[Adjuntos seleccionados en la interfaz]",
-    attachmentList,
-    "Nota: el transporte actual no envio el contenido binario de estos archivos; solo se comparte su referencia nominal.",
-  ].join("\n");
-};
+const buildTransportAttachments = async (
+  attachments: ComposerAttachment[],
+): Promise<IADevChatAttachment[]> =>
+  Promise.all(
+    attachments.map(async (attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      mime_type: attachment.mimeType,
+      size: attachment.size,
+      kind: attachment.kind,
+      last_modified: attachment.lastModified,
+      content_base64: await fileToBase64(attachment.file),
+    })),
+  );
 
 const INITIAL_MESSAGES: ChatMessageModel[] = [
   {
@@ -98,6 +120,102 @@ const getVisibleActions = (actions: IADevAction[] | undefined) =>
 
 const isOperationalChatStatus = (status: string) =>
   status.trim().toLowerCase() === "respuesta generada correctamente.";
+
+const ACTIVE_BACKGROUND_STATUSES = new Set([
+  "queued",
+  "running",
+  "resumed",
+  "awaiting_approval",
+  "paused",
+]);
+
+const DEFAULT_BACKGROUND_POLL_MS = 1000;
+const BACKGROUND_POLL_ERROR_RETRY_MS = 5000;
+
+const extractBackgroundRunId = (message: ChatMessageModel) => {
+  const response = message.response;
+  const background =
+    response?.task?.current_run?.background ||
+    (response?.task?.current_run?.final_state?.background_run_id
+      ? { background_run_id: response.task.current_run.final_state.background_run_id }
+      : null);
+  const semantic = response?.task?.current_run?.semantic_explanation?.background_status;
+  return (
+    (typeof background?.background_run_id === "string"
+      ? background.background_run_id
+      : "") ||
+    (typeof semantic?.background_run_id === "string"
+      ? semantic.background_run_id
+      : "")
+  ).trim();
+};
+
+const extractBackgroundStatus = (message: ChatMessageModel) => {
+  const status =
+    message.response?.task?.current_run?.background?.run_status ||
+    message.response?.task?.current_run?.status ||
+    message.normalized?.semanticExplanation?.background_status?.status ||
+    "";
+  return String(status).trim().toLowerCase();
+};
+
+const extractBackgroundPollIntervalMs = (message: ChatMessageModel) => {
+  const background = message.response?.task?.current_run?.background;
+  const polling =
+    (background?.polling as Record<string, unknown> | undefined) ||
+    (message.response?.task?.current_run?.semantic_explanation?.background_status as
+      | Record<string, unknown>
+      | undefined);
+  const candidates = [
+    polling?.next_poll_after_ms,
+    polling?.poll_interval_ms,
+  ];
+  for (const candidate of candidates) {
+    const value =
+      typeof candidate === "number"
+        ? candidate
+        : typeof candidate === "string"
+          ? Number(candidate)
+          : NaN;
+    if (Number.isFinite(value) && value > 0) {
+      return Math.max(1000, Math.min(value, 15000));
+    }
+  }
+  return DEFAULT_BACKGROUND_POLL_MS;
+};
+
+const isPollableBackgroundMessage = (message: ChatMessageModel) =>
+  message.role === "assistant" &&
+  Boolean(extractBackgroundRunId(message)) &&
+  ACTIVE_BACKGROUND_STATUSES.has(extractBackgroundStatus(message));
+
+type PollableBackgroundTarget = {
+  backgroundRunId: string;
+  chatId: string;
+  messageId: string;
+  message: ChatMessageModel;
+};
+
+const collectPollableBackgroundTargets = (
+  chat: AgenteIAChatThread | null,
+): PollableBackgroundTarget[] => {
+  const targetsByRunId = new Map<string, PollableBackgroundTarget>();
+  if (!chat) return [];
+  [...chat.messages]
+    .reverse()
+    .forEach((message) => {
+      if (!isPollableBackgroundMessage(message)) return;
+      const backgroundRunId = extractBackgroundRunId(message);
+      if (!backgroundRunId || targetsByRunId.has(backgroundRunId)) return;
+      targetsByRunId.set(backgroundRunId, {
+        backgroundRunId,
+        chatId: chat.id,
+        messageId: message.id,
+        message,
+      });
+    });
+  return [...targetsByRunId.values()];
+};
 
 const getSuggestionQuery = (action: IADevAction) => {
   const payload = action.payload ?? {};
@@ -160,27 +278,6 @@ const buildChatPreview = (messages: ChatMessageModel[]) => {
     latestMessage.normalized?.summary || latestMessage.content || "";
   const compact = previewText.replace(/\s+/g, " ").trim();
   return compact.length > 86 ? `${compact.slice(0, 86)}...` : compact;
-};
-
-const buildSemanticHint = (messages: ChatMessageModel[]) => {
-  const latestAssistant = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant");
-  const understoodAs =
-    latestAssistant?.normalized?.semanticExplanation?.understood_as?.trim() || "";
-  if (understoodAs) return understoodAs;
-
-  const explanation = latestAssistant?.normalized?.semanticExplanation;
-  if (!explanation?.domain && !explanation?.intent) return "";
-
-  const domain = explanation.domain
-    ? explanation.domain.replace(/[_-]+/g, " ")
-    : "la consulta";
-  const intent = explanation.intent
-    ? explanation.intent.replace(/[_-]+/g, " ")
-    : "la solicitud";
-
-  return `Entendi que quieres revisar ${intent} en ${domain}.`;
 };
 
 const buildBusinessReportText = (snapshot: ReturnType<typeof buildDashboardSnapshot>) => {
@@ -289,9 +386,8 @@ const AgenteIAModule = () => {
     initialSplitViewState.dashboardCollapsed,
   );
   const [layoutSizes, setLayoutSizes] = useState(initialSplitViewState.sizes);
-  const [activeTabletTab, setActiveTabletTab] = useState<
-    "history" | "chat" | "dashboard"
-  >(initialSplitViewState.activeTabletTab);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [dashboardDrawerOpen, setDashboardDrawerOpen] = useState(false);
   const [selectedDashboardMessageByChat, setSelectedDashboardMessageByChat] =
     useState(initialSplitViewState.selectedDashboardMessageByChat);
 
@@ -361,7 +457,10 @@ const AgenteIAModule = () => {
     [messages, resolvedSelectedDashboardMessageId],
   );
   const liveDashboardSnapshot = latestDashboardEntry?.snapshot ?? null;
-  const semanticHint = useMemo(() => buildSemanticHint(messages), [messages]);
+  const pollableBackgroundTargets = useMemo(
+    () => collectPollableBackgroundTargets(activeChat),
+    [activeChat],
+  );
 
   const hasDashboardWorkspace = dashboardEntries.length > 0;
 
@@ -376,15 +475,11 @@ const AgenteIAModule = () => {
       return chatStatus;
     }
     if (messages.length <= 1) {
-      return "Nuevo chat listo.";
-    }
-    if (initialHistoryState.restoredFromHistory) {
-      return "Historial recuperado correctamente.";
+      return "Haz tu primera pregunta cuando quieras.";
     }
     return "Listo para continuar.";
   }, [
     chatStatus,
-    initialHistoryState.restoredFromHistory,
     messages.length,
     transportError,
   ]);
@@ -425,6 +520,154 @@ const AgenteIAModule = () => {
     [updateActiveChat],
   );
 
+  const backgroundPollersRef = useRef<
+    Map<
+      string,
+      {
+        cancel: () => void;
+      }
+    >
+  >(new Map());
+
+  useEffect(() => {
+    const activeRunIds = new Set(
+      pollableBackgroundTargets.map((target) => target.backgroundRunId),
+    );
+    backgroundPollersRef.current.forEach((poller, backgroundRunId) => {
+      if (activeRunIds.has(backgroundRunId)) return;
+      poller.cancel();
+      backgroundPollersRef.current.delete(backgroundRunId);
+    });
+
+    pollableBackgroundTargets.forEach((target) => {
+      if (backgroundPollersRef.current.has(target.backgroundRunId)) return;
+
+      let cancelled = false;
+      let inFlight = false;
+      let timeoutId: number | null = null;
+      let consecutiveErrors = 0;
+      let activeController: AbortController | null = null;
+
+      const cancel = () => {
+        cancelled = true;
+        activeController?.abort();
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+      };
+
+      const scheduleNext = (delayMs: number) => {
+        if (cancelled) return;
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+        timeoutId = window.setTimeout(() => {
+          void poll();
+        }, delayMs);
+      };
+
+      const poll = async () => {
+        if (cancelled || inFlight) return;
+        inFlight = true;
+        const controller = new AbortController();
+        activeController = controller;
+        try {
+          const result = await getIADevTaskStatus(
+            {
+              background_run_id: target.backgroundRunId,
+            },
+            {
+              signal: controller.signal,
+            },
+          );
+          if (cancelled) return;
+          consecutiveErrors = 0;
+          const normalizedPayload = normalizeChatPayload(result);
+          const assistantReply = result.reply || result.task?.current_run.reply || "";
+          const nextStatus = String(result.task?.current_run?.status || "")
+            .trim()
+            .toLowerCase();
+          const nextDelay = extractBackgroundPollIntervalMs({
+            ...target.message,
+            response: result,
+          });
+          setChats((prev) =>
+            sortChatsByRecent(
+              prev.map((chat) =>
+                chat.id !== target.chatId
+                  ? chat
+                  : {
+                      ...chat,
+                      chatStatus:
+                        activeChatId === chat.id && consecutiveErrors > 0 ? "" : chat.chatStatus,
+                      messages: chat.messages.map((message) =>
+                        message.id === target.messageId
+                          ? {
+                              ...message,
+                              content: assistantReply || message.content,
+                              status: ACTIVE_BACKGROUND_STATUSES.has(nextStatus)
+                                ? ("streaming" as const)
+                                : ("final" as const),
+                              response: result,
+                              normalized: normalizedPayload,
+                              error:
+                                ACTIVE_BACKGROUND_STATUSES.has(nextStatus)
+                                  ? undefined
+                                  : message.error,
+                            }
+                          : message,
+                      ),
+                      updatedAt: new Date().toISOString(),
+                    },
+              ),
+            ).slice(0, MAX_CHAT_HISTORY),
+          );
+          if (ACTIVE_BACKGROUND_STATUSES.has(nextStatus)) {
+            scheduleNext(nextDelay);
+            return;
+          }
+          backgroundPollersRef.current.get(target.backgroundRunId)?.cancel();
+          backgroundPollersRef.current.delete(target.backgroundRunId);
+        } catch {
+          if (!cancelled) {
+            consecutiveErrors += 1;
+            if (activeChatId === target.chatId) {
+              setChats((prev) =>
+                prev.map((chat) =>
+                  chat.id !== target.chatId
+                    ? chat
+                    : {
+                        ...chat,
+                        chatStatus:
+                          consecutiveErrors >= 3
+                            ? "Seguimos intentando reconectar con el job en background para mostrar el avance."
+                            : "Reconectando con el job en background...",
+                      },
+                ),
+              );
+            }
+            scheduleNext(BACKGROUND_POLL_ERROR_RETRY_MS);
+          }
+        } finally {
+          activeController = null;
+          inFlight = false;
+        }
+      };
+
+      backgroundPollersRef.current.set(target.backgroundRunId, { cancel });
+      void poll();
+    });
+
+  }, [activeChatId, pollableBackgroundTargets]);
+
+  useEffect(
+    () => () => {
+      backgroundPollersRef.current.forEach((poller) => poller.cancel());
+      backgroundPollersRef.current.clear();
+    },
+    [],
+  );
+
   useEffect(() => {
     const persistableChats = chats.filter((chat) => chatHasUserMessages(chat));
 
@@ -450,14 +693,12 @@ const AgenteIAModule = () => {
 
     saveSplitViewState({
       sizes: layoutSizes,
-      activeTabletTab,
       historyCollapsed,
       chatCollapsed,
       dashboardCollapsed,
       selectedDashboardMessageByChat,
     });
   }, [
-    activeTabletTab,
     chatCollapsed,
     dashboardCollapsed,
     historyCollapsed,
@@ -614,7 +855,8 @@ const AgenteIAModule = () => {
     if (!shouldUseWorkspaceLayout) return;
     setDashboardCollapsed(false);
     setChatCollapsed(false);
-    setActiveTabletTab("dashboard");
+    setDashboardDrawerOpen(true);
+    setHistoryDrawerOpen(false);
   }, [shouldUseWorkspaceLayout]);
 
   const selectDashboardMessage = useCallback(
@@ -648,7 +890,8 @@ const AgenteIAModule = () => {
     const base = dashboardSnapshot.executiveSummary || dashboardSnapshot.summary;
     const prompt = `Quiero profundizar sobre esto: ${base}`;
     setChatInputTracked(prompt);
-    setActiveTabletTab("chat");
+    setHistoryDrawerOpen(false);
+    setDashboardDrawerOpen(false);
   };
 
   const copyAssistantMessageById = (messageId: string) => {
@@ -666,6 +909,7 @@ const AgenteIAModule = () => {
 
     setActiveChatId(chatId);
     setHistoryCollapsed(false);
+    setHistoryDrawerOpen(false);
     resetComposerForChatChange();
   };
 
@@ -686,6 +930,7 @@ const AgenteIAModule = () => {
     );
     setActiveChatId(nextChat.id);
     setHistoryCollapsed(false);
+    setHistoryDrawerOpen(false);
     resetComposerForChatChange();
   };
 
@@ -796,6 +1041,8 @@ const AgenteIAModule = () => {
     const value = (overridePrompt ?? chatInput).trim();
     if (!value || isSubmitting || !activeChat) return;
 
+    setIsSubmitting(true);
+
     const userMessageId = createMessageId("user");
     const assistantMessageId = createMessageId("assistant");
     const submittedAt = new Date().toISOString();
@@ -805,9 +1052,19 @@ const AgenteIAModule = () => {
     const userMessageAttachments = attachmentsForSubmission.map((attachment) =>
       toAttachmentSummary(attachment),
     );
-    const transportMessage = `${value}${buildAttachmentTransportNote(
-      attachmentsForSubmission,
-    )}`;
+    let transportAttachments: IADevChatAttachment[] = [];
+
+    try {
+      transportAttachments = await buildTransportAttachments(
+        attachmentsForSubmission,
+      );
+    } catch {
+      setIsSubmitting(false);
+      setActiveChatStatus(
+        "No fue posible preparar los adjuntos para enviarlos.",
+      );
+      return;
+    }
 
     updateActiveChat((chat) => {
       const nextMessages = [
@@ -845,13 +1102,12 @@ const AgenteIAModule = () => {
     setStreamingMessageId(assistantMessageId);
     setHistoryCollapsed(false);
     notifyContentChanged("user-submit", { behavior: "smooth", force: true });
-    setActiveTabletTab("chat");
 
     try {
-      setIsSubmitting(true);
       const result = await sendMessage({
-        message: transportMessage,
+        message: value,
         sessionId: sessionId ?? undefined,
+        attachments: transportAttachments,
         callbacks: {
           onStart: () => {
             notifyContentChanged("stream-start", { behavior: "smooth" });
@@ -899,6 +1155,13 @@ const AgenteIAModule = () => {
       const normalizedPayload = normalizeChatPayload(result);
       const visibleActions = getVisibleActions(result.actions);
       const assistantReply = result.reply || result.task?.current_run.reply || "";
+      const nextStatus = String(
+        result.task?.current_run?.background?.run_status ||
+          result.task?.current_run?.status ||
+          "",
+      )
+        .trim()
+        .toLowerCase();
 
       updateActiveChat((chat) => {
         const nextMessages = chat.messages.map((message) =>
@@ -906,7 +1169,9 @@ const AgenteIAModule = () => {
             ? {
                 ...message,
                 content: assistantReply || message.content,
-                status: "final" as const,
+                status: ACTIVE_BACKGROUND_STATUSES.has(nextStatus)
+                  ? ("streaming" as const)
+                  : ("final" as const),
                 response: result,
                 normalized: normalizedPayload,
                 actions: visibleActions,
@@ -968,7 +1233,7 @@ const AgenteIAModule = () => {
         ...chat,
         chatStatus: "La visualizacion ya se muestra en el panel derecho.",
       }));
-      setActiveTabletTab("dashboard");
+      setDashboardDrawerOpen(true);
       return;
     }
     if (!isKnownNonQueryAction(action)) {
@@ -1036,21 +1301,37 @@ const AgenteIAModule = () => {
             <SplitLayout
               hasDashboard={shouldUseWorkspaceLayout}
               sizes={layoutSizes}
-              activeTabletTab={activeTabletTab}
               historyCollapsed={historyCollapsed}
               chatCollapsed={chatCollapsed}
               dashboardCollapsed={dashboardCollapsed}
+              historyDrawerOpen={historyDrawerOpen}
+              dashboardDrawerOpen={dashboardDrawerOpen}
               onSizesChange={setLayoutSizes}
-              onTabletTabChange={setActiveTabletTab}
               onToggleHistory={() => setHistoryCollapsed((prev) => !prev)}
               onToggleChat={() => setChatCollapsed((prev) => !prev)}
               onToggleDashboard={() => setDashboardCollapsed((prev) => !prev)}
+              onOpenHistoryDrawer={() => {
+                setHistoryDrawerOpen(true);
+                setDashboardDrawerOpen(false);
+              }}
+              onCloseHistoryDrawer={() => setHistoryDrawerOpen(false)}
+              onOpenDashboardDrawer={() => {
+                if (!shouldUseWorkspaceLayout) return;
+                setDashboardDrawerOpen(true);
+                setHistoryDrawerOpen(false);
+              }}
+              onCloseDashboardDrawer={() => setDashboardDrawerOpen(false)}
+              historyToggleLabel="Historial"
+              dashboardToggleLabel="Resultados"
+              historyDrawerTitle="Historial"
+              historyDrawerDescription="Conversaciones recientes"
+              dashboardDrawerTitle="Resultados"
+              dashboardDrawerDescription="Resumen, tablas y hallazgos relacionados"
               history={
                 <HistoryPanel
                   threads={chats.filter((chat) => chatHasUserMessages(chat))}
                   activeChatId={resolvedActiveChatId}
                   isSubmitting={isSubmitting}
-                  snapshot={dashboardSnapshot}
                   onOpenChat={openChat}
                   onStartNewChat={startNewChat}
                   onRenameChat={renameChat}
@@ -1061,15 +1342,13 @@ const AgenteIAModule = () => {
               }
               chat={
                 <ChatPanel
+                  mode="user"
                   chatTitle={activeChat?.title || "Nuevo chat"}
                   chatStatus={effectiveChatStatus}
                   streaming={Boolean(streamingMessageId)}
                   isWorkspaceLayout={shouldUseWorkspaceLayout}
                   activeDashboardMessageId={resolvedSelectedDashboardMessageId}
-                  taskStatusLabel={dashboardSnapshot.taskStatusLabel}
-                  taskStatusTone={dashboardSnapshot.taskStatusTone}
                   taskPreparationLabel={dashboardSnapshot.taskPreparationLabel}
-                  semanticHint={semanticHint}
                   clarificationQuestion={dashboardSnapshot.clarificationQuestion}
                   visibleMessages={visibleMessages}
                   messages={messages}
@@ -1110,13 +1389,13 @@ const AgenteIAModule = () => {
                   onScrollToBottomClick={onScrollToBottomClick}
                   onLoadDemo={appendMockDemo}
                   onShowDashboard={selectDashboardMessage}
-                  onOpenDashboardPanel={jumpToDashboard}
                   onCopyMessage={copyAssistantMessageById}
                   onPrepareRelatedQuery={prepareRelatedQuery}
                 />
               }
               dashboard={
                 <DashboardPanel
+                  mode="user"
                   snapshot={dashboardSnapshot}
                   liveSnapshot={liveDashboardSnapshot}
                   historyEntries={dashboardEntries.map((entry) => ({

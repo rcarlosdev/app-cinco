@@ -19,13 +19,16 @@ export default function AdminLayout({ children }: RootLayoutProps) {
     pathname?.startsWith("/programacion/ia-dev") ||
     pathname?.startsWith("/agente-ia") ||
     false;
+  const desktopSidebarWidth = isExpanded ? "290px" : "90px";
 
   // Dynamic class for main content margin based on sidebar state
-  const mainContentMargin = isMobileOpen
+  const mainContentMargin = isWideWorkspaceView
     ? "ml-0"
-    : isExpanded
-      ? "lg:ml-[290px]"
-      : "lg:ml-[90px]";
+    : isMobileOpen
+      ? "ml-0"
+      : isExpanded
+        ? "lg:ml-[290px]"
+        : "lg:ml-[90px]";
 
   return (
     <RequireAuth>
@@ -35,7 +38,18 @@ export default function AdminLayout({ children }: RootLayoutProps) {
         <Backdrop />
         {/* Main Content Area */}
         <div
-          className={`min-w-0 flex-1 overflow-x-hidden transition-all duration-300 ease-in-out ${mainContentMargin}`}
+          style={
+            isWideWorkspaceView
+              ? ({
+                  "--workspace-sidebar-width": desktopSidebarWidth,
+                } as React.CSSProperties)
+              : undefined
+          }
+          className={`min-w-0 flex-1 overflow-x-hidden transition-all duration-300 ease-in-out ${
+            isWideWorkspaceView
+              ? "lg:ml-[var(--workspace-sidebar-width)] lg:w-[calc(100%-var(--workspace-sidebar-width))]"
+              : mainContentMargin
+          }`}
         >
           {/* Header */}
           <AppHeader />

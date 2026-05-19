@@ -4,16 +4,12 @@ import { useMemo, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
 import ChatHistoryPanel from "@/modules/agente-ia/components/ChatHistoryPanel";
-import FeaturePanel from "@/modules/agente-ia/components/FeaturePanel";
-import ToolsPanel from "@/modules/agente-ia/components/ToolsPanel";
 import type { AgenteIAChatThread } from "@/modules/agente-ia/persistence/chatSessionStorage";
-import type { DashboardSnapshot } from "@/modules/agente-ia/types";
 
 type HistoryPanelProps = {
   threads: AgenteIAChatThread[];
   activeChatId: string | null;
   isSubmitting: boolean;
-  snapshot: DashboardSnapshot;
   onOpenChat: (chatId: string) => void;
   onStartNewChat: () => void;
   onRenameChat: (chatId: string) => void;
@@ -22,17 +18,10 @@ type HistoryPanelProps = {
   buildChatPreview: (messages: ChatMessageModel[]) => string;
 };
 
-const tabs = [
-  { id: "history", label: "Historial" },
-  { id: "tools", label: "Herramientas" },
-  { id: "features", label: "Caracteristicas" },
-] as const;
-
 const HistoryPanel = ({
   threads,
   activeChatId,
   isSubmitting,
-  snapshot,
   onOpenChat,
   onStartNewChat,
   onRenameChat,
@@ -40,8 +29,6 @@ const HistoryPanel = ({
   formatChatTimestamp,
   buildChatPreview,
 }: HistoryPanelProps) => {
-  const [activeTab, setActiveTab] =
-    useState<(typeof tabs)[number]["id"]>("history");
   const [search, setSearch] = useState("");
 
   const filteredThreads = useMemo(() => {
@@ -61,10 +48,10 @@ const HistoryPanel = ({
         <div className="flex items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-gray-950 dark:text-white">
-              Soporte operativo
+              Conversaciones
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Historial, capacidades y guia de uso.
+              Retoma conversaciones recientes o empieza una nueva.
             </p>
           </div>
 
@@ -78,44 +65,21 @@ const HistoryPanel = ({
             Nuevo
           </button>
         </div>
-
-        <div className="mt-4 inline-flex rounded-full border border-gray-300 p-1 dark:border-gray-700">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                activeTab === tab.id
-                  ? "bg-[#111827] text-white"
-                  : "text-gray-600 dark:text-gray-300"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
-        {activeTab === "history" ? (
-          <ChatHistoryPanel
-            search={search}
-            threads={filteredThreads}
-            activeChatId={activeChatId}
-            isSubmitting={isSubmitting}
-            onSearchChange={setSearch}
-            onOpenChat={onOpenChat}
-            onRenameChat={onRenameChat}
-            onDeleteChat={onDeleteChat}
-            formatChatTimestamp={formatChatTimestamp}
-            buildChatPreview={buildChatPreview}
-          />
-        ) : activeTab === "tools" ? (
-          <ToolsPanel snapshot={snapshot} />
-        ) : (
-          <FeaturePanel />
-        )}
+        <ChatHistoryPanel
+          search={search}
+          threads={filteredThreads}
+          activeChatId={activeChatId}
+          isSubmitting={isSubmitting}
+          onSearchChange={setSearch}
+          onOpenChat={onOpenChat}
+          onRenameChat={onRenameChat}
+          onDeleteChat={onDeleteChat}
+          formatChatTimestamp={formatChatTimestamp}
+          buildChatPreview={buildChatPreview}
+        />
       </div>
     </aside>
   );

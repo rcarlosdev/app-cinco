@@ -53,7 +53,22 @@ class MatcherSemanticoGobernadoInventario:
         "serializados": ("serial", "seriales", "serializado", "serializados", "equipo", "equipos", "cpe"),
         "tecnico": ("tecnico", "técnico", "empleado", "cedula", "cédula"),
         "limitacion_documental": ("sap", "acta", "actas"),
+        "proveedor": ("proveedor", "contratante"),
+        "archivo": ("archivo", "excel", "adjunto", "xlsx", "csv"),
     }
+
+    @staticmethod
+    def _has_runtime_attachment(contexto_semantico: dict[str, Any] | None) -> bool:
+        context = dict(contexto_semantico or {})
+        attachment_summary = dict(context.get("runtime_attachment_summary") or {})
+        if bool(attachment_summary.get("present")):
+            return True
+        if int(attachment_summary.get("count") or 0) > 0:
+            return True
+        attachments = [
+            item for item in list(context.get("attachments") or []) if isinstance(item, dict)
+        ]
+        return bool(attachments)
 
     def resolver(
         self,
@@ -77,6 +92,10 @@ class MatcherSemanticoGobernadoInventario:
 
         senal_kardex = self._contiene(texto, sinonimos["kardex"])
         senal_limitacion_documental = self._contiene(texto, sinonimos["limitacion_documental"])
+        senal_proveedor = self._contiene(texto, sinonimos["proveedor"])
+        senal_archivo = self._contiene(texto, sinonimos["archivo"]) or self._has_runtime_attachment(
+            contexto_semantico
+        )
 
         cedula = self._extraer_cedula(texto_original, texto)
         movil = self._extraer_movil(texto_original, texto)
@@ -99,6 +118,21 @@ class MatcherSemanticoGobernadoInventario:
             nombre_probable = True
         es_kardex = senal_kardex
         es_serializado = self._contiene(texto, sinonimos["serializados"]) or bool(familia_serializada)
+        es_validacion_seriales_proveedor = bool(
+            es_serializado
+            and senal_proveedor
+            and senal_archivo
+            and (
+                "valida" in texto
+                or "validacion" in texto
+                or "validar" in texto
+                or "revisa" in texto
+                or "revisar" in texto
+                or "cruza" in texto
+                or "cruzar" in texto
+                or "contra nuestras bases" in texto
+            )
+        )
         senal_stock = (
             self._contiene(texto, sinonimos["inventario"])
             or bool(re.search(r"\bmaterial(?:es)?\b", texto))
@@ -106,6 +140,32 @@ class MatcherSemanticoGobernadoInventario:
             or self._contiene(texto, sinonimos["material_claro"])
             or es_serializado
         )
+        if es_validacion_seriales_proveedor:
+            reglas_aplicadas.append("validacion_seriales_proveedor_desde_dd_reglas")
+            return {
+                "coincidencia_gobernada": True,
+                "dominio_candidato": "inventario_logistica",
+                "intencion": "provider_serial_validation",
+                "capacidad_candidata": "inventory_provider_serial_validation",
+                "template_id": "inventory_provider_serial_validation",
+                "operation": "validate_file",
+                "filtros": {"source_kind": "provider_file", "serial_scope": "external_inventory_validation"},
+                "entidades": {"archivo": "seriales_proveedor"},
+                "group_by": [],
+                "familias": ["serializados"],
+                "incluye_serializados": True,
+                "reglas_aplicadas": [item for item in dict.fromkeys(reglas_aplicadas) if item],
+                "limitaciones": [],
+                "requiere_aclaracion": False,
+                "pregunta_aclaracion": "",
+                "regla_metadata_usada": list(
+                    dict.fromkeys([*reglas_metadata_usadas, "inventario.route.provider_serial_validation"])
+                ),
+                "fuente_dd": list(FUENTES_DD_GOBERNADAS),
+                "fallback_sombreado_usado": fallback_sombreado_usado,
+                "regla_legacy_detectada": False,
+                "regla_migrada": True,
+            }
         tiene_senal_inventario = senal_stock or senal_kardex or senal_limitacion_documental
         if not tiene_senal_inventario:
             return self._resultado_vacio()

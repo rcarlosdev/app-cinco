@@ -73,6 +73,10 @@ class BusinessResponseComposerService:
         data["business_response_composer"] = composed
         payload["data"] = data
 
+        if self._is_provider_serial_background_active(payload=payload):
+            payload["reply"] = reply
+            return payload
+
         if business_response:
             payload["reply"] = self._sanitize(
                 " ".join(
@@ -103,6 +107,26 @@ class BusinessResponseComposerService:
         else:
             payload["reply"] = reply
         return payload
+
+    @staticmethod
+    def _is_provider_serial_background_active(*, payload: dict[str, Any]) -> bool:
+        task_run = dict(((payload.get("task") or {}).get("current_run") or {}))
+        semantic = dict(task_run.get("semantic_explanation") or {})
+        background = dict(task_run.get("background") or {})
+        capability = str(
+            semantic.get("selected_capability")
+            or semantic.get("candidate_capability")
+            or task_run.get("intent")
+            or dict(payload.get("orchestrator") or {}).get("intent")
+            or ""
+        ).strip()
+        route_hint = str(semantic.get("planner_route_hint") or "").strip()
+        background_status = str(background.get("run_status") or task_run.get("status") or "").strip().lower()
+        return (
+            capability == "inventory_provider_serial_validation"
+            and route_hint == "inventory.serial.validation.provider_file"
+            and background_status in {"queued", "running", "resumed"}
+        )
 
     def _build_understanding(
         self,

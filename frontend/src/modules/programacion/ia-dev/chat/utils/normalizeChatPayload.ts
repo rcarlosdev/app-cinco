@@ -2,6 +2,7 @@ import type {
   IADevAction,
   IADevChartPayload,
   IADevChatResponse,
+  IADevDashboardComposition,
   IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 import type {
@@ -49,6 +50,30 @@ const isValidChart = (chart: unknown): chart is IADevChartPayload => {
     (Array.isArray(candidate.data) && candidate.data.length > 0) ||
     (Array.isArray(candidate.points) && candidate.points.length > 0) ||
     (Array.isArray(candidate.labels) && candidate.labels.length > 0),
+  );
+};
+
+const isValidDashboardComposition = (
+  composition: unknown,
+): composition is IADevDashboardComposition => {
+  const candidate = asObject(composition);
+  if (!candidate) return false;
+
+  const evidenceContract = asObject(candidate.evidence_contract);
+  if (!evidenceContract) return false;
+
+  const plannerId = asString(evidenceContract.planner_id);
+  const supportedPattern = asString(
+    evidenceContract.semantic_pattern || evidenceContract.supported_pattern,
+  );
+
+  return (
+    plannerId.length > 0 &&
+    evidenceContract.validated === true &&
+    [
+      "inventory.serial.stock.dimension",
+      "inventory.serial.validation.provider_file",
+    ].includes(supportedPattern)
   );
 };
 
@@ -165,6 +190,7 @@ const normalizeTable = (value: unknown): NormalizedTable | null => {
   const totalRecords =
     asNumber(source.total_records) ?? asNumber(source.rowcount) ?? rows.length;
   const returnedRecords = asNumber(source.returned_records) ?? rows.length;
+  const exportArtifactSource = asObject(source.export_artifact);
 
   return {
     columns: inferredColumns,
@@ -180,6 +206,18 @@ const normalizeTable = (value: unknown): NormalizedTable | null => {
     exportLimit: asNumber(source.export_limit) ?? 0,
     truncated: Boolean(source.truncated) || totalRecords > returnedRecords,
     limit: asNumber(source.limit) ?? 0,
+    exportArtifact: exportArtifactSource
+      ? {
+          available: Boolean(exportArtifactSource.available),
+          format: asString(exportArtifactSource.format) || "csv",
+          artifactId: asString(exportArtifactSource.artifact_id),
+          filename: asString(exportArtifactSource.filename),
+          recordCount: asNumber(exportArtifactSource.record_count) ?? 0,
+          endpointHint: asString(exportArtifactSource.endpoint_hint),
+          expiresInSeconds:
+            asNumber(exportArtifactSource.expires_in_seconds) ?? 0,
+        }
+      : null,
   };
 };
 
@@ -314,14 +352,53 @@ const findDominantHighlight = (
 export const normalizeChatPayload = (
   response: Partial<IADevChatResponse> | null | undefined,
 ): NormalizedAssistantPayload => {
-  const fallbackSummary = asString(response?.reply);
+  const taskRun = asObject(response?.task?.current_run);
   const data = asObject(response?.data) || {};
   const envelope = asObject(response?.response_envelope) || {};
   const runtime = asObject(asObject(response?.data_sources)?.runtime) || {};
   const semanticExplanation =
-    (asObject(response?.task?.current_run?.semantic_explanation) as
+    (asObject(taskRun?.semantic_explanation) as
       | IADevSemanticExplanation
       | null) || null;
+  const background = asObject(taskRun?.background);
+  const backgroundProgress =
+    asObject(asObject(taskRun?.evidence)?.background_progress) ||
+    asObject(semanticExplanation?.background_status) ||
+    (asObject(asObject(data)?.meta)?.background_job as Record<string, unknown> | null) ||
+    null;
+  const selectedCapability = asString(
+    semanticExplanation?.selected_capability ||
+      taskRun?.intent ||
+      response?.orchestrator?.intent,
+  );
+  const plannerRouteHint = asString(semanticExplanation?.planner_route_hint);
+  const backgroundStatus = asString(
+    background?.run_status || taskRun?.status,
+  ).toLowerCase();
+  const isProviderSerialBackground =
+    selectedCapability === "inventory_provider_serial_validation" &&
+    plannerRouteHint === "inventory.serial.validation.provider_file" &&
+    ["queued", "running", "resumed"].includes(backgroundStatus);
+  const attachmentName = asString(backgroundProgress?.attachment_name);
+  const fallbackSummary = (() => {
+    const reply = asString(response?.reply);
+    if (
+      isProviderSerialBackground &&
+      (!reply || reply.toLowerCase().includes("riesgo operativo concluyente"))
+    ) {
+      const filename = attachmentName || "el archivo de seriales del proveedor";
+      if (backgroundStatus === "queued") {
+        return `Recibi ${filename} y la validacion fue enviada a ejecucion en segundo plano por el tamano del archivo. Ire actualizando el avance aqui y mostrare el dashboard final cuando termine.`;
+      }
+      return `Estoy validando ${filename} en segundo plano por el tamano del archivo. Ire actualizando el avance aqui y mostrare el dashboard final cuando termine.`;
+    }
+    return reply;
+  })();
+  const businessResponse = asObject(data.business_response);
+  const dashboardComposition =
+    isValidDashboardComposition(businessResponse?.dashboard_composition)
+      ? businessResponse.dashboard_composition
+      : null;
 
   const kpis = normalizeKpis(
     data.kpis ?? (response as Record<string, unknown> | undefined)?.kpis,
@@ -339,6 +416,12 @@ export const normalizeChatPayload = (
   const table = normalizeTable(
     data.table ?? (response as Record<string, unknown> | undefined)?.table,
   );
+  const shouldSuppressPartialProgressTable =
+    backgroundStatus !== "completed" &&
+    table?.columns.length === 2 &&
+    table.columns[0] === "campo" &&
+    table.columns[1] === "valor" &&
+    table.rows.length > 0;
   const extraTables = asArray(
     data.extra_tables ??
       (response as Record<string, unknown> | undefined)?.extra_tables,
@@ -394,12 +477,13 @@ export const normalizeChatPayload = (
   const hasStructuredContent = Boolean(
     kpis.length ||
     insights.length ||
-    table?.rows.length ||
+    (!shouldSuppressPartialProgressTable && table?.rows.length) ||
     extraTables.length ||
     chart ||
     charts.length ||
     (labels.length && series.length) ||
-    semanticExplanation,
+    semanticExplanation ||
+    dashboardComposition,
   );
 
   const kind: NormalizedAssistantPayload["kind"] =
@@ -416,7 +500,7 @@ export const normalizeChatPayload = (
     insights,
     chart,
     charts,
-    table,
+    table: shouldSuppressPartialProgressTable ? null : table,
     extraTables,
     labels,
     series,
@@ -446,5 +530,6 @@ export const normalizeChatPayload = (
       asString(runtime.progress_source) ||
       "backend",
     semanticExplanation,
+    dashboardComposition,
   };
 };
