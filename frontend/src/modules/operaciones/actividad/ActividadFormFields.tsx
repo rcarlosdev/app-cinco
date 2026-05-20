@@ -1,10 +1,14 @@
-import { Controller } from "react-hook-form";
+import { Controller, FieldPath } from "react-hook-form";
 import Label from "@/components/form/Label";
 import Input from "@/components/form/input/InputField";
 import DatePicker from "@/components/form/date-picker";
 import TextArea from "@/components/form/input/TextArea";
 import Select from "@/components/form/Select";
 import EmployeeSearchInput from "@/components/form/EmployeeSearchInput";
+import {
+  ActividadFormData,
+  isActividadFieldRequired,
+} from "@/schemas/actividades.schema";
 import { ActividadFormFieldsProps } from "./ActividadForm.types";
 import {
   getDateFromPicker,
@@ -21,6 +25,26 @@ const ESTADO_OPTIONS = [
   { value: "reprogramada", label: "Reprogramada" },
 ];
 
+const RequiredMark = () => <strong className="text-red-400">*</strong>;
+
+interface FieldLabelProps {
+  htmlFor: string;
+  field: FieldPath<ActividadFormData>;
+  children: React.ReactNode;
+}
+
+const FieldLabel = ({ htmlFor, field, children }: FieldLabelProps) => (
+  <Label htmlFor={htmlFor}>
+    {children}
+    {isActividadFieldRequired(field) && (
+      <>
+        {" "}
+        <RequiredMark />
+      </>
+    )}
+  </Label>
+);
+
 export const ActividadFormFields = ({
   control,
   errors,
@@ -31,9 +55,9 @@ export const ActividadFormFields = ({
   return (
     <div className="grid max-h-96 grid-cols-1 gap-5 overflow-auto pr-2 sm:grid-cols-2">
       <div className="col-span-2">
-        <Label htmlFor="ots">
-          OTs Relacionadas <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="ots" field="ots">
+          OTs Relacionadas
+        </FieldLabel>
         <Controller
           name="ots"
           control={control}
@@ -74,7 +98,7 @@ export const ActividadFormFields = ({
                 onEmployeeChange(empleado);
                 field.onChange(empleado?.id ?? 0);
               }}
-              required
+              required={isActividadFieldRequired("responsable_id")}
               error={!!errors.responsable_id}
               hint={
                 errors.responsable_id
@@ -112,9 +136,9 @@ export const ActividadFormFields = ({
       </div>
       
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="fecha_inicio_actividad">
-          Fecha de Inicio <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="fecha_inicio_actividad" field="fecha_inicio">
+          Fecha de Inicio
+        </FieldLabel>
         <Controller
           name="fecha_inicio"
           control={control}
@@ -138,9 +162,9 @@ export const ActividadFormFields = ({
 
       {mode === "edit" && (
         <div className="col-span-2 md:col-span-1">
-          <Label htmlFor="estado_actividad">
-            Estado <strong className="text-red-400">*</strong>
-          </Label>
+          <FieldLabel htmlFor="estado_actividad" field="estado">
+            Estado
+          </FieldLabel>
           <Controller
             name="estado"
             control={control}
@@ -159,9 +183,12 @@ export const ActividadFormFields = ({
       )}
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="fecha_fin_estimado">
-          Fecha de Fin Estimada <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel
+          htmlFor="fecha_fin_estimado"
+          field="fecha_fin_estimado"
+        >
+          Fecha de Fin Estimada
+        </FieldLabel>
         <Controller
           name="fecha_fin_estimado"
           control={control}
@@ -186,7 +213,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="fecha_fin_real">Fecha de Fin Real</Label>
+        <FieldLabel htmlFor="fecha_fin_real" field="fecha_fin_real">
+          Fecha de Fin Real
+        </FieldLabel>
         <Controller
           name="fecha_fin_real"
           control={control}
@@ -211,9 +240,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="tipo_actividad">
-          Tipo de Actividad <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="tipo_actividad" field="detalle.tipo_trabajo">
+          Tipo de Actividad
+        </FieldLabel>
         <Controller
           name="detalle.tipo_trabajo"
           control={control}
@@ -236,9 +265,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2">
-        <Label htmlFor="descripcion">
-          Descripción <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="descripcion" field="detalle.descripcion">
+          Descripción
+        </FieldLabel>
         <Controller
           name="detalle.descripcion"
           control={control}
@@ -261,9 +290,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2">
-        <Label htmlFor="ubicacion">
-          Dirección <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="ubicacion" field="ubicacion.direccion">
+          Dirección
+        </FieldLabel>
         <Controller
           name="ubicacion.direccion"
           control={control}
@@ -286,9 +315,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="coordenada_x">
-          Latitud / Coordenada X <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="coordenada_x" field="ubicacion.coordenada_x">
+          Latitud / Coordenada X
+        </FieldLabel>
         <Controller
           name="ubicacion.coordenada_x"
           control={control}
@@ -311,9 +340,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="coordenada_y">
-          Longitud / Coordenada Y <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="coordenada_y" field="ubicacion.coordenada_y">
+          Longitud / Coordenada Y
+        </FieldLabel>
         <Controller
           name="ubicacion.coordenada_y"
           control={control}
@@ -336,9 +365,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="zona">
-          Zona <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="zona" field="ubicacion.zona">
+          Zona
+        </FieldLabel>
         <Controller
           name="ubicacion.zona"
           control={control}
@@ -361,9 +390,9 @@ export const ActividadFormFields = ({
       </div>
 
       <div className="col-span-2 md:col-span-1">
-        <Label htmlFor="nodo">
-          Nodo <strong className="text-red-400">*</strong>
-        </Label>
+        <FieldLabel htmlFor="nodo" field="ubicacion.nodo">
+          Nodo
+        </FieldLabel>
         <Controller
           name="ubicacion.nodo"
           control={control}
