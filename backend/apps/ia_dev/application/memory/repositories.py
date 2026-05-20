@@ -177,6 +177,12 @@ class MemoryRepository:
     def get_workflow_state(self, workflow_key: str, *, for_update: bool = False) -> dict | None:
         return self.store.get_workflow_state(workflow_key, for_update=for_update)
 
+    def find_workflow_state_by_background_run_id(self, background_run_id: str) -> dict | None:
+        return self.store.find_workflow_state_by_background_run_id(background_run_id)
+
+    def find_workflow_state_by_resume_token(self, resume_token: str) -> dict | None:
+        return self.store.find_workflow_state_by_resume_token(resume_token)
+
     def list_workflow_states(
         self,
         *,

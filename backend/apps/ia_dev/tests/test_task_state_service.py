@@ -44,6 +44,31 @@ class _FakeWorkflowRepo:
             rows = [row for row in rows if str(row.get("status") or "") == str(status)]
         return rows[:limit]
 
+    def find_workflow_state_by_background_run_id(self, background_run_id: str):
+        target = str(background_run_id or "").strip()
+        if not target:
+            return None
+        for row in self._rows.values():
+            state = dict(row.get("state") or {})
+            background = dict(state.get("background") or {})
+            if str(background.get("background_run_id") or "") == target:
+                return row
+        return None
+
+    def find_workflow_state_by_resume_token(self, resume_token: str):
+        target = str(resume_token or "").strip()
+        if not target:
+            return None
+        for row in self._rows.values():
+            state = dict(row.get("state") or {})
+            background = dict(state.get("background") or {})
+            if str(background.get("resume_token") or "") == target:
+                return row
+            for approval in list(state.get("approvals") or []):
+                if isinstance(approval, dict) and str(approval.get("resume_token") or "") == target:
+                    return row
+        return None
+
 
 class TaskStateServiceTests(SimpleTestCase):
     def setUp(self):
@@ -268,3 +293,23 @@ class TaskStateServiceTests(SimpleTestCase):
         found_approval = self.service.find_by_resume_token("resume-apr")
         self.assertEqual(str((found_background or {}).get("workflow_key") or ""), "task_runtime:run-find-token")
         self.assertEqual(str((found_approval or {}).get("workflow_key") or ""), "task_runtime:run-find-token")
+
+    def test_find_by_background_run_id_uses_repo_direct_lookup(self):
+        self.service.save(
+            run_id="run-find-background",
+            status="running",
+            original_question="valida seriales",
+            detected_domain="inventario_logistica",
+            plan={},
+            source_used={},
+            extra_state={
+                "background": {
+                    "background_run_id": "bg-direct-lookup",
+                    "run_status": "running",
+                }
+            },
+        )
+
+        found = self.service.find_by_background_run_id("bg-direct-lookup")
+
+        self.assertEqual(str((found or {}).get("workflow_key") or ""), "task_runtime:run-find-background")

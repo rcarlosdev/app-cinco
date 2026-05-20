@@ -39,8 +39,14 @@ const formatCount = (value?: number) =>
   Number.isFinite(value) ? Number(value).toLocaleString("es-CO") : "-";
 
 const buildUserBackgroundHighlights = (backgroundJob: DashboardBackgroundJob) => [
-  ["Procesados", formatCount(backgroundJob.rowsProcessed)],
-  ["Total estimado", formatCount(backgroundJob.totalEstimated)],
+  [
+    "Seriales revisados",
+    formatCount(backgroundJob.serialsProcessed ?? backgroundJob.rowsProcessed),
+  ],
+  [
+    "Seriales totales",
+    formatCount(backgroundJob.serialsUniqueTotal ?? backgroundJob.totalEstimated),
+  ],
   ["Encontrados", formatCount(backgroundJob.foundSoFar)],
   ["Pendientes", formatCount(backgroundJob.serialsPending ?? backgroundJob.notFoundSoFar)],
 ];
@@ -86,8 +92,9 @@ const UserProgressCard = ({
           {backgroundJob.resultLabel || "Seguimos procesando tu solicitud"}
         </h3>
         <p className="mt-2 text-sm text-sky-900 dark:text-sky-100">
-          {backgroundJob.phaseLabel || toLabel(backgroundJob.phase)}. El resultado
-          final y la descarga completa apareceran cuando el proceso termine.
+          {backgroundJob.phaseLabel || toLabel(backgroundJob.phase)}. El avance
+          resume el trabajo total por etapas y los contadores muestran seriales
+          revisados del archivo.
         </p>
       </div>
       <div className="rounded-3xl bg-white/90 px-4 py-3 text-right shadow-sm dark:bg-sky-950/40">
@@ -202,6 +209,11 @@ const DevBackgroundRuntime = ({
         Chunk activo: {backgroundJob.activeChunk ?? backgroundJob.currentChunk ?? 0}
         {backgroundJob.totalChunks > 0 ? ` / ${backgroundJob.totalChunks}` : ""}
       </div>
+      <div>Chunk size: {formatCount(backgroundJob.chunkSize)}</div>
+      <div>
+        Fallback normalizado:{" "}
+        {backgroundJob.normalizedFallbackMode ? toLabel(backgroundJob.normalizedFallbackMode) : "-"}
+      </div>
       <div>Base actual: {formatCount(backgroundJob.foundInBaseActual)}</div>
       <div>Asociados actual: {formatCount(backgroundJob.foundInAsociadosActual)}</div>
       <div>Solo historico: {formatCount(backgroundJob.foundInHistorico)}</div>
@@ -212,6 +224,44 @@ const DevBackgroundRuntime = ({
       <div>Pendientes etapa actual: {formatCount(backgroundJob.stageSerialsPending)}</div>
       <div>Tabla actual: {backgroundJob.tableLabel || "-"}</div>
     </div>
+    {backgroundJob.lastChunkMetrics ? (
+      <div className="mt-3 rounded-xl bg-white/70 px-3 py-3 text-xs dark:bg-sky-950/40">
+        <div className="font-medium">Ultimo chunk</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-4">
+          <div>Entrada: {formatCount(Number(backgroundJob.lastChunkMetrics.input_serials || 0))}</div>
+          <div>Encontrados: {formatCount(Number(backgroundJob.lastChunkMetrics.found_serials || 0))}</div>
+          <div>Queries: {formatCount(Number(backgroundJob.lastChunkMetrics.query_count || 0))}</div>
+          <div>SQL ms: {formatCount(Number(backgroundJob.lastChunkMetrics.sql_time_ms || 0))}</div>
+        </div>
+      </div>
+    ) : null}
+    {backgroundJob.performanceMetrics ? (
+      <div className="mt-3 rounded-xl bg-white/70 px-3 py-3 text-xs dark:bg-sky-950/40">
+        <div className="font-medium">Performance runtime</div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-4">
+          <div>
+            Queries totales:{" "}
+            {formatCount(Number(backgroundJob.performanceMetrics.query_count_total || 0))}
+          </div>
+          <div>
+            SQL ms totales:{" "}
+            {formatCount(Number(backgroundJob.performanceMetrics.sql_time_ms_total || 0))}
+          </div>
+          <div>
+            Filas retornadas:{" "}
+            {formatCount(Number(backgroundJob.performanceMetrics.rows_returned_total || 0))}
+          </div>
+          <div>
+            Etapas medidas:{" "}
+            {formatCount(
+              Array.isArray(backgroundJob.performanceMetrics.stages)
+                ? backgroundJob.performanceMetrics.stages.length
+                : 0,
+            )}
+          </div>
+        </div>
+      </div>
+    ) : null}
     {backgroundJob.status !== "completed" ? (
       <div className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-xs dark:bg-sky-950/40">
         {backgroundJob.resultLabel || "Resultado parcial / validacion en proceso"}.
