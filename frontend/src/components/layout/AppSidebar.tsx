@@ -5,16 +5,23 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../../context/SidebarContext";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { House } from "lucide-react";
 import { ChevronDownIcon, HorizontaLDots } from "../../icons/index";
 import { IconMessageChatbot } from '@tabler/icons-react';
+import { useAuthStore } from "@/store/auth.store";
 
 type NavItem = {
   name: string;
   icon?: React.ReactNode;
   path?: string;
-  subItems?: { name: string; path: string; new?: boolean }[];
+  requiresSuperuser?: boolean;
+  subItems?: {
+    name: string;
+    path: string;
+    new?: boolean;
+    requiresSuperuser?: boolean;
+  }[];
 };
 
 const defaultNavItems: NavItem[] = [
@@ -31,10 +38,13 @@ const defaultNavItems: NavItem[] = [
     name: "Agente IA",
     icon: <IconMessageChatbot className="h-5 w-5" />,
     path: "/agente-ia",
+    requiresSuperuser: true,
   },
   {
     name: "PROGRAMACION",
-    subItems: [{ name: "IA DEV", path: "/programacion/ia-dev" }],
+    subItems: [
+      { name: "IA DEV", path: "/programacion/ia-dev", requiresSuperuser: true },
+    ],
   },
 ];
 
@@ -49,7 +59,31 @@ const AppSidebar: React.FC = () => {
     expandSidebar,
   } = useSidebar();
   const pathname = usePathname();
-  const navItems = defaultNavItems;
+  const user = useAuthStore((state) => state.user);
+  const isSuperuser = Boolean(user?.is_superuser);
+  const navItems = useMemo(
+    () =>
+      defaultNavItems.reduce<NavItem[]>((allowedItems, nav) => {
+        if (nav.requiresSuperuser && !isSuperuser) {
+          return allowedItems;
+        }
+
+        const allowedSubItems = nav.subItems?.filter(
+          (subItem) => !subItem.requiresSuperuser || isSuperuser,
+        );
+
+        if (nav.subItems && (!allowedSubItems || allowedSubItems.length === 0)) {
+          return allowedItems;
+        }
+
+        allowedItems.push({
+          ...nav,
+          subItems: allowedSubItems,
+        });
+        return allowedItems;
+      }, []),
+    [isSuperuser],
+  );
   const isSidebarOpen = isExpanded || isMobileOpen;
   const asideRef = useRef<HTMLElement | null>(null);
 
