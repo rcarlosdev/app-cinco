@@ -1,0 +1,561 @@
+nombre_paquete: empleados
+dominio: empleados
+version: 0.4.0
+fase_migracion: cuarta_capacidad_cumpleanos_gobernada
+descripcion: >
+  Capability Pack de empleados para migrar las consultas de conteo general,
+  agrupaciones organizacionales, detalle seguro y cumpleanos gobernados sin
+  mover planner, SQL ni runtime general.
+procesos_operativos:
+  - conteo de personal activo o inactivo
+  - agrupacion de personal por area, cargo, sede, carpeta, supervisor y movil
+  - detalle seguro por cedula, movil, nombre y filtros organizacionales declarados
+  - cumpleanos de empleados por mes, dimension segura y detalle filtrado
+  - diagnostico de rutas pendientes para rotacion y certificados
+entidades:
+  - empleados
+  - cedula
+  - movil
+  - nombre
+  - area
+  - cargo
+  - supervisor
+  - carpeta
+  - sede
+  - tipo_labor
+  - estado
+  - fecha_nacimiento
+  - fnacimiento_month
+  - birth_month
+fuentes_metadata_gobernada:
+  - ai_dictionary.dd_tablas
+  - ai_dictionary.dd_campos
+  - ai_dictionary.dd_relaciones
+  - ai_dictionary.dd_sinonimos
+  - ai_dictionary.dd_reglas
+  - ai_dictionary.ia_dev_capacidades_columna
+limitaciones_declaradas:
+  - empleados.limit.grouped_population_undeclared_dimension
+  - empleados.limit.grouped_population_ambiguous_request
+  - empleados.limit.grouped_population_metadata_gap
+  - empleados.limit.detail_unverifiable_entity
+  - empleados.limit.detail_undeclared_filter
+  - empleados.limit.detail_ambiguous_request
+  - empleados.limit.detail_insufficient_metadata
+  - empleados.limit.birthday_ambiguous_period
+  - empleados.limit.birthday_ungoverned_date_field
+  - empleados.limit.birthday_insufficient_metadata
+  - empleados.limit.heights_certificate_pending_pack
+  - empleados.limit.turnover_pending_pack
+  - empleados.limit.missingness_pending_pack
+  - empleados.limit.sensitive_fields_hidden
+mapa_capacidades_actual:
+  - capability_id: empleados.count.active.v1
+    templates_actuales:
+      - count_entities_by_status
+      - aggregate_by_group_and_period
+      - count_records_by_period
+    rutas_actuales:
+      - handler
+      - sql_assisted
+    observacion: >
+      Capability vigente para conteo, agrupaciones, cumpleanos, rotacion y
+      varios rescates modernos de empleados. En esta fase se gobiernan por pack
+      el conteo simple, las agrupaciones declaradas y el conteo de cumpleanos
+      por mes.
+  - capability_id: empleados.detail.v1
+    templates_actuales:
+      - detail_by_entity_and_period
+    rutas_actuales:
+      - handler
+    observacion: >
+      Detalle seguro por cedula, movil, nombre y filtros organizacionales
+      declarados. En esta fase deja de depender del fallback legacy para los
+      filtros, entidades verificables y detalle filtrado de cumpleanos por mes.
+templates_candidatos:
+  - template_id: count_entities_by_status
+    estado: activo_pack_driven
+    capability_id: empleados.count.active.v1
+    response_profile: empleados.count.active.summary
+  - template_id: aggregate_by_group_and_period
+    estado: activo_pack_driven
+    capability_id: empleados.count.active.v1
+    response_profile: empleados.count.grouped.summary
+  - template_id: detail_by_entity_and_period
+    estado: activo_pack_driven
+    capability_id: empleados.detail.v1
+    response_profile: empleados.detail.safe_table
+  - template_id: count_records_by_period
+    estado: activo_pack_driven
+    capability_id: empleados.count.active.v1
+    response_profile: empleados.birthday.summary
+  - template_id: heights_certificate_summary
+    estado: candidato_pendiente
+    capability_id: empleados.count.active.v1
+    response_profile: empleados.certificados_alturas.summary
+perfiles_respuesta_candidatos:
+  - empleados.count.active.summary
+  - empleados.count.grouped.summary
+  - empleados.detail.safe_table
+  - empleados.birthday.summary
+  - empleados.certificados_alturas.summary
+semantic_bindings:
+  - template_id: count_entities_by_status
+    candidate_capability: empleados.count.active.v1
+    planner_route_hint: empleados.population.count
+    response_profile: empleados.count.active.summary
+    tool_id: empleados.count.active.v1
+    intent_ids:
+      - count
+      - summary
+    entity_fields:
+      - empleados
+      - estado
+      - tipo_labor
+    filter_fields:
+      - estado
+      - tipo_labor
+    grouping_fields: []
+    output_profiles:
+      - kpi_total_personal
+    selection_rules:
+      - priority: 98
+        intent_ids:
+          - count
+          - summary
+        required_status_values:
+          - ACTIVO
+          - INACTIVO
+        normalized_filters_absent:
+          - cedula
+          - cedula_empleado
+          - identificacion
+          - documento
+          - id_empleado
+          - movil
+          - codigo_sap
+          - nombre
+          - search
+        group_by_absent: true
+        metrics_absent:
+          - turnover_rate
+        forbid_business_concepts:
+          - birthday
+          - turnover
+          - heights_certificate_validity
+          - missingness
+        declared_rules:
+          - empleados.route.population_count
+          - empleados.default.status_active
+  - template_id: aggregate_by_group_and_period
+    candidate_capability: empleados.count.active.v1
+    planner_route_hint: empleados.population.grouped
+    response_profile: empleados.count.grouped.summary
+    tool_id: empleados.count.active.v1
+    intent_ids:
+      - aggregate
+      - count
+      - summary
+    entity_fields:
+      - empleados
+      - estado
+      - tipo_labor
+      - area
+      - cargo
+      - supervisor
+      - carpeta
+      - sede
+      - movil
+      - fecha_nacimiento
+      - fnacimiento_month
+      - birth_month
+    filter_fields:
+      - estado
+      - tipo_labor
+      - fnacimiento_month
+      - area
+      - cargo
+      - supervisor
+      - carpeta
+      - sede
+      - movil
+    grouping_fields:
+      - area
+      - cargo
+      - sede
+      - carpeta
+      - supervisor
+      - movil
+      - birth_month
+    period_fields:
+      - fnacimiento_month
+    date_semantics:
+      - birthday_month
+      - birthday_by_month
+    output_profiles:
+      - total_por_dimension
+    selection_rules:
+      - priority: 99
+        intent_ids:
+          - aggregate
+          - count
+          - summary
+        required_business_concepts:
+          - birthday
+        date_semantics_any_of:
+          - birthday_month
+          - birthday_by_month
+        normalized_filters_all_in:
+          - estado
+          - tipo_labor
+          - fnacimiento_month
+          - area
+          - cargo
+          - supervisor
+          - carpeta
+          - sede
+          - movil
+        group_by_required: true
+        group_by_all_in:
+          - area
+          - cargo
+          - sede
+          - carpeta
+          - supervisor
+          - movil
+          - birth_month
+        declared_rules:
+          - empleados.route.birthdays_grouped_dimension
+          - empleados.birthdays.declared_period_fields
+          - empleados.birthdays.safe_grouping_dimensions
+          - empleados.birthdays.safe_projection
+      - priority: 97
+        intent_ids:
+          - aggregate
+          - count
+          - summary
+        required_status_values:
+          - ACTIVO
+          - INACTIVO
+        normalized_filters_absent:
+          - cedula
+          - cedula_empleado
+          - identificacion
+          - documento
+          - id_empleado
+          - codigo_sap
+          - nombre
+          - search
+        group_by_required: true
+        group_by_all_in:
+          - area
+          - cargo
+          - sede
+          - carpeta
+          - supervisor
+          - movil
+          - birth_month
+        forbid_business_concepts:
+          - birthday
+          - turnover
+          - heights_certificate_validity
+          - missingness
+        declared_rules:
+          - empleados.route.population_grouped_dimension
+          - empleados.grouping.declared_dimensions
+          - empleados.default.status_active
+      - priority: 95
+        intent_ids:
+          - aggregate
+          - count
+        normalized_filters_any_of:
+          - tipo_labor
+        normalized_filters_absent:
+          - cedula
+          - cedula_empleado
+          - identificacion
+          - documento
+          - id_empleado
+          - codigo_sap
+          - nombre
+          - search
+        group_by_required: true
+        group_by_all_in:
+          - area
+          - cargo
+          - sede
+          - carpeta
+          - supervisor
+          - movil
+          - birth_month
+        forbid_business_concepts:
+          - birthday
+          - turnover
+          - heights_certificate_validity
+          - missingness
+        declared_rules:
+          - empleados.route.population_grouped_dimension
+          - empleados.grouping.declared_dimensions
+  - template_id: detail_by_entity_and_period
+    candidate_capability: empleados.detail.v1
+    planner_route_hint: empleados.population.detail
+    response_profile: empleados.detail.safe_table
+    tool_id: empleados.detail.v1
+    intent_ids:
+      - detail
+    entity_fields:
+      - cedula
+      - movil
+      - nombre
+      - area
+      - cargo
+      - supervisor
+      - carpeta
+      - sede
+      - tipo_labor
+      - estado
+      - fecha_nacimiento
+      - fnacimiento_month
+    filter_fields:
+      - cedula
+      - movil
+      - nombre
+      - area
+      - cargo
+      - supervisor
+      - carpeta
+      - sede
+      - tipo_labor
+      - estado
+      - fnacimiento_month
+    grouping_fields: []
+    period_fields:
+      - fnacimiento_month
+    date_semantics:
+      - birthday_month
+    output_profiles:
+      - detalle_empleado_seguro
+    selection_rules:
+      - priority: 99
+        intent_ids:
+          - detail
+        normalized_filters_any_of:
+          - cedula
+          - movil
+          - nombre
+        normalized_filters_all_in:
+          - cedula
+          - movil
+          - nombre
+          - estado
+          - tipo_labor
+          - area
+          - cargo
+          - supervisor
+          - carpeta
+          - sede
+        group_by_absent: true
+        forbid_business_concepts:
+          - birthday
+          - turnover
+          - heights_certificate_validity
+          - missingness
+        declared_rules:
+          - empleados.route.employee_detail
+          - empleados.detail.declared_identifiers
+          - empleados.detail.safe_projection
+      - priority: 98
+        intent_ids:
+          - detail
+          - count
+        required_business_concepts:
+          - birthday
+        period_fields_any_of:
+          - fnacimiento_month
+        date_semantics_any_of:
+          - birthday_month
+        normalized_filters_any_of:
+          - fnacimiento_month
+        normalized_filters_all_in:
+          - fnacimiento_month
+          - estado
+          - tipo_labor
+          - area
+          - cargo
+          - supervisor
+          - carpeta
+          - sede
+        group_by_absent: true
+        declared_rules:
+          - empleados.route.birthdays_detail
+          - empleados.birthdays.declared_period_fields
+          - empleados.birthdays.safe_projection
+      - priority: 97
+        intent_ids:
+          - detail
+        normalized_filters_any_of:
+          - area
+          - cargo
+          - supervisor
+          - carpeta
+          - sede
+          - tipo_labor
+          - estado
+        normalized_filters_all_in:
+          - area
+          - cargo
+          - supervisor
+          - carpeta
+          - sede
+          - tipo_labor
+          - estado
+        group_by_absent: true
+        forbid_business_concepts:
+          - birthday
+          - turnover
+          - heights_certificate_validity
+          - missingness
+        declared_rules:
+          - empleados.route.employee_detail
+          - empleados.detail.declared_filter_fields
+          - empleados.detail.safe_projection
+  - template_id: count_records_by_period
+    candidate_capability: empleados.count.active.v1
+    planner_route_hint: empleados.birthdays.count
+    response_profile: empleados.birthday.summary
+    tool_id: empleados.count.active.v1
+    intent_ids:
+      - count
+      - summary
+    entity_fields:
+      - empleados
+      - fecha_nacimiento
+      - estado
+      - tipo_labor
+      - area
+      - cargo
+      - supervisor
+      - carpeta
+      - sede
+      - movil
+      - fnacimiento_month
+    filter_fields:
+      - fnacimiento_month
+      - estado
+      - tipo_labor
+      - area
+      - cargo
+      - supervisor
+      - carpeta
+      - sede
+      - movil
+    grouping_fields: []
+    period_fields:
+      - fnacimiento_month
+    date_semantics:
+      - birthday_month
+    output_profiles:
+      - cumpleanos_personal
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - count
+          - summary
+        required_business_concepts:
+          - birthday
+        period_fields_any_of:
+          - fnacimiento_month
+        date_semantics_any_of:
+          - birthday_month
+        normalized_filters_all_in:
+          - fnacimiento_month
+          - estado
+          - tipo_labor
+          - area
+          - cargo
+          - supervisor
+          - carpeta
+          - sede
+          - movil
+        normalized_filters_absent:
+          - cedula
+          - cedula_empleado
+          - identificacion
+          - documento
+          - id_empleado
+          - codigo_sap
+          - nombre
+          - search
+        group_by_absent: true
+        declared_rules:
+          - empleados.route.birthdays_count
+          - empleados.birthdays.declared_period_fields
+          - empleados.birthdays.safe_projection
+capacidades:
+  - capability_id: empleados.count.active.v1
+    template_id: count_entities_by_status
+    planner_route_hint: empleados.population.count
+    response_profile: empleados.count.active.summary
+    approval_policy: empleados.readonly.default
+    tools:
+      - empleados.count.active.v1
+    reglas:
+      - empleados.route.population_count
+      - empleados.default.status_active
+    evaluaciones:
+      - empleados_runtime_eval_v1
+    limitaciones:
+      - empleados.limit.sensitive_fields_hidden
+  - capability_id: empleados.count.active.v1
+    template_id: aggregate_by_group_and_period
+    planner_route_hint: empleados.population.grouped
+    response_profile: empleados.count.grouped.summary
+    approval_policy: empleados.readonly.default
+    tools:
+      - empleados.count.active.v1
+    reglas:
+      - empleados.route.population_grouped_dimension
+      - empleados.grouping.declared_dimensions
+      - empleados.default.status_active
+      - empleados.route.birthdays_grouped_dimension
+      - empleados.birthdays.declared_period_fields
+      - empleados.birthdays.safe_grouping_dimensions
+      - empleados.birthdays.safe_projection
+    evaluaciones:
+      - empleados_runtime_eval_v1
+    limitaciones:
+      - empleados.limit.sensitive_fields_hidden
+  - capability_id: empleados.detail.v1
+    template_id: detail_by_entity_and_period
+    planner_route_hint: empleados.population.detail
+    response_profile: empleados.detail.safe_table
+    approval_policy: empleados.readonly.default
+    tools:
+      - empleados.detail.v1
+    reglas:
+      - empleados.route.employee_detail
+      - empleados.detail.declared_identifiers
+      - empleados.detail.declared_filter_fields
+      - empleados.detail.safe_projection
+      - empleados.route.birthdays_detail
+      - empleados.birthdays.declared_period_fields
+      - empleados.birthdays.safe_projection
+    evaluaciones:
+      - empleados_runtime_eval_v1
+    limitaciones:
+      - empleados.limit.sensitive_fields_hidden
+  - capability_id: empleados.count.active.v1
+    template_id: count_records_by_period
+    planner_route_hint: empleados.birthdays.count
+    response_profile: empleados.birthday.summary
+    approval_policy: empleados.readonly.default
+    tools:
+      - empleados.count.active.v1
+    reglas:
+      - empleados.route.birthdays_count
+      - empleados.birthdays.declared_period_fields
+      - empleados.birthdays.safe_projection
+    evaluaciones:
+      - empleados_runtime_eval_v1
+    limitaciones:
+      - empleados.limit.sensitive_fields_hidden

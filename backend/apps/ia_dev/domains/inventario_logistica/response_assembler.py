@@ -107,6 +107,11 @@ def _semantic_trace_payload(
 ) -> dict[str, Any]:
     binding_trace = dict(resolved_semantic.get("binding_trace") or {})
     return {
+        "source": str(
+            semantic_binding.get("source")
+            or binding_trace.get("source")
+            or ""
+        ),
         "template_id": str(
             semantic_binding.get("template_id")
             or resolved_semantic.get("binding_template_id")
@@ -134,9 +139,23 @@ def _semantic_trace_payload(
             semantic_binding.get("fallback_sombreado_usado")
             or binding_trace.get("fallback_sombreado_usado")
         ),
+        "fallback_used": bool(
+            semantic_binding.get("fallback_used")
+            or binding_trace.get("fallback_used")
+        ),
+        "legacy_mapping_used": bool(
+            semantic_binding.get("legacy_mapping_used")
+            or binding_trace.get("legacy_mapping_used")
+        ),
         "regla_legacy_detectada": bool(
             semantic_binding.get("regla_legacy_detectada")
             or binding_trace.get("regla_legacy_detectada")
+        ),
+        "legacy_retained_reason": str(
+            semantic_binding.get("legacy_retained_reason")
+            or binding_trace.get("legacy_retained_reason")
+            or binding_trace.get("reason")
+            or ""
         ),
         "paquete_capacidad_usado": str(
             semantic_binding.get("paquete_capacidad_usado")

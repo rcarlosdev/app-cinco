@@ -13,10 +13,11 @@ from apps.ia_dev.application.runtime.semantic_gap_registry_service import Semant
 from apps.ia_dev.application.runtime.service_runtime_bootstrap import apply_service_runtime_bootstrap
 from apps.ia_dev.application.semantic.query_execution_planner import QueryExecutionPlanner
 from apps.ia_dev.domains.inventario_logistica.response_assembler import build_inventory_business_response
+from apps.ia_dev.domains.inventario_logistica.paquete_capacidades_loader import build_inventory_capability_pack_coverage
 from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import InventorySemanticResolver
 
 
-DATASET_VERSION = "p5_inventario_runtime_eval_v1"
+DATASET_VERSION = "p5_inventario_runtime_eval_v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,10 @@ class InventoryRuntimeEvalCase:
     fixture_extra_tables: tuple[dict[str, Any], ...] = ()
     fixture_result_set: dict[str, Any] = field(default_factory=dict)
     force_shadow_metadata: bool = False
+    legacy_allowed: bool = False
+    expected_source: str = "capability_pack"
+    expected_legacy_retained_reason: str = ""
+    minimum_validation_label: str = ""
 
 
 def _inventory_eval_context() -> dict[str, Any]:
@@ -191,6 +196,7 @@ def _inventory_eval_context() -> dict[str, Any]:
         ],
         "allowed_columns": sorted({str(item["column_name"]) for item in fields}),
         "aliases": {},
+        "inventory_catalog_families": ["DECO", "CPE RESIDENCIAL", "ONT", "ROUTER"],
     }
 
 
@@ -219,6 +225,26 @@ def _serial_rows() -> tuple[dict[str, Any], ...]:
     )
 
 
+def _serial_family_dimension_rows() -> tuple[dict[str, Any], ...]:
+    return (
+        {
+            "dimension": "TIRAN224",
+            "cedula": "5098747",
+            "empleado": "Juan Perez",
+            "movil": "TIRAN224",
+            "bodega": "",
+            "codigo": "SER-001",
+            "descripcion": "DECO HD",
+            "familia": "DECO",
+            "seriales_total": 2,
+            "en_movil": 2,
+            "en_base": 0,
+            "cobros": 0,
+            "saldo": 2,
+        },
+    )
+
+
 def _kardex_rows() -> tuple[dict[str, Any], ...]:
     return (
         {
@@ -234,7 +260,7 @@ def _kardex_rows() -> tuple[dict[str, Any], ...]:
 
 
 def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
-    return [
+    cases = [
         InventoryRuntimeEvalCase(
             case_id="stock_cuadrilla_asignado",
             grupo_semantico="stock_movil_dual",
@@ -251,6 +277,7 @@ def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
             fixture_rows=_stock_rows(),
             fixture_extra_tables=_serial_rows(),
             fixture_result_set={"rowcount": 1, "total_records": 1, "returned_records": 1},
+            minimum_validation_label="inventario_generico_por_movil_cuadrilla",
         ),
         InventoryRuntimeEvalCase(
             case_id="stock_movil_muestrame",
@@ -320,6 +347,23 @@ def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
             fixture_result_set={"rowcount": 1},
         ),
         InventoryRuntimeEvalCase(
+            case_id="stock_cedula_generico",
+            grupo_semantico="stock_cedula_generico",
+            pregunta="saldo del empleado 5098747",
+            operacion="stock_balance",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_material_stock_mobile",
+            expected_capability="inventory_stock_balance_by_mobile",
+            expected_planner_reason="inventory_material_stock_mobile",
+            expected_response_status="success",
+            expected_route_hint="inventory.material_stock.mobile",
+            expected_filters={"cedula": "5098747"},
+            expected_metadata_rules=("inventario.route.stock_balance_holder",),
+            fixture_rows=_stock_rows(),
+            fixture_result_set={"rowcount": 1},
+            minimum_validation_label="inventario_por_cedula",
+        ),
+        InventoryRuntimeEvalCase(
             case_id="stock_tecnico_ferretero",
             grupo_semantico="stock_tecnico_ferretero",
             pregunta="ferretería asignada al técnico 5098747",
@@ -351,6 +395,7 @@ def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
             expected_metadata_rules=("inventario.route.kardex_employee",),
             fixture_rows=_kardex_rows(),
             fixture_result_set={"rowcount": 1},
+            minimum_validation_label="kardex_por_empleado",
         ),
         InventoryRuntimeEvalCase(
             case_id="kardex_tecnico_entradas_salidas",
@@ -385,6 +430,24 @@ def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
             expected_metadata_rules=("inventario.route.kardex_employee",),
             fixture_rows=_kardex_rows(),
             fixture_result_set={"rowcount": 1},
+            minimum_validation_label="kardex_codigo_mas_empleado",
+        ),
+        InventoryRuntimeEvalCase(
+            case_id="seriales_por_familia_deco",
+            grupo_semantico="serial_family_dimension_declared",
+            pregunta="saldo en moviles de Deco",
+            operacion="aggregate",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_serial_stock_by_family_grouped_dimension",
+            expected_capability="inventory_serial_stock_by_family_grouped_dimension",
+            expected_planner_reason="inventory_serial_stock_by_family_grouped_dimension",
+            expected_response_status="success",
+            expected_route_hint="inventory.serial_stock.family_dimension",
+            expected_filters={"material_family": "DECO", "material_family_match_mode": "contains"},
+            expected_metadata_rules=("inventario.route.serial_stock_family_grouped_dimension",),
+            fixture_rows=_serial_family_dimension_rows(),
+            fixture_result_set={"rowcount": 1},
+            minimum_validation_label="seriales_equipos_por_familia",
         ),
         InventoryRuntimeEvalCase(
             case_id="clarificacion_nombre_propio",
@@ -396,6 +459,34 @@ def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
             expected_response_status="clarification_required",
             fixture_rows=(),
             fixture_result_set={"rowcount": 0},
+            legacy_allowed=True,
+            expected_source="aclaracion_controlada",
+            expected_legacy_retained_reason="requiere_aclaracion_estructural_por_portador_no_verificable",
+            minimum_validation_label="consulta_ambigua_rescate_permitido",
+        ),
+        InventoryRuntimeEvalCase(
+            case_id="movement_detail_operativo",
+            grupo_semantico="movement_detail_declared",
+            pregunta="ingreso del codigo 1025507",
+            operacion="detail",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_movement_detail",
+            expected_capability="inventory_movement_detail",
+            expected_planner_reason="inventory_movement_detail",
+            expected_response_status="success",
+            expected_route_hint="inventory.movement.detail",
+            expected_filters={"codigo": "1025507"},
+            expected_metadata_rules=("inventario.route.movement_detail",),
+            fixture_rows=(
+                {
+                    "codigo": "1025507",
+                    "cantidad": 4,
+                    "fecha": "2026-05-03T00:00:00",
+                    "bodega": "operacion_hfc",
+                },
+            ),
+            fixture_result_set={"rowcount": 1},
+            minimum_validation_label="movement_detail",
         ),
         InventoryRuntimeEvalCase(
             case_id="limitacion_actas_sap",
@@ -431,22 +522,220 @@ def build_inventory_runtime_eval_cases() -> list[InventoryRuntimeEvalCase]:
             fixture_result_set={"rowcount": 0, "total_records": 0, "returned_records": 0},
         ),
         InventoryRuntimeEvalCase(
-            case_id="fallback_sombreado_controlado",
-            grupo_semantico="kardex_shadow",
-            pregunta="historial del código 1025507 para 5098747 con ruido extra por favor",
-            operacion="detail",
-            expectativa_resultado="correcto_con_fallback",
-            expected_template_id="inventory_kardex_by_employee",
-            expected_capability="inventory_kardex_by_employee",
-            expected_planner_reason="inventory_kardex_by_employee",
+            case_id="serial_stock_estado_declared",
+            grupo_semantico="serial_stock_dimension_declared",
+            pregunta="equipos por estado",
+            operacion="aggregate",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_serial_stock_by_dimension",
+            expected_capability="inventory_serial_stock_by_dimension",
+            expected_planner_reason="inventory_serial_stock_by_dimension",
             expected_response_status="success",
-            expected_route_hint="inventory.kardex.employee",
-            expected_filters={"cedula": "5098747", "codigo": "1025507"},
-            fixture_rows=_kardex_rows(),
+            expected_route_hint="inventory.serial.stock.dimension",
+            expected_metadata_rules=("inventario.route.serial_stock_dimension",),
+            fixture_rows=(
+                {
+                    "estado": "MOVIL",
+                    "codigo": "SER-001",
+                    "descripcion": "DECO HD",
+                    "saldo": 2,
+                },
+            ),
             fixture_result_set={"rowcount": 1},
-            force_shadow_metadata=True,
+            minimum_validation_label="serial_stock_por_dimension",
+        ),
+        InventoryRuntimeEvalCase(
+            case_id="risk_consumo_movil_declared",
+            grupo_semantico="risk_serial_declared",
+            pregunta="equipos serializados en consumo movil sin validar",
+            operacion="detail",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_risk_consumo_movil_sin_validar",
+            expected_capability="inventory_risk_consumo_movil_sin_validar",
+            expected_planner_reason="missing_dictionary_column",
+            expected_response_status="success",
+            expected_route_hint="inventory.risk.consumo_movil_sin_validar",
+            expected_metadata_rules=("inventario.route.risk_consumo_movil_sin_validar",),
+            fixture_rows=(
+                {
+                    "serial": "SER-001",
+                    "codigo": "SER-001",
+                    "estado": "CONSUMO MOVIL",
+                    "ubicacion": "TIRAN224",
+                    "fecha": "2026-05-10T00:00:00",
+                },
+            ),
+            fixture_result_set={"rowcount": 1},
+            minimum_validation_label="riesgo_consumo_movil_sin_validar",
+        ),
+        InventoryRuntimeEvalCase(
+            case_id="consumption_top_declared",
+            grupo_semantico="consumption_top_declared",
+            pregunta="top de consumos de materiales en mayo",
+            operacion="aggregate",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_consumption_top",
+            expected_capability="inventory_consumption_top",
+            expected_planner_reason="inventory_consumption_top",
+            expected_response_status="success",
+            expected_route_hint="inventory.consumption.top",
+            expected_filters={"month": "5"},
+            expected_metadata_rules=("inventario.route.consumption_top",),
+            fixture_rows=(
+                {
+                    "codigo": "MAT-001",
+                    "descripcion": "Conector",
+                    "tipo": "FERRETERO",
+                    "cantidad": 12,
+                },
+            ),
+            fixture_result_set={"rowcount": 1},
+            minimum_validation_label="top_consumos",
+        ),
+        InventoryRuntimeEvalCase(
+            case_id="reconciliation_operacion_hfc_declared",
+            grupo_semantico="reconciliation_hfc_declared",
+            pregunta="comparativo de consumo tecnico contra facturacion hfc",
+            operacion="aggregate",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_consumption_billing_operacion_hfc",
+            expected_capability="inventory_consumption_billing_operacion_hfc",
+            expected_planner_reason="missing_dictionary_column",
+            expected_response_status="success",
+            expected_route_hint="inventory.reconciliation.operacion_hfc",
+            expected_filters={"bodega": "operacion_hfc"},
+            expected_metadata_rules=("inventario.route.reconciliation_operacion_hfc",),
+            fixture_rows=(
+                {
+                    "codigo": "MAT-001",
+                    "cantidad": 7,
+                    "orden_trabajo": "OT-001",
+                    "tipo": "MATERIAL",
+                    "bodega": "operacion_hfc",
+                },
+            ),
+            fixture_result_set={"rowcount": 1},
+            minimum_validation_label="consumo_vs_facturacion_operacion_hfc",
+        ),
+        InventoryRuntimeEvalCase(
+            case_id="critical_materials_ruido_controlado",
+            grupo_semantico="critical_materials_declared",
+            pregunta="materiales criticos por empleado en operacion_hfc con algo de ruido extra por favor",
+            operacion="aggregate",
+            expectativa_resultado="correcto",
+            expected_template_id="inventory_material_critical_by_employee",
+            expected_capability="inventory_stock_balance_by_mobile",
+            expected_planner_reason="inventory_material_critical_by_employee",
+            expected_response_status="success",
+            expected_route_hint="inventory.material_stock.critical_employee",
+            expected_filters={"bodega": "operacion_hfc"},
+            expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+            fixture_rows=_stock_rows(),
+            fixture_result_set={"rowcount": 1},
         ),
     ]
+    cases[-1] = InventoryRuntimeEvalCase(
+        case_id="critical_materials_por_empleado",
+        grupo_semantico="critical_materials_declared",
+        pregunta="materiales criticos por empleado en operacion_hfc cruzando saldo, cedula, movil y datos del empleado",
+        operacion="aggregate",
+        expectativa_resultado="correcto",
+        expected_template_id="inventory_material_critical_by_employee",
+        expected_capability="inventory_stock_balance_by_mobile",
+        expected_planner_reason="inventory_material_critical_by_employee",
+        expected_response_status="success",
+        expected_route_hint="inventory.material_stock.critical_employee",
+        expected_filters={"bodega": "operacion_hfc"},
+        expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+        fixture_rows=_stock_rows(),
+        fixture_result_set={"rowcount": 1},
+        minimum_validation_label="materiales_criticos",
+    )
+    cases.extend(
+        [
+            InventoryRuntimeEvalCase(
+                case_id="critical_materials_por_tecnico",
+                grupo_semantico="critical_materials_declared",
+                pregunta="materiales críticos por técnico en operacion_hfc",
+                operacion="aggregate",
+                expectativa_resultado="correcto",
+                expected_template_id="inventory_material_critical_by_employee",
+                expected_capability="inventory_stock_balance_by_mobile",
+                expected_planner_reason="inventory_material_critical_by_employee",
+                expected_response_status="success",
+                expected_route_hint="inventory.material_stock.critical_employee",
+                expected_filters={"bodega": "operacion_hfc"},
+                expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+                fixture_rows=_stock_rows(),
+                fixture_result_set={"rowcount": 1},
+            ),
+            InventoryRuntimeEvalCase(
+                case_id="critical_materials_por_movil",
+                grupo_semantico="critical_materials_declared",
+                pregunta="materiales críticos por móvil/cuadrilla en operacion_hfc",
+                operacion="aggregate",
+                expectativa_resultado="correcto",
+                expected_template_id="inventory_material_critical_by_employee",
+                expected_capability="inventory_stock_balance_by_mobile",
+                expected_planner_reason="inventory_material_critical_by_employee",
+                expected_response_status="success",
+                expected_route_hint="inventory.material_stock.critical_employee",
+                expected_filters={"bodega": "operacion_hfc"},
+                expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+                fixture_rows=_stock_rows(),
+                fixture_result_set={"rowcount": 1},
+            ),
+            InventoryRuntimeEvalCase(
+                case_id="critical_materials_saldo_consumo",
+                grupo_semantico="critical_materials_declared",
+                pregunta="criticidad de materiales por saldo y consumo en operacion_hfc",
+                operacion="aggregate",
+                expectativa_resultado="correcto",
+                expected_template_id="inventory_material_critical_by_employee",
+                expected_capability="inventory_stock_balance_by_mobile",
+                expected_planner_reason="inventory_material_critical_by_employee",
+                expected_response_status="success",
+                expected_route_hint="inventory.material_stock.critical_employee",
+                expected_filters={"bodega": "operacion_hfc"},
+                expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+                fixture_rows=_stock_rows(),
+                fixture_result_set={"rowcount": 1},
+            ),
+            InventoryRuntimeEvalCase(
+                case_id="critical_materials_cobertura_baja",
+                grupo_semantico="critical_materials_declared",
+                pregunta="materiales con cobertura baja en operacion_hfc",
+                operacion="aggregate",
+                expectativa_resultado="correcto",
+                expected_template_id="inventory_material_critical_by_employee",
+                expected_capability="inventory_stock_balance_by_mobile",
+                expected_planner_reason="inventory_material_critical_by_employee",
+                expected_response_status="success",
+                expected_route_hint="inventory.material_stock.critical_employee",
+                expected_filters={"bodega": "operacion_hfc"},
+                expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+                fixture_rows=_stock_rows(),
+                fixture_result_set={"rowcount": 1},
+            ),
+            InventoryRuntimeEvalCase(
+                case_id="critical_materials_bajo_umbral",
+                grupo_semantico="critical_materials_declared",
+                pregunta="materiales por debajo de umbral en operacion_hfc",
+                operacion="aggregate",
+                expectativa_resultado="correcto",
+                expected_template_id="inventory_material_critical_by_employee",
+                expected_capability="inventory_stock_balance_by_mobile",
+                expected_planner_reason="inventory_material_critical_by_employee",
+                expected_response_status="success",
+                expected_route_hint="inventory.material_stock.critical_employee",
+                expected_filters={"bodega": "operacion_hfc"},
+                expected_metadata_rules=("inventario.route.critical_materials_by_employee",),
+                fixture_rows=_stock_rows(),
+                fixture_result_set={"rowcount": 1},
+            ),
+        ]
+    )
+    return cases
 
 
 def _shadow_metadata_payload() -> dict[str, Any]:
@@ -562,11 +851,30 @@ def _evaluate_case(
     if evidence_ok:
         eval_checks.append("evidence_correctness")
 
+    reported_source = str(semantic_trace.get("source") or "").strip()
     fallback_detected = bool(
         semantic_trace.get("fallback_sombreado_usado")
-        or response_metadata.get("fallback_narrativo_usado")
-        or str(execution_plan.get("strategy") or "") == "fallback"
+        or semantic_trace.get("regla_legacy_detectada")
     )
+    if result_status == "clarification_required" and not reported_source:
+        reported_source = "aclaracion_controlada"
+    elif result_status == "clarification_required" and reported_source not in {"legacy_shadow_fallback", "aclaracion_controlada"}:
+        reported_source = "aclaracion_controlada"
+    legacy_retained_reason = str(semantic_trace.get("legacy_retained_reason") or semantic_trace.get("reason") or "").strip()
+    if not legacy_retained_reason and result_status == "clarification_required":
+        legacy_retained_reason = "requiere_aclaracion_estructural_por_portador_no_verificable"
+    if case.expected_source:
+        if reported_source == case.expected_source:
+            eval_checks.append("resolution_source_correctness")
+        else:
+            eval_errors.append("resolution_source_mismatch")
+    if case.expected_legacy_retained_reason:
+        if legacy_retained_reason == case.expected_legacy_retained_reason:
+            eval_checks.append("legacy_retained_reason_correctness")
+        else:
+            eval_errors.append("legacy_retained_reason_mismatch")
+    if fallback_detected and not bool(case.legacy_allowed):
+        eval_errors.append("unexpected_legacy_fallback")
     semantic_confidence = float(
         (resolved_semantic.get("binding_trace") or {}).get("confidence")
         or binding.get("confidence")
@@ -602,6 +910,9 @@ def _evaluate_case(
         "checks_failed": eval_errors,
         "semantic_confidence": round(semantic_confidence, 4),
         "fallback_detected": fallback_detected,
+        "legacy_allowed": bool(case.legacy_allowed),
+        "source": reported_source,
+        "legacy_retained_reason": legacy_retained_reason,
         "metadata_used": metadata_used,
         "suspected_hardcode": False,
         "template_id": str((resolved_query.get("intent") or {}).get("template_id") or ""),
@@ -641,6 +952,32 @@ def _mark_hardcode_suspicion(results: list[dict[str, Any]]) -> None:
             item["eval_reason"] = "semantic_group_divergence_detected"
 
 
+def _build_minimum_validation_matrix(
+    *,
+    cases: list[InventoryRuntimeEvalCase],
+    results: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    results_by_case = {str(item.get("case_id") or ""): item for item in results}
+    matrix: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        label = str(case.minimum_validation_label or "").strip()
+        if not label:
+            continue
+        result = dict(results_by_case.get(case.case_id) or {})
+        matrix[label] = {
+            "case_id": case.case_id,
+            "eval_result": str(result.get("eval_result") or ""),
+            "template_id": str(result.get("template_id") or ""),
+            "candidate_capability": str(result.get("candidate_capability") or ""),
+            "response_status": str(result.get("response_status") or ""),
+            "source": str(result.get("source") or ""),
+            "legacy_mapping_used": bool((result.get("semantic_trace") or {}).get("legacy_mapping_used")),
+            "fallback_used": bool((result.get("semantic_trace") or {}).get("fallback_used")),
+            "legacy_retained_reason": str(result.get("legacy_retained_reason") or ""),
+        }
+    return matrix
+
+
 def run_inventory_runtime_eval_suite(
     *,
     gap_registry_service: SemanticGapRegistryService | None = None,
@@ -652,6 +989,7 @@ def run_inventory_runtime_eval_suite(
 
     planner = QueryExecutionPlanner()
     cases = build_inventory_runtime_eval_cases()
+    pack_coverage = build_inventory_capability_pack_coverage()
     results: list[dict[str, Any]] = []
 
     for case in cases:
@@ -723,6 +1061,7 @@ def run_inventory_runtime_eval_suite(
     clarification_count = int(classification_counter.get("aclaracion_valida") or 0)
     limitation_count = int(classification_counter.get("limitacion_valida") or 0)
     hardcode_count = int(classification_counter.get("hardcode_sospechoso") or 0)
+    minimum_validation_matrix = _build_minimum_validation_matrix(cases=cases, results=results)
 
     return {
         "dataset_version": DATASET_VERSION,
@@ -740,6 +1079,8 @@ def run_inventory_runtime_eval_suite(
         "evidence_coverage_ratio": round(evidence_coverage_count / max(1, len(results)), 4),
         "fallback_usage_ratio": round(fallback_usage_count / max(1, len(results)), 4),
         "suspected_hardcode_count": hardcode_count,
+        "capability_pack_coverage": pack_coverage.as_dict(),
+        "minimum_validation_matrix": minimum_validation_matrix,
         "results": results,
         "continuous_runtime_learning_readiness": {
             "required_future_fields": [

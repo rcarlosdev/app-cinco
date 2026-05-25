@@ -222,6 +222,30 @@ class InventorySemanticResolver:
             matched.append("material")
         return list(dict.fromkeys(matched))
 
+    @staticmethod
+    def _looks_like_critical_material_query(normalized: str) -> bool:
+        text = str(normalized or "")
+        if "material" not in text:
+            return False
+        if "critic" in text:
+            return True
+        if "cobertura baja" in text:
+            return True
+        if "por debajo de umbral" in text or "por debajo del umbral" in text:
+            return True
+        if "debajo de umbral" in text or "debajo del umbral" in text:
+            return True
+        return bool("saldo" in text and "consumo" in text and "cobertura" in text)
+
+    @staticmethod
+    def _critical_material_scope_group_by(normalized: str, group_by: list[str]) -> list[str]:
+        resolved = list(group_by or [])
+        if any(token in normalized for token in ("por tecnico", "por empleado", "por cedula")) and "cedula" not in resolved:
+            resolved.append("cedula")
+        if any(token in normalized for token in ("por movil", "por cuadrilla", "por brigada")) and "movil" not in resolved:
+            resolved.append("movil")
+        return resolved
+
     def infer_for_arbitration(self, *, message: str, dictionary_context: dict[str, Any] | None = None) -> dict[str, Any]:
         coincidencia_gobernada = self.matcher_gobernado.resolver(
             mensaje=message,
@@ -640,14 +664,13 @@ class InventorySemanticResolver:
                 "logistica_movimientos_devolucion",
             ]
             candidate_fields = ["codigo", "cantidad", "f_consumo", "movil", "cedula", "estado"]
-        elif "materiales criticos" in normalized and any(
-            token in normalized for token in ("empleado", "tecnico", "cedula", "movil", "móvil")
-        ):
+        elif self._looks_like_critical_material_query(normalized):
             intent = "stock_balance"
             operation = "aggregate"
             material_family = "materiales"
             business_concept = "materiales_criticos_por_empleado"
             filters["stock_scope"] = "movil"
+            group_by = self._critical_material_scope_group_by(normalized, group_by)
             candidate_tables = [
                 "logistica_movimientos_entrega",
                 "logistica_movimientos_consumo",
@@ -877,6 +900,11 @@ class InventorySemanticResolver:
             "unresolved_reason": str(binding_decision.get("unresolved_reason") or ""),
             "legacy_mapping_used": bool(binding_decision.get("legacy_mapping_used")),
             "reason": str(binding_decision.get("legacy_reason") or ""),
+            "legacy_retained_reason": str(
+                binding_decision.get("legacy_retained_reason")
+                or binding_decision.get("legacy_reason")
+                or ""
+            ),
             "migration_target": str(binding_decision.get("migration_target") or ""),
             "regla_metadata_usada": list(binding_decision.get("regla_metadata_usada") or []),
             "fuente_dd": list(binding_decision.get("fuente_dd") or []),
@@ -889,6 +917,10 @@ class InventorySemanticResolver:
             "reglas_declaradas": list(binding_decision.get("reglas_declaradas") or []),
             "perfiles_respuesta": list(binding_decision.get("perfiles_respuesta") or []),
             "evaluaciones_asociadas": list(binding_decision.get("evaluaciones_asociadas") or []),
+            "capability_pack_coverage": float(binding_decision.get("capability_pack_coverage") or 0.0),
+            "templates_pack_driven_count": int(binding_decision.get("templates_pack_driven_count") or 0),
+            "templates_legacy_allowed_count": int(binding_decision.get("templates_legacy_allowed_count") or 0),
+            "templates_missing_selection_rules": list(binding_decision.get("templates_missing_selection_rules") or []),
         }
         semantic_context["material_family"] = str(inference.get("material_family") or "")
         semantic_context["business_concept"] = str(inference.get("business_concept") or "")

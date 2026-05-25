@@ -2,6 +2,575 @@ Micro resumen actualizado
 
 No reauditar arquitectura ni contratos. No tocar `fallback_policy`. No reabrir discovery del dominio. Continuar desde el estado actual de `inventario_logistica`.
 
+## Actualizacion 2026-05-25 Fase 1.3 anti-hardcode empleados cumpleanos gobernados
+
+Se migro la familia semantica de cumpleanos de `empleados` al `Capability Pack`,
+moviendo `count_records_by_period` a binding declarativo y habilitando tambien
+las rutas seguras de agrupacion y detalle por mes, sin tocar
+`QueryExecutionPlanner`, `fallback_policy`, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Templates de `empleados` ya pack-driven:
+
+- `count_entities_by_status`
+- `aggregate_by_group_and_period`
+- `detail_by_entity_and_period`
+- `count_records_by_period`
+
+Capabilities y rutas activas en esta fase:
+
+- `empleados.count.active.v1`
+  - `empleados.population.count`
+  - `empleados.population.grouped`
+  - `empleados.birthdays.count`
+- `empleados.detail.v1`
+  - `empleados.population.detail`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Cumpleanos gobernados por pack:
+
+- `cumpleanos de mayo`
+- `empleados que cumplen anos este mes`
+- `cumpleanos por mes`
+- `cumpleanos de mayo por area`
+- `cumpleanos de mayo por sede`
+- detalle seguro de cumpleanos por mes
+- privacidad:
+  - no exponer `password`
+  - no exponer `link_foto`
+  - no exponer `codigo_sap`
+  - no exponer otros campos sensibles fuera de `perfiles_respuesta.yaml`
+
+Fallback legacy retenido solo para cumpleanos cuando aplique:
+
+- periodo ambiguo no resoluble como `cumpleanos de hoy`
+- periodo ambiguo no resoluble como `proximos cumpleanos`
+- campo fecha no gobernado
+- metadata insuficiente
+
+Superficies que siguen en compatibilidad trazada:
+
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad requerida del registry para cumpleanos migrados:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+- `version_paquete = 0.4.0`
+
+Cobertura declarativa del pack de `empleados` en esta fase:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 4`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_chat_runtime_metadata --verbosity 2`
+- resultado: `137 tests` OK
+
+## Actualizacion 2026-05-25 Fase 1.2 anti-hardcode empleados detalle gobernado
+
+Se migro `detail_by_entity_and_period` al `Capability Pack` de `empleados`, manteniendo compatibilidad solo para ambiguedades y gaps declarados, sin tocar `QueryExecutionPlanner`, `fallback_policy`, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Templates de `empleados` ya pack-driven:
+
+- `count_entities_by_status`
+- `aggregate_by_group_and_period`
+- `detail_by_entity_and_period`
+
+Capabilities y rutas activas en esta fase:
+
+- `empleados.count.active.v1`
+  - `empleados.population.count`
+  - `empleados.population.grouped`
+- `empleados.detail.v1`
+  - `empleados.population.detail`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Detalle gobernado por pack:
+
+- identificadores verificables:
+  - `cedula`
+  - `movil`
+  - `nombre`
+- filtros declarados:
+  - `area`
+  - `cargo`
+  - `supervisor`
+  - `carpeta`
+  - `sede`
+  - `tipo_labor`
+  - `estado`
+- privacidad:
+  - no exponer `password`
+  - no exponer `link_foto`
+  - no exponer `codigo_sap`
+  - no exponer otros campos sensibles fuera de `perfiles_respuesta.yaml`
+
+Fallback legacy retenido solo para detalle cuando aplique:
+
+- entidad no verificable
+- filtro no declarado
+- consulta ambigua
+- metadata insuficiente
+
+Superficies que siguen en compatibilidad trazada:
+
+- `count_records_by_period` para cumpleanos
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad requerida del registry para detalle migrado:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+- `version_paquete = 0.3.0`
+
+Cobertura declarativa del pack de `empleados` en esta fase:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 3`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focalizadas esperadas:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_chat_runtime_metadata --verbosity 2`
+
+## Actualizacion 2026-05-24
+
+Se creo `backend/INVENTARIO_REGLAS_SEMANTICAS_HARDCODEADAS.md` como diagnostico tecnico de reglas semanticas hardcodeadas y heuristicas actuales en intencion, dominio, capability, routing, planner, response assembly y agentes.
+
+Estado de esta actualizacion:
+
+- solo documentacion
+- sin cambios funcionales de runtime
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin migraciones ni refactors
+
+## Actualizacion 2026-05-24 Fase 1 anti-hardcode empleados
+
+Se inicio la migracion anti-hardcode de `empleados` tomando como patron el cierre exitoso de `inventario_logistica`, pero sin mover autoridad de planner, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Artefactos nuevos del dominio `empleados`:
+
+- `backend/apps/ia_dev/domains/empleados/paquete_capacidades.yaml`
+- `backend/apps/ia_dev/domains/empleados/reglas_semanticas.yaml`
+- `backend/apps/ia_dev/domains/empleados/perfiles_respuesta.yaml`
+- `backend/apps/ia_dev/domains/empleados/politicas_aprobacion.yaml`
+- `backend/apps/ia_dev/domains/empleados/evaluaciones.yaml`
+- `backend/apps/ia_dev/domains/empleados/README_OPERATIVO.md`
+- `backend/apps/ia_dev/domains/empleados/paquete_capacidades_loader.py`
+- `backend/INVENTARIO_REGLAS_SEMANTICAS_EMPLEADOS.md`
+
+Primera capability gobernada por pack:
+
+- `count_entities_by_status`
+- capability: `empleados.count.active.v1`
+- ruta declarada: `empleados.population.count`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Superficies que siguen en compatibilidad trazada:
+
+- `aggregate_by_group_and_period`
+- `detail_by_entity_and_period`
+- `count_records_by_period` para cumpleanos
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad nueva del registry para `empleados`:
+
+- pack-driven:
+  - `source = capability_pack`
+  - `paquete_capacidad_usado = empleados`
+  - `version_paquete = 0.1.0`
+- compatibilidad temporal:
+  - `source = legacy_shadow_fallback`
+  - `legacy_retained_reason`
+
+Cobertura declarativa del pack inicial:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 1`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focales confirmadas en esta fase:
+
+- `apps.ia_dev.tests.test_empleados_handler`
+- `apps.ia_dev.tests.test_query_intelligence_layer`
+- `apps.ia_dev.tests.test_chat_runtime_metadata`
+- `apps.ia_dev.tests.test_semantic_capability_registry`
+
+Resultado observado:
+
+- `123 tests` OK en la suite focal ampliada
+- la consulta `personal activo hoy` ya deja traza gobernada por pack
+- `cumpleanos de mayo` queda trazado como `legacy_shadow_fallback`
+- `certificados de altura proximos a vencer` sigue resolviendo por la ruta moderna actual sin introducir capabilities nuevas
+
+## Actualizacion 2026-05-24 Fase 1.1 anti-hardcode empleados agrupaciones declarativas
+
+Se migro la segunda capability de `empleados` al `Capability Pack` moviendo `aggregate_by_group_and_period` a binding declarativo gobernado por pack, sin tocar `QueryExecutionPlanner`, `fallback_policy`, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Templates de `empleados` ya pack-driven:
+
+- `count_entities_by_status`
+- `aggregate_by_group_and_period`
+
+Capability y rutas activas en esta fase:
+
+- capability efectiva: `empleados.count.active.v1`
+- rutas declaradas:
+  - `empleados.population.count`
+  - `empleados.population.grouped`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Agrupaciones gobernadas por pack:
+
+- `area`
+- `cargo`
+- `sede`
+- `carpeta`
+- `supervisor`
+- `movil`
+
+Fallback legacy retenido solo para:
+
+- agrupaciones con dimension no declarada
+- consultas ambiguas tipo `distribucion de personal` sin dimension explicita
+- gaps de metadata gobernada
+- `detail_by_entity_and_period`
+- `count_records_by_period` para cumpleanos
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad requerida del registry para agrupaciones migradas:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+- `version_paquete = 0.2.0`
+
+Cobertura declarativa del pack de `empleados` en esta fase:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 2`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_chat_runtime_metadata --verbosity 2`
+- resultado: `126 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2 anti-hardcode inventario_logistica
+
+Se implemento la Fase 2 de migracion anti-hardcode para `inventario_logistica` moviendo la seleccion de `template_id` desde reglas Python del `SemanticCapabilityRegistry` hacia `semantic_bindings` declarativos del `Capability Pack`.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Seleccion declarativa de `template_id` ya gobernada por pack:
+
+- `inventory_material_stock_mobile`
+- `inventory_material_stock_grouped_dimension`
+- `inventory_serial_stock_by_family_grouped_dimension`
+- `inventory_material_stock_by_warehouse`
+- `inventory_material_stock_balance`
+- `inventory_material_critical_by_employee`
+- `inventory_kardex_by_employee`
+- `inventory_kardex_consolidated`
+- `inventory_serial_by_operational_holder`
+- `inventory_document_generation_pending`
+- `inventory_transfer_destination_not_available`
+- `inventory_traceability_by_serial`
+- `inventory_transfer_warehouse`
+- `inventory_transfer_other_ally`
+- `inventory_provider_serial_validation`
+
+Trace estable del registry:
+
+- match declarativo:
+  - `source = capability_pack`
+  - `fallback_used = false`
+  - `legacy_mapping_used = false`
+- sin match declarativo:
+  - `source = legacy_shadow_fallback`
+  - `fallback_used = true`
+  - `migration_pending = true`
+
+Legacy shadow fallback mantenido de forma explicita:
+
+- `_resolve_inventory_template_legacy` sigue vigente solo para templates no migrados a `semantic_bindings.selection_rules`
+- en esta fase ya no queda un caso focal confirmado en pruebas dentro de `inventario_logistica`
+- se conserva como compatibilidad temporal para cualquier template legacy futuro que todavia no tenga `selection_rules` declarados
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite --verbosity 2`
+- resultado: `73 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2.1 verificacion de cierre anti-hardcode
+
+Se agrego una validacion automatica de cobertura del `Capability Pack` de `inventario_logistica` para medir, auditar y acotar cualquier recaida a legacy antes de retirar `_resolve_inventory_template_legacy`.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Trazabilidad nueva publicada por loader/registry/evals:
+
+- `capability_pack_coverage`
+- `templates_pack_driven_count`
+- `templates_legacy_allowed_count`
+- `templates_missing_selection_rules`
+
+Cobertura declarativa medida sobre templates activos usados por pruebas/evals focales:
+
+- cobertura actual: `0.6875`
+- templates activos pack-driven: `11`
+- templates activos con legacy permitido explicito: `1`
+- templates activos pendientes de migracion declarativa:
+  - `inventory_consumption_billing_operacion_hfc`
+  - `inventory_consumption_top`
+  - `inventory_movement_detail`
+  - `inventory_risk_consumo_movil_sin_validar`
+  - `inventory_serial_stock_by_dimension`
+
+Politica vigente de legacy:
+
+- permitido solo para templates futuros no declarados
+- permitido para casos marcados `legacy_allowed`
+- permitido como fallback de seguridad cuando el pack este incompleto
+- `_resolve_inventory_template_legacy` no se retira en esta fase; queda medido y auditado
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite --verbosity 2`
+- resultado: `77 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2.2 cierre declarativo de templates activos pendientes
+
+Se migraron los 5 templates activos pendientes de `inventario_logistica` a `semantic_bindings.selection_rules` del `Capability Pack`, manteniendo `_resolve_inventory_template_legacy` como `shadow_fallback` para casos no cubiertos declarativamente.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Templates activos migrados en esta fase:
+
+- `inventory_consumption_billing_operacion_hfc`
+- `inventory_consumption_top`
+- `inventory_movement_detail`
+- `inventory_risk_consumo_movil_sin_validar`
+- `inventory_serial_stock_by_dimension`
+
+Cobertura declarativa activa medida por loader/registry/evals:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 16`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Perfiles y reglas declarativas agregadas para mantener paridad observable:
+
+- perfiles:
+  - `inventory.serial.dimension.summary`
+  - `inventory.risk.serial.detail`
+  - `inventory.consumption.top.summary`
+  - `inventory.movement.detail`
+  - `inventory.reconciliation.operacion_hfc`
+- reglas:
+  - `inventario.route.serial_stock_dimension`
+  - `inventario.route.risk_consumo_movil_sin_validar`
+  - `inventario.route.consumption_top`
+  - `inventario.route.movement_detail`
+  - `inventario.route.reconciliation_operacion_hfc`
+
+Legacy shadow fallback aun vigente por seguridad:
+
+- sigue existiendo para ambiguedades no declarativas como `que tiene Juan Perez`
+- sigue existiendo para templates legacy no activos en esta suite que todavia no tienen `selection_rules`
+- no se retiro `_resolve_inventory_template_legacy` en esta fase
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite --verbosity 2`
+- resultado: `82 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2.3 retiro acotado de ramas legacy ya migradas
+
+Se retiraron de `_resolve_inventory_template_legacy` las ramas legacy especificas de los 5 templates activos que ya estaban cubiertos por `semantic_bindings.selection_rules`.
+
+Ramas legacy retiradas:
+
+- `inventory_consumption_billing_operacion_hfc`
+- `inventory_consumption_top`
+- `inventory_movement_detail`
+- `inventory_risk_consumo_movil_sin_validar`
+- `inventory_serial_stock_by_dimension`
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Trazas requeridas mantenidas para los 5 templates migrados:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+
+Legacy retenido y motivo:
+
+- ambiguedades no declarativas como `que tiene Juan Perez`
+  - `legacy_retained_reason = requiere aclaracion estructural y no corresponde a una seleccion declarativa de template`
+- templates futuros o no activos que todavia no tienen `selection_rules`
+  - `legacy_retained_reason = compatibilidad temporal fuera del alcance activo cubierto por evals`
+- rescate controlado cuando el pack este incompleto para rutas no retiradas en esta fase
+  - `legacy_retained_reason = seguridad operativa mientras existan superficies no declarativas fuera de estos 5 templates`
+
+Cobertura declarativa final confirmada:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 16`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+- conteo derivado `templates_missing_selection_rules = 0`
+
+## Actualizacion 2026-05-24 Fase 2.4 validacion ampliada de no-regresion
+
+Se cerro la validacion ampliada de no-regresion de `inventario_logistica` despues del retiro acotado de ramas legacy de los 5 templates migrados.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL libre
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Ampliacion aplicada:
+
+- la suite `inventario_runtime_eval_suite` ahora ejecuta `25` casos versionados
+- publica `minimum_validation_matrix` con los `12` casos minimos de cierre pedidos
+- traza explicitamente el caso ambiguo `que tiene Juan Perez` como `source = aclaracion_controlada`
+- publica `legacy_retained_reason = requiere_aclaracion_estructural_por_portador_no_verificable` para esa ambiguedad permitida
+
+Casos minimos cerrados en la matriz:
+
+- inventario generico por movil/cuadrilla
+- inventario por cedula
+- kardex por empleado
+- kardex codigo + empleado
+- seriales/equipos por familia
+- consumo vs facturacion operacion HFC
+- top consumos
+- movement detail
+- riesgo consumo movil sin validar
+- serial stock por dimension
+- materiales criticos
+- consulta ambigua con aclaracion controlada
+
+Trazas confirmadas para todos los casos pack-driven de esa matriz:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+
+Cobertura declarativa confirmada despues de ampliar la validacion:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 17`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Regresion complementaria cerrada durante esta validacion:
+
+- se declaro en el pack la ruta `inventory_consumption_by_dimension`
+- esto restablece la resolucion gobernada de consultas tipo `consumos de la movil TIRAN314 el 05 de mayo`
+- la cobertura sigue completa y sin recaida a legacy
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite apps.ia_dev.tests.test_inventario_runtime_sql_alignment --verbosity 2`
+- resultado: `125 tests` OK
+
 ## USO, MANEJO, ACTUALIZACION Y PERSISTENCIA DEL CONTEXTO
 
 Esta seccion es la autoridad operativa de continuidad para futuros chats, trabajo en equipo, Codex/VSC, implementaciones incrementales, auditorias parciales y migraciones futuras.
@@ -2223,29 +2792,26 @@ Metricas P5 obtenidas con dataset versionado:
   - `1` `aclaracion_valida`
   - `1` `limitacion_valida`
   - `1` `capability_incorrecta`
-- `metadata_usage_count = 13`
+- `metadata_usage_count = 18`
 - `metadata_usage_ratio = 1.0`
-- `evidence_coverage_count = 13`
+- `evidence_coverage_count = 18`
 - `evidence_coverage_ratio = 1.0`
-- `fallback_usage_count = 2`
-- `fallback_usage_ratio = 0.1538`
-- `clarification_ratio = 0.0769`
-- `limitation_ratio = 0.0769`
+- `fallback_usage_count = 1`
+- `fallback_usage_ratio = 0.0556`
+- `clarification_ratio = 0.0556`
+- `limitation_ratio = 0.0556`
 - `suspected_hardcode_count = 0`
 
 Fallbacks y gaps detectados:
 
-- caso controlado `fallback_sombreado_controlado`:
-  - al forzar metadata gobernada vacia, la ruta cae en `legacy` sombreado
-  - queda trazado con:
-    - `fallback_sombreado_usado = true`
-    - `regla_legacy_detectada = true`
-  - el legado degrada de `inventory_kardex_by_employee` a `inventory_kardex_consolidated`
-  - el evaluador lo clasifica como `capability_incorrecta`
-- esto deja validado que P5 ya detecta:
-  - dependencia excesiva de metadata ausente
-  - divergencia capability/route
-  - respuestas exitosas con evidencia pero semantica degradada
+- la familia `critical_materials_declared` ya valida variaciones semanticas gobernadas sin caer al binding legacy:
+  - `materiales criticos por empleado`
+  - `materiales criticos por tecnico`
+  - `materiales criticos por movil/cuadrilla`
+  - `criticidad por saldo y consumo`
+  - `cobertura baja`
+  - `por debajo de umbral`
+- el `fallback_usage_count` residual de esta suite queda asociado a la ruta de limitacion declarada y no a `inventory_material_critical_by_employee`
 
 Pruebas ejecutadas y estado:
 

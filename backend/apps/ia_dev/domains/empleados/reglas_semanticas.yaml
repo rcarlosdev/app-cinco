@@ -1,0 +1,485 @@
+reglas:
+  - id: empleados.route.population_count
+    clasificacion: authoritative_layer
+    descripcion: >
+      El conteo general de personal activo/inactivo sin identificador puntual ni agrupacion
+      se resuelve por la capability vigente de conteo.
+    metadata_gobernada:
+      dd_reglas:
+        - personal_activo_operativo
+      dd_sinonimos:
+        - empleados
+        - personal
+        - colaboradores
+        - activo
+        - inactivo
+      ia_dev_capacidades_columna:
+        - estado_empleado
+        - tipo_labor
+  - id: empleados.default.status_active
+    clasificacion: authoritative_layer
+    descripcion: >
+      Si la consulta de poblacion de empleados no trae estado explicito, el estado por defecto
+      observado por el runtime actual es ACTIVO.
+    metadata_gobernada:
+      dd_reglas:
+        - personal_activo_operativo
+      dd_sinonimos:
+        - activo
+        - vigente
+        - habilitado
+      ia_dev_capacidades_columna:
+        - estado_empleado
+  - id: empleados.alias.status_canonization
+    clasificacion: assistive_heuristic
+    descripcion: >
+      Canonizacion actual observada en Python para activo/inactivo, egresos, retiros,
+      desvinculacion, bajas y vigencia.
+    metadata_gobernada:
+      dd_reglas:
+        - personal_activo_operativo
+      dd_sinonimos:
+        - activo
+        - inactivo
+        - egresos
+        - retiros
+        - bajas
+      ia_dev_capacidades_columna:
+        - estado_empleado
+  - id: empleados.alias.labor_to_tipo_labor
+    clasificacion: assistive_heuristic
+    descripcion: >
+      Labor, tipo labor y tipo de labor se usan hoy como aliases de tipo_labor.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - labor
+        - tipo labor
+        - tipo de labor
+      ia_dev_capacidades_columna:
+        - tipo_labor
+  - id: empleados.route.population_grouped_dimension
+    clasificacion: authoritative_layer
+    descripcion: >
+      Las agrupaciones de personal activo o inactivo por dimensiones organizacionales
+      declaradas se resuelven por la capability agrupada del pack.
+    metadata_gobernada:
+      dd_reglas:
+        - personal_activo_operativo
+      dd_sinonimos:
+        - area
+        - cargo
+        - sede
+        - carpeta
+        - supervisor
+        - movil
+        - distribucion
+        - agrupado
+        - por
+      ia_dev_capacidades_columna:
+        - area
+        - cargo
+        - sede
+        - carpeta
+        - supervisor
+        - movil
+        - estado_empleado
+  - id: empleados.grouping.declared_dimensions
+    clasificacion: authoritative_layer
+    descripcion: >
+      Las dimensiones gobernadas para aggregate_by_group_and_period en empleados son
+      area, cargo, sede, carpeta, supervisor y movil. Cualquier otra dimension agrupada
+      debe quedar en fallback sombreado trazado hasta declararse formalmente.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - area
+        - cargo
+        - sede
+        - carpeta
+        - supervisor
+        - movil
+      ia_dev_capacidades_columna:
+        - area
+        - cargo
+        - sede
+        - carpeta
+        - supervisor
+        - movil
+  - id: empleados.limit.grouped_population_undeclared_dimension
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si la consulta agrupada usa una dimension fuera del set gobernado del pack, la
+      compatibilidad legacy puede rescatar la ruta mientras se modela metadata oficial.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - por
+        - agrupado
+        - distribucion
+      ia_dev_capacidades_columna: []
+  - id: empleados.limit.grouped_population_ambiguous_request
+    clasificacion: shadow_fallback
+    descripcion: >
+      Consultas de distribucion de personal sin dimension explicita siguen requiriendo
+      aclaracion estructural o rescate legacy trazado.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - distribucion
+        - agrupacion
+      ia_dev_capacidades_columna: []
+  - id: empleados.limit.grouped_population_metadata_gap
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si falta metadata gobernada suficiente para validar una agrupacion de empleados,
+      el registry debe conservar fallback legacy trazado y no inventar binding.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos: []
+      ia_dev_capacidades_columna: []
+  - id: empleados.route.employee_detail
+    clasificacion: authoritative_layer
+    descripcion: >
+      El detalle seguro de empleados por identificadores verificables o filtros
+      organizacionales declarados se resuelve por la capability de detalle del pack.
+    metadata_gobernada:
+      dd_reglas:
+        - personal_activo_operativo
+      dd_sinonimos:
+        - informacion
+        - detalle
+        - ficha
+        - datos
+      ia_dev_capacidades_columna:
+        - cedula
+        - movil
+        - nombre
+        - area
+        - cargo
+        - supervisor
+        - carpeta
+        - sede
+        - tipo_labor
+        - estado_empleado
+  - id: empleados.detail.declared_identifiers
+    clasificacion: authoritative_layer
+    descripcion: >
+      Los identificadores verificables permitidos para detalle gobernado son cedula,
+      movil y nombre declarado; codigo_sap no se expone ni gobierna esta fase.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - cedula
+        - documento
+        - identificacion
+        - movil
+        - nombre
+      ia_dev_capacidades_columna:
+        - cedula
+        - movil
+        - nombre
+  - id: empleados.detail.declared_filter_fields
+    clasificacion: authoritative_layer
+    descripcion: >
+      Los filtros declarados para detalle gobernado son area, cargo, supervisor,
+      carpeta, sede, tipo_labor y estado_empleado.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - area
+        - cargo
+        - supervisor
+        - jefe directo
+        - lider
+        - carpeta
+        - sede
+        - labor
+        - tipo labor
+        - estado
+        - activo
+        - inactivo
+      ia_dev_capacidades_columna:
+        - area
+        - cargo
+        - supervisor
+        - carpeta
+        - sede
+        - tipo_labor
+        - estado_empleado
+  - id: empleados.detail.safe_projection
+    clasificacion: technical_guardrail
+    descripcion: >
+      El detalle gobernado solo puede publicar columnas seguras del perfil declarativo
+      y nunca password, link_foto, codigo_sap ni campos sensibles no autorizados.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos: []
+      ia_dev_capacidades_columna:
+        - cedula
+        - nombre
+        - apellido
+        - cargo
+        - area
+        - supervisor
+        - carpeta
+        - sede
+        - tipo_labor
+        - movil
+        - estado_empleado
+  - id: empleados.limit.detail_unverifiable_entity
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si la consulta de detalle menciona una entidad no verificable por metadata declarada,
+      el registry conserva fallback legacy trazado.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - empleado
+        - tecnico
+        - persona
+      ia_dev_capacidades_columna:
+        - cedula
+        - movil
+        - nombre
+  - id: empleados.limit.detail_undeclared_filter
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si la consulta de detalle usa un filtro fuera del set declarado del pack,
+      la compatibilidad legacy puede rescatar la ruta mientras se modela metadata oficial.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - por
+        - de
+      ia_dev_capacidades_columna: []
+  - id: empleados.limit.detail_ambiguous_request
+    clasificacion: shadow_fallback
+    descripcion: >
+      Consultas de detalle sin entidad verificable ni filtro declarado suficiente siguen
+      requiriendo aclaracion estructural o rescate legacy trazado.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - informacion
+        - detalle
+        - datos
+      ia_dev_capacidades_columna: []
+  - id: empleados.limit.detail_insufficient_metadata
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si falta metadata gobernada suficiente para validar un detalle de empleados,
+      el registry debe conservar fallback legacy trazado y no inventar binding.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos: []
+      ia_dev_capacidades_columna: []
+  - id: empleados.route.birthdays_count
+    clasificacion: authoritative_layer
+    descripcion: >
+      El conteo gobernado de cumpleanos de empleados por mes se resuelve por
+      `count_records_by_period` en el pack cuando la semantica de periodo es
+      mensual y el campo de fecha de nacimiento esta gobernado.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - cumpleanos
+        - nacimiento
+        - cumplen anos
+        - mes actual
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - datos_birthday_fecha
+  - id: empleados.route.birthdays_grouped_dimension
+    clasificacion: authoritative_layer
+    descripcion: >
+      Los cumpleanos de empleados agrupados por dimensiones seguras o por mes
+      se resuelven desde `aggregate_by_group_and_period` cuando la familia
+      semantica es birthday.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - cumpleanos
+        - nacimiento
+        - por area
+        - por sede
+        - por mes
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - area
+        - sede
+        - cargo
+        - supervisor
+        - carpeta
+        - movil
+  - id: empleados.route.birthdays_detail
+    clasificacion: authoritative_layer
+    descripcion: >
+      El detalle seguro de cumpleanos por mes usa la misma proyeccion protegida
+      del dominio y solo publica columnas autorizadas.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - cumpleanos
+        - nacimiento
+        - empleados que cumplen anos
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - area
+        - cargo
+  - id: empleados.birthdays.declared_period_fields
+    clasificacion: authoritative_layer
+    descripcion: >
+      La familia de cumpleanos gobernada en esta fase solo admite periodos
+      mensuales resolubles por `fnacimiento_month`.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - mes
+        - este mes
+        - mes actual
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - datos_birthday_fecha
+  - id: empleados.birthdays.safe_grouping_dimensions
+    clasificacion: authoritative_layer
+    descripcion: >
+      Las dimensiones seguras para agrupacion de cumpleanos son area, cargo,
+      sede, carpeta, supervisor, movil y birth_month.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - area
+        - cargo
+        - sede
+        - carpeta
+        - supervisor
+        - movil
+        - mes
+      ia_dev_capacidades_columna:
+        - area
+        - cargo
+        - sede
+        - carpeta
+        - supervisor
+        - movil
+        - fecha_nacimiento
+  - id: empleados.birthdays.safe_projection
+    clasificacion: technical_guardrail
+    descripcion: >
+      La salida gobernada de cumpleanos conserva solo columnas seguras del pack
+      y nunca expone password, link_foto, codigo_sap ni otros campos sensibles.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos: []
+      ia_dev_capacidades_columna:
+        - cedula
+        - nombre
+        - apellido
+        - cargo
+        - area
+        - fecha_nacimiento
+        - estado_empleado
+  - id: empleados.limit.birthday_ambiguous_period
+    clasificacion: shadow_fallback
+    descripcion: >
+      Cumpleanos de hoy, proximos o cualquier periodo no reducible con seguridad
+      a `fnacimiento_month` conservan fallback legacy trazado hasta declarar una
+      semantica temporal mas fina.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - hoy
+        - proximos
+        - proximos cumpleanos
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - datos_birthday_fecha
+  - id: empleados.limit.birthday_ungoverned_date_field
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si la consulta de cumpleanos no puede validar un campo gobernado de fecha
+      de nacimiento, el registry debe conservar fallback legacy trazado.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - cumpleanos
+        - nacimiento
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - datos_birthday_fecha
+  - id: empleados.limit.birthday_insufficient_metadata
+    clasificacion: shadow_fallback
+    descripcion: >
+      Si falta metadata suficiente para validar filtros o dimensions seguras de
+      cumpleanos, el registry conserva fallback legacy trazado y no inventa binding.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - cumpleanos
+      ia_dev_capacidades_columna:
+        - fecha_nacimiento
+        - area
+        - sede
+  - id: empleados.limit.heights_certificate_pending_pack
+    clasificacion: compatibility_layer
+    descripcion: >
+      Certificados de alturas proximos a vencer o vencidos siguen resueltos por la ruta moderna
+      sql_assisted actual; el pack solo deja la traza de migracion pendiente.
+    metadata_gobernada:
+      dd_reglas:
+        - certificado_alturas_vigencia_anual
+        - certificado_alturas_vencido
+        - certificado_alturas_proximo_vencer_30_dias
+      dd_sinonimos:
+        - certificado de alturas
+        - alturas
+        - proximos a vencer
+      ia_dev_capacidades_columna:
+        - certificado_alturas_fecha_emision
+        - certificado_alturas_fecha_vencimiento
+        - certificado_alturas_estado_vigencia
+  - id: empleados.limit.turnover_pending_pack
+    clasificacion: compatibility_layer
+    descripcion: >
+      Rotacion de personal y su ventana temporal por defecto siguen en reglas Python del runtime
+      mientras se diseña la version declarativa completa.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - rotacion
+        - turnover
+        - egresos
+      ia_dev_capacidades_columna:
+        - fecha_egreso
+        - estado_empleado
+  - id: empleados.limit.missingness_pending_pack
+    clasificacion: technical_guardrail
+    descripcion: >
+      Operadores de faltantes e incompletitud siguen protegidos por la normalizacion tecnica
+      existente y no deben migrarse como autoridad de ejecucion en esta fase.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos:
+        - falta
+        - faltan
+        - no tiene
+      ia_dev_capacidades_columna:
+        - celular_personal
+        - celular_alterno
+        - documento_identidad_lado_a
+  - id: empleados.limit.sensitive_fields_hidden
+    clasificacion: technical_guardrail
+    descripcion: >
+      Fotos, imagenes, telefonos personales y otros campos sensibles no deben exponerse por
+      defecto en respuestas modernas ni en perfiles de salida del pack.
+    metadata_gobernada:
+      dd_reglas: []
+      dd_sinonimos: []
+      ia_dev_capacidades_columna:
+        - foto_empleado
+        - imagen_empleado
+        - link_foto
+        - password
+        - celular_personal
+        - celular_alterno

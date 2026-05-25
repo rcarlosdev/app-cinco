@@ -114,6 +114,19 @@ perfiles_respuesta:
       - descripcion
       - tipo
       - saldo
+  - id: inventory.stock.critical.employee
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - cedula
+      - movil
+      - codigo
+      - descripcion
+      - tipo
+      - saldo_actual
+      - consumo_ultimos_8_dias
+      - umbral_3_dias
+      - estado_critico
   - id: inventory.kardex.employee.detail
     expected_output: kardex_operativo
     grain: movimiento_por_codigo
@@ -157,6 +170,60 @@ perfiles_respuesta:
       - cedula
       - movil
       - saldo
+  - id: inventory.serial.dimension.summary
+    expected_output: inventario_serializado
+    grain: serial_por_codigo_y_estado
+    columnas:
+      - estado
+      - codigo
+      - descripcion
+      - saldo
+  - id: inventory.risk.serial.detail
+    expected_output: inventario_serializado
+    grain: serial_por_codigo_y_estado
+    columnas:
+      - serial
+      - codigo
+      - estado
+      - ubicacion
+      - fecha
+  - id: inventory.consumption.top.summary
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - descripcion
+      - tipo
+      - cantidad
+  - id: inventory.consumption.dimension.summary
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - descripcion
+      - tipo
+      - cantidad
+      - fecha
+      - cedula
+      - movil
+      - bodega
+  - id: inventory.movement.detail
+    expected_output: saldo_inventario
+    grain: movimiento_por_fecha_y_codigo
+    columnas:
+      - codigo
+      - cantidad
+      - fecha
+      - bodega
+  - id: inventory.reconciliation.operacion_hfc
+    expected_output: saldo_inventario
+    grain: saldo_por_codigo
+    columnas:
+      - codigo
+      - cantidad
+      - orden_trabajo
+      - tipo
+      - bodega
   - id: inventory.traceability.serial.detail
     expected_output: inventario_serializado
     grain: serial_por_codigo_y_estado
