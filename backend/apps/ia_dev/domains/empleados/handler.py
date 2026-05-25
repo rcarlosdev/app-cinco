@@ -29,6 +29,39 @@ class EmpleadosHandleResult:
 
 class EmpleadosHandler:
     _ALLOWED_TEMPORAL_COLUMNS = {"fecha_ingreso", "fecha_egreso"}
+    _SAFE_DETAIL_COLUMNS = [
+        "cedula",
+        "nombre",
+        "apellido",
+        "cargo",
+        "area",
+        "supervisor",
+        "carpeta",
+        "tipo_labor",
+        "movil",
+        "sede",
+        "estado",
+    ]
+    _SAFE_DETAIL_COLUMNS_BY_MOVIL = [
+        "cedula",
+        "nombre",
+        "apellido",
+        "cargo",
+        "area",
+        "carpeta",
+        "tipo_labor",
+        "movil",
+        "estado",
+    ]
+    _SAFE_DETAIL_COLUMNS_BIRTHDAY = [
+        "cedula",
+        "nombre",
+        "apellido",
+        "cargo",
+        "area",
+        "fecha_nacimiento",
+        "estado",
+    ]
 
     def __init__(self, *, service: EmpleadoService | None = None, org_context: OrganizationalContextService | None = None):
         self.service = service or EmpleadoService()
@@ -99,11 +132,15 @@ class EmpleadosHandler:
                     empleados=detalle_rows,
                     filtros_aplicados=filtros_aplicados,
                 )
+                safe_rows = self._project_detail_rows(
+                    empleados=detalle_rows,
+                    table_columns=table_columns,
+                )
                 payload["kpis"] = {"total_empleados": int(len(detalle_rows))}
                 payload["table"] = {
                     "columns": table_columns,
-                    "rows": detalle_rows,
-                    "rowcount": len(detalle_rows),
+                    "rows": safe_rows,
+                    "rowcount": len(safe_rows),
                 }
                 payload["insights"] = [
                     f"Consulta de detalle de empleados resuelta con filtros: {filtros_aplicados or {}}."
@@ -616,7 +653,7 @@ class EmpleadosHandler:
                     "estado": str(row.get("estado") or "").strip(),
                     "codigo_sap": str(row.get("codigo_sap") or "").strip(),
                     "sede": str(row.get("sede") or "").strip(),
-                    "fnacimiento": row.get("fnacimiento").isoformat() if row.get("fnacimiento") else "",
+                    "fecha_nacimiento": row.get("fnacimiento").isoformat() if row.get("fnacimiento") else "",
                     "link_foto": str(row.get("link_foto") or "").strip(),
                 }
             )
@@ -629,21 +666,27 @@ class EmpleadosHandler:
         filtros_aplicados: dict[str, Any],
     ) -> list[str]:
         if str((filtros_aplicados or {}).get("movil") or "").strip():
-            return ["cedula", "nombre", "apellido", "cargo", "area", "carpeta", "tipo_labor", "movil"]
+            return list(EmpleadosHandler._SAFE_DETAIL_COLUMNS_BY_MOVIL)
         if str((filtros_aplicados or {}).get("fnacimiento_month") or "").strip():
-            return ["cedula", "nombre", "apellido", "cargo", "area", "fnacimiento", "estado"]
-        if empleados:
-            return list(empleados[0].keys())
+            return list(EmpleadosHandler._SAFE_DETAIL_COLUMNS_BIRTHDAY)
+        return list(EmpleadosHandler._SAFE_DETAIL_COLUMNS)
+
+    @staticmethod
+    def _project_detail_rows(
+        *,
+        empleados: list[dict[str, Any]],
+        table_columns: list[str],
+    ) -> list[dict[str, Any]]:
+        allowed = [str(item or "").strip() for item in list(table_columns or []) if str(item or "").strip()]
+        if not allowed:
+            return []
         return [
-            "cedula",
-            "nombre",
-            "apellido",
-            "cargo",
-            "area",
-            "carpeta",
-            "tipo_labor",
-            "estado",
-            "fnacimiento",
+            {
+                column: row.get(column, "")
+                for column in allowed
+            }
+            for row in list(empleados or [])
+            if isinstance(row, dict)
         ]
 
     def _resolve_detail_filters(

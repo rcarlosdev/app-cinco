@@ -14,6 +14,10 @@ from apps.ia_dev.application.contracts.query_intelligence_contracts import (
 from apps.ia_dev.application.delegation.domain_registry import DomainRegistry
 from apps.ia_dev.application.semantic.column_semantic_resolver import ColumnSemanticResolver
 from apps.ia_dev.application.semantic.query_intent_resolver import QueryIntentResolver
+from apps.ia_dev.application.semantic.semantic_capability_registry import (
+    SemanticBindingRequest,
+    SemanticCapabilityRegistry,
+)
 from apps.ia_dev.application.semantic.relation_semantic_resolver import RelationSemanticResolver
 from apps.ia_dev.application.semantic.rule_semantic_resolver import RuleSemanticResolver
 from apps.ia_dev.application.semantic.synonym_semantic_resolver import SynonymSemanticResolver
@@ -84,6 +88,7 @@ class SemanticBusinessResolver:
         self.relation_resolver = relation_resolver or RelationSemanticResolver()
         self.rule_resolver = rule_resolver or RuleSemanticResolver()
         self.synonym_resolver = synonym_resolver or SynonymSemanticResolver()
+        self.semantic_capability_registry = SemanticCapabilityRegistry()
 
     def build_semantic_context(self, *, domain_code: str, include_dictionary: bool = True) -> dict[str, Any]:
         normalized_domain = self.registry.normalize_domain_code(domain_code)
@@ -869,6 +874,24 @@ class SemanticBusinessResolver:
             "temporal_scope": dict(temporal_scope or {}),
             "field_match": dict(semantic_field_match or {}),
         }
+        if domain_code in {"empleados", "rrhh"}:
+            registry_binding = self.semantic_capability_registry.resolve(
+                SemanticBindingRequest(
+                    domain="empleados",
+                    message=message,
+                    intent=resolved_operation or str(intent.operation or ""),
+                    normalized_filters=dict(normalized_filters or {}),
+                    group_by=list(resolved_group_by or []),
+                    semantic_context=semantic_context,
+                    source_hints={
+                        "template_id": resolved_template_id or str(intent.template_id or ""),
+                        "metrics": list(resolved_metrics or []),
+                    },
+                )
+            ).as_dict()
+            semantic_context["semantic_capability_registry"] = dict(registry_binding)
+            resolution_payload["semantic_capability_registry"] = dict(registry_binding)
+            resolution_payload["binding_trace"] = dict(registry_binding)
         semantic_context["resolved_semantic"] = resolution_payload
         semantic_context["temporal_scope"] = dict(temporal_scope or {})
         if semantic_field_match:

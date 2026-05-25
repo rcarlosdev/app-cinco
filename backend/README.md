@@ -2,6 +2,10 @@
 
 Este backend esta pensado para operar en entornos controlados, donde la base de datos ya existe y no debe alterarse sin aprobacion.
 
+## Punto de arranque para Codex
+
+Antes de trabajar con IA DEV o agentes empresariales, leer `backend/START_HERE_CODEX.md`.
+
 ## Requisitos
 
 - Python 3.11+
