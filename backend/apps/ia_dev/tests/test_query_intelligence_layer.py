@@ -71,6 +71,70 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(intent.template_id, "count_entities_by_status")
         self.assertEqual(dict(intent.period or {}), {})
 
+    def test_semantic_business_resolver_attaches_employee_pack_trace_for_active_population(self):
+        from apps.ia_dev.application.semantic.semantic_business_resolver import SemanticBusinessResolver
+
+        resolver = SemanticBusinessResolver()
+        intent = StructuredQueryIntent(
+            raw_query="personal activo hoy",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_entities_by_status",
+            filters={},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.9,
+            source="rules",
+        )
+
+        resolved = resolver.resolve_query(
+            message="personal activo hoy",
+            intent=intent,
+            base_classification={"domain": "empleados", "intent": "empleados_query", "needs_database": True},
+            semantic_context_override=resolver.build_semantic_context(domain_code="empleados"),
+        )
+
+        binding = dict(resolved.semantic_context.get("semantic_capability_registry") or {})
+        trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+        self.assertEqual(str(binding.get("source") or ""), "capability_pack")
+        self.assertEqual(str(binding.get("candidate_capability") or ""), "empleados.count.active.v1")
+        self.assertEqual(str(trace.get("response_profile") or ""), "empleados.count.active.summary")
+        self.assertEqual(float(trace.get("capability_pack_coverage") or 0.0), 1.0)
+        self.assertEqual(list(trace.get("templates_missing_selection_rules") or []), [])
+
+    def test_semantic_business_resolver_attaches_employee_pack_trace_for_birthday_month(self):
+        from apps.ia_dev.application.semantic.semantic_business_resolver import SemanticBusinessResolver
+
+        resolver = SemanticBusinessResolver()
+        intent = StructuredQueryIntent(
+            raw_query="empleados que cumplen anos este mes",
+            domain_code="empleados",
+            operation="count",
+            template_id="count_records_by_period",
+            filters={},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.9,
+            source="rules",
+        )
+
+        resolved = resolver.resolve_query(
+            message="empleados que cumplen anos este mes",
+            intent=intent,
+            base_classification={"domain": "empleados", "intent": "empleados_query", "needs_database": True},
+            semantic_context_override=resolver.build_semantic_context(domain_code="empleados"),
+        )
+
+        binding = dict(resolved.semantic_context.get("semantic_capability_registry") or {})
+        trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+        self.assertEqual(str(binding.get("source") or ""), "capability_pack")
+        self.assertEqual(str(binding.get("template_id") or ""), "count_records_by_period")
+        self.assertEqual(str(binding.get("candidate_capability") or ""), "empleados.count.active.v1")
+        self.assertEqual(str(trace.get("response_profile") or ""), "empleados.birthday.summary")
+        self.assertFalse(bool(trace.get("fallback_used")))
+
     def test_query_intent_resolver_treats_colaboradores_activos_as_employee_count(self):
         resolver = QueryIntentResolver()
         with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
@@ -610,6 +674,39 @@ class QueryIntelligenceLayerTests(SimpleTestCase):
         self.assertEqual(intent.operation, "detail")
         self.assertEqual(intent.template_id, "detail_by_entity_and_period")
         self.assertEqual(str(intent.filters.get("cedula") or ""), "123456")
+
+    def test_query_intent_resolver_treats_listar_empleados_inactivos_as_employee_detail(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="listar empleados inactivos",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "empleados_query",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "detail")
+        self.assertEqual(intent.template_id, "detail_by_entity_and_period")
+        self.assertEqual(str(intent.filters.get("estado") or ""), "INACTIVO")
+
+    def test_query_intent_resolver_treats_mostrar_personal_por_supervisor_as_employee_detail(self):
+        resolver = QueryIntentResolver()
+        with patch.dict(os.environ, {"IA_DEV_QUERY_INTELLIGENCE_OPENAI_ENABLED": "0"}, clear=False):
+            intent = resolver.resolve(
+                message="mostrar personal por supervisor",
+                base_classification={
+                    "domain": "empleados",
+                    "intent": "empleados_query",
+                    "needs_database": True,
+                },
+                semantic_context={},
+            )
+        self.assertEqual(intent.domain_code, "empleados")
+        self.assertEqual(intent.operation, "detail")
+        self.assertEqual(intent.template_id, "detail_by_entity_and_period")
 
     def test_query_intent_resolver_merge_discards_search_when_identifier_is_present(self):
         fallback = StructuredQueryIntent(

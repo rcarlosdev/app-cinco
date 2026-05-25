@@ -1,6 +1,6 @@
 nombre_paquete: inventario_logistica
 dominio: inventario_logistica
-version: 1.0.0
+version: 1.2.0
 descripcion: >
   Capability Pack empresarial para incorporar procesos operativos de inventario y logistica
   sobre metadata gobernada, capabilities declaradas y respuesta evidence-first.
@@ -31,6 +31,633 @@ limitaciones_declaradas:
   - attachment_required
   - provider_file_empty
   - serial_column_not_detected
+semantic_bindings:
+  - template_id: inventory_material_stock_mobile
+    candidate_capability: inventory_stock_balance_by_mobile
+    planner_route_hint: inventory.material_stock.mobile
+    response_profile: inventory.stock.mobile.detail
+    tool_id: inventory_stock_balance_by_mobile
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields:
+      - movil
+      - cedula
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - saldo_por_codigo
+      - saldo_por_empleado_codigo
+    selection_rules:
+      - priority: 96
+        intent_ids:
+          - stock_balance
+          - stock_query
+        stock_scopes:
+          - movil
+        business_concepts:
+          - stock_movil
+        declared_rules:
+          - inventario.route.stock_balance_holder
+      - priority: 85
+        intent_ids:
+          - stock_balance
+          - stock_query
+        entity_fields:
+          - movil
+          - cedula
+        declared_rules:
+          - inventario.route.stock_balance_holder
+      - priority: 84
+        intent_ids:
+          - stock_balance
+          - stock_query
+        normalized_filters_any_of:
+          - movil
+          - cedula
+        stock_scopes:
+          - movil
+        forbid_business_concepts:
+          - materiales_criticos_por_empleado
+        declared_rules:
+          - inventario.route.stock_balance_holder
+  - template_id: inventory_material_stock_grouped_dimension
+    candidate_capability: inventory_stock_balance_by_material_dimension
+    planner_route_hint: inventory.material_stock.dimension
+    response_profile: inventory.stock.dimension.summary
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields:
+      - codigo
+      - descripcion
+      - movil
+      - cedula
+      - bodega
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - saldo_por_dimension_y_codigo
+    selection_rules:
+      - priority: 95
+        intent_ids:
+          - stock_balance
+          - stock_query
+        group_by_any_of:
+          - movil
+          - cedula
+          - bodega
+        normalized_filters_any_of:
+          - codigo
+          - descripcion
+        normalized_filters_absent:
+          - cedula
+          - movil
+        forbid_business_concepts:
+          - materiales_criticos_por_empleado
+        declared_rules:
+          - inventario.route.stock_balance_material_grouped_dimension
+      - priority: 94
+        intent_ids:
+          - stock_balance
+          - stock_query
+        group_by_any_of:
+          - movil
+          - cedula
+        normalized_filters_any_of:
+          - tipo
+        normalized_filters_absent:
+          - cedula
+          - movil
+        forbid_business_concepts:
+          - stock_movil
+          - materiales_criticos_por_empleado
+        declared_rules:
+          - inventario.route.stock_balance_material_grouped_dimension
+  - template_id: inventory_serial_stock_by_family_grouped_dimension
+    candidate_capability: inventory_serial_stock_by_family_grouped_dimension
+    planner_route_hint: inventory.serial_stock.family_dimension
+    response_profile: inventory.serial.stock.dimension.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields: []
+    families:
+      - serializados
+      - equipos
+      - cpe
+    output_profiles:
+      - saldo_serializado_por_dimension_y_codigo
+    selection_rules:
+      - priority: 98
+        intent_ids:
+          - stock_balance
+          - stock_query
+        families:
+          - serializados
+          - equipos
+          - cpe
+        group_by_any_of:
+          - movil
+          - cedula
+          - bodega
+        normalized_filters_all_of:
+          - material_family
+        normalized_filters_absent:
+          - cedula
+          - movil
+          - serial
+        declared_rules:
+          - inventario.route.serial_stock_family_grouped_dimension
+  - template_id: inventory_material_stock_by_warehouse
+    candidate_capability: inventory_stock_balance_by_warehouse
+    planner_route_hint: inventory.material_stock.warehouse
+    response_profile: inventory.stock.warehouse.detail
+    tool_id: inventory_stock_balance_by_warehouse
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields:
+      - bodega
+    families:
+      - material
+      - ferretero
+    output_profiles:
+      - saldo_por_codigo
+    selection_rules:
+      - priority: 83
+        intent_ids:
+          - stock_balance
+          - stock_query
+        stock_scopes:
+          - bodega
+        group_by_any_of:
+          - bodega
+        declared_rules:
+          - inventario.metric.stock_include_zero_negative
+  - template_id: inventory_material_stock_balance
+    candidate_capability: inventory_stock_balance
+    planner_route_hint: inventory.material_stock.balance
+    response_profile: inventory.stock.balance.summary
+    tool_id: inventory_stock_balance
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields:
+      - codigo
+      - descripcion
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - saldo_por_codigo
+    selection_rules:
+      - priority: 10
+        intent_ids:
+          - stock_balance
+          - stock_query
+        normalized_filters_any_of:
+          - codigo
+          - descripcion
+        declared_rules:
+          - inventario.metric.stock_include_zero_negative
+  - template_id: inventory_material_critical_by_employee
+    candidate_capability: inventory_stock_balance_by_mobile
+    planner_route_hint: inventory.material_stock.critical_employee
+    response_profile: inventory.stock.critical.employee
+    tool_id: inventory_stock_balance_by_mobile
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields:
+      - cedula
+      - movil
+      - bodega
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - saldo_por_codigo
+    selection_rules:
+      - priority: 97
+        intent_ids:
+          - stock_balance
+          - stock_query
+        entity_fields: []
+        business_concepts:
+          - materiales_criticos_por_empleado
+        declared_rules:
+          - inventario.route.critical_materials_by_employee
+  - template_id: inventory_kardex_by_employee
+    candidate_capability: inventory_kardex_by_employee
+    planner_route_hint: inventory.kardex.employee
+    response_profile: inventory.kardex.employee.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - movement_history
+    entity_fields:
+      - cedula
+    families:
+      - material
+      - ferretero
+    output_profiles:
+      - movimiento_por_codigo
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - movement_history
+        entity_fields:
+          - cedula
+        declared_rules:
+          - inventario.route.kardex_employee
+      - priority: 99
+        intent_ids:
+          - movement_history
+        normalized_filters_any_of:
+          - cedula
+        declared_rules:
+          - inventario.route.kardex_employee
+  - template_id: inventory_kardex_consolidated
+    candidate_capability: inventory_kardex_consolidated
+    planner_route_hint: inventory.kardex.consolidated
+    response_profile: inventory.kardex.consolidated.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - movement_history
+    entity_fields:
+      - codigo
+    families:
+      - material
+      - ferretero
+    output_profiles:
+      - movimiento_por_fecha_y_codigo
+    selection_rules:
+      - priority: 90
+        intent_ids:
+          - movement_history
+        entity_fields:
+          - codigo
+        normalized_filters_absent:
+          - cedula
+        declared_rules:
+          - inventario.route.kardex_codigo
+      - priority: 89
+        intent_ids:
+          - movement_history
+        normalized_filters_any_of:
+          - codigo
+        normalized_filters_absent:
+          - cedula
+        declared_rules:
+          - inventario.route.kardex_codigo
+  - template_id: inventory_movement_detail
+    candidate_capability: inventory_movement_detail
+    planner_route_hint: inventory.movement.detail
+    response_profile: inventory.movement.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - movement_query
+    entity_fields:
+      - codigo
+      - bodega
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - movimiento_por_fecha_y_codigo
+    selection_rules:
+      - priority: 88
+        intent_ids:
+          - movement_query
+        forbid_group_by_any_of:
+          - mes
+        declared_rules:
+          - inventario.route.movement_detail
+  - template_id: inventory_serial_by_operational_holder
+    candidate_capability: inventory_serial_by_operational_holder
+    planner_route_hint: inventory.serial.holder
+    response_profile: inventory.serial.holder.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - serial_holder_query
+    entity_fields:
+      - cedula
+      - movil
+      - serial
+    families:
+      - serializados
+      - equipos
+      - cpe
+    output_profiles:
+      - serial_por_codigo_y_estado
+    selection_rules:
+      - priority: 95
+        intent_ids:
+          - serial_holder_query
+        entity_fields:
+          - cedula
+          - movil
+          - serial
+        families:
+          - serializados
+          - equipos
+          - cpe
+        declared_rules:
+          - inventario.route.serial_holder
+  - template_id: inventory_document_generation_pending
+    candidate_capability: inventory_document_generation_pending
+    planner_route_hint: inventory.document_generation.pending
+    response_profile: inventory.document_generation.pending
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - document_generation
+    entity_fields:
+      - cedula
+    families:
+      - generic_inventory
+    output_profiles:
+      - documento_pendiente
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - document_generation
+        declared_rules:
+          - inventario.limit.document_generation_pending
+  - template_id: inventory_transfer_destination_not_available
+    candidate_capability: inventory_transfer_destination_not_available
+    planner_route_hint: inventory.transfer.destination_unresolved
+    response_profile: inventory.transfer.destination.blocked
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - transfer_query
+    entity_fields:
+      - bodega
+    families:
+      - generic_inventory
+    output_profiles:
+      - movimiento_por_fecha_y_codigo
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - transfer_query
+        entity_fields: []
+        group_by_any_of:
+          - bodega_destino
+        declared_rules:
+          - inventario.limit.transfer_destination_missing_metadata
+  - template_id: inventory_traceability_by_serial
+    candidate_capability: inventory_traceability_by_serial
+    planner_route_hint: inventory.traceability.serial
+    response_profile: inventory.traceability.serial.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - traceability_query
+    entity_fields:
+      - serial
+    families:
+      - serializados
+      - equipos
+      - cpe
+    output_profiles:
+      - serial_por_codigo_y_estado
+    selection_rules:
+      - priority: 95
+        intent_ids:
+          - traceability_query
+        entity_fields:
+          - serial
+        families:
+          - serializados
+          - equipos
+          - cpe
+  - template_id: inventory_serial_stock_by_dimension
+    candidate_capability: inventory_serial_stock_by_dimension
+    planner_route_hint: inventory.serial.stock.dimension
+    response_profile: inventory.serial.dimension.summary
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - stock_balance
+      - stock_query
+    entity_fields: []
+    families:
+      - serializados
+      - equipos
+      - cpe
+    output_profiles:
+      - serial_por_codigo_y_estado
+    selection_rules:
+      - priority: 94
+        intent_ids:
+          - stock_balance
+          - stock_query
+        families:
+          - serializados
+          - equipos
+          - cpe
+        group_by_any_of:
+          - estado
+          - bodega
+          - ubicacion
+          - codigo
+        normalized_filters_absent:
+          - cedula
+          - movil
+          - serial
+        forbid_group_by_any_of:
+          - cedula
+          - movil
+        declared_rules:
+          - inventario.route.serial_stock_dimension
+  - template_id: inventory_risk_consumo_movil_sin_validar
+    candidate_capability: inventory_risk_consumo_movil_sin_validar
+    planner_route_hint: inventory.risk.consumo_movil_sin_validar
+    response_profile: inventory.risk.serial.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - risk_detection
+    entity_fields: []
+    families:
+      - serializados
+      - equipos
+      - cpe
+    output_profiles:
+      - serial_por_codigo_y_estado
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - risk_detection
+        families:
+          - serializados
+          - equipos
+          - cpe
+        business_concepts:
+          - consumo_movil_sin_validar
+        declared_rules:
+          - inventario.route.risk_consumo_movil_sin_validar
+  - template_id: inventory_consumption_top
+    candidate_capability: inventory_consumption_top
+    planner_route_hint: inventory.consumption.top
+    response_profile: inventory.consumption.top.summary
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - consumption_query
+    entity_fields: []
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - saldo_por_codigo
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - consumption_query
+        business_concepts:
+          - materiales_mas_consumidos
+        declared_rules:
+          - inventario.route.consumption_top
+  - template_id: inventory_consumption_by_dimension
+    candidate_capability: inventory_consumption_by_dimension
+    planner_route_hint: inventory.consumption.dimension
+    response_profile: inventory.consumption.dimension.summary
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - consumption_query
+    entity_fields:
+      - movil
+      - cedula
+      - codigo
+    families:
+      - material
+      - ferretero
+      - generic_inventory
+    output_profiles:
+      - saldo_por_codigo
+    selection_rules:
+      - priority: 92
+        intent_ids:
+          - consumption_query
+        normalized_filters_any_of:
+          - movil
+          - cedula
+          - month
+        forbid_business_concepts:
+          - materiales_mas_consumidos
+        declared_rules:
+          - inventario.route.consumption_dimension
+  - template_id: inventory_consumption_billing_operacion_hfc
+    candidate_capability: inventory_consumption_billing_operacion_hfc
+    planner_route_hint: inventory.reconciliation.operacion_hfc
+    response_profile: inventory.reconciliation.operacion_hfc
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - reconciliation_query
+    entity_fields:
+      - codigo
+      - bodega
+      - orden_trabajo
+    families: []
+    output_profiles:
+      - saldo_por_codigo
+    selection_rules:
+      - priority: 100
+        intent_ids:
+          - reconciliation_query
+        business_concepts:
+          - consumo_vs_facturacion
+        normalized_filter_values:
+          bodega:
+            - OPERACION_HFC
+        declared_rules:
+          - inventario.route.reconciliation_operacion_hfc
+  - template_id: inventory_transfer_warehouse
+    candidate_capability: inventory_transfer_warehouse
+    planner_route_hint: inventory.transfer.warehouse
+    response_profile: inventory.transfer.warehouse.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - transfer_query
+      - return_query
+    entity_fields:
+      - bodega
+    families:
+      - material
+      - ferretero
+    output_profiles:
+      - movimiento_por_fecha_y_codigo
+    selection_rules:
+      - priority: 96
+        intent_ids:
+          - transfer_query
+          - return_query
+        normalized_filter_values:
+          movimiento:
+            - TRASLADO_BODEGA
+        declared_rules:
+          - inventario.route.transfer_warehouse
+      - priority: 80
+        intent_ids:
+          - return_query
+        declared_rules:
+          - inventario.route.transfer_warehouse
+  - template_id: inventory_transfer_other_ally
+    candidate_capability: inventory_transfer_other_ally
+    planner_route_hint: inventory.transfer.other_ally
+    response_profile: inventory.transfer.other_ally.detail
+    tool_id: query_execution_planner.sql_assisted
+    intent_ids:
+      - transfer_query
+    entity_fields:
+      - bodega
+    families:
+      - material
+      - ferretero
+    output_profiles:
+      - movimiento_por_fecha_y_codigo
+    selection_rules:
+      - priority: 97
+        intent_ids:
+          - transfer_query
+        normalized_filter_values:
+          movimiento:
+            - TRASLADOS_OTRO_ALIADO
+        declared_rules:
+          - inventario.route.transfer_other_ally
+  - template_id: inventory_provider_serial_validation
+    candidate_capability: inventory_provider_serial_validation
+    planner_route_hint: inventory.serial.validation.provider_file
+    response_profile: inventory.serial.validation.provider_file.detail
+    tool_id: inventory_provider_serial_validation
+    intent_ids:
+      - provider_serial_validation
+    entity_fields:
+      - serial
+      - cedula
+      - movil
+    families:
+      - serializados
+      - equipos
+      - cpe
+      - generic_inventory
+    output_profiles:
+      - serial_proveedor_validado
+    selection_rules:
+      - priority: 99
+        intent_ids:
+          - provider_serial_validation
+        entity_fields: []
+        requires_attachment: true
+        declared_rules:
+          - inventario.route.provider_serial_validation
 capacidades:
   - capability_id: inventory_stock_balance_by_mobile
     template_id: inventory_material_stock_mobile
@@ -104,6 +731,20 @@ capacidades:
       - inventario_runtime_eval_v1
     limitaciones:
       - result_set_empty
+  - capability_id: inventory_stock_balance_by_mobile
+    template_id: inventory_material_critical_by_employee
+    planner_route_hint: inventory.material_stock.critical_employee
+    response_profile: inventory.stock.critical.employee
+    tools:
+      - inventory_stock_balance_by_mobile
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.critical_materials_by_employee
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
   - capability_id: inventory_kardex_by_employee
     template_id: inventory_kardex_by_employee
     planner_route_hint: inventory.kardex.employee
@@ -129,6 +770,19 @@ capacidades:
     reglas:
       - inventario.route.kardex_codigo
       - inventario.kardex.signos_operativos
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_movement_detail
+    template_id: inventory_movement_detail
+    planner_route_hint: inventory.movement.detail
+    response_profile: inventory.movement.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.movement_detail
     evaluaciones:
       - inventario_runtime_eval_v1
     limitaciones:
@@ -186,6 +840,74 @@ capacidades:
       - inventario_runtime_eval_v1
     limitaciones:
       - result_set_empty
+  - capability_id: inventory_serial_stock_by_dimension
+    template_id: inventory_serial_stock_by_dimension
+    planner_route_hint: inventory.serial.stock.dimension
+    response_profile: inventory.serial.dimension.summary
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.serial_stock_dimension
+      - inventario.metric.serial_count_only
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_risk_consumo_movil_sin_validar
+    template_id: inventory_risk_consumo_movil_sin_validar
+    planner_route_hint: inventory.risk.consumo_movil_sin_validar
+    response_profile: inventory.risk.serial.detail
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.risk_consumo_movil_sin_validar
+      - inventario.metric.serial_count_only
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_consumption_top
+    template_id: inventory_consumption_top
+    planner_route_hint: inventory.consumption.top
+    response_profile: inventory.consumption.top.summary
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.consumption_top
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_consumption_by_dimension
+    template_id: inventory_consumption_by_dimension
+    planner_route_hint: inventory.consumption.dimension
+    response_profile: inventory.consumption.dimension.summary
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.consumption_dimension
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+  - capability_id: inventory_consumption_billing_operacion_hfc
+    template_id: inventory_consumption_billing_operacion_hfc
+    planner_route_hint: inventory.reconciliation.operacion_hfc
+    response_profile: inventory.reconciliation.operacion_hfc
+    tools:
+      - query_execution_planner.sql_assisted
+    approval_policy: auto_read_only
+    reglas:
+      - inventario.route.reconciliation_operacion_hfc
+    evaluaciones:
+      - inventario_runtime_eval_v1
+    limitaciones:
+      - result_set_empty
+      - scope_required:operacion_hfc
   - capability_id: inventory_transfer_warehouse
     template_id: inventory_transfer_warehouse
     planner_route_hint: inventory.transfer.warehouse

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from datetime import date
 
 from django.test import SimpleTestCase
 
@@ -90,6 +91,7 @@ class _FakeListadoQuerySet:
                 "estado": "ACTIVO",
                 "codigo_sap": "SAP-11",
                 "sede": "Bogota",
+                "fnacimiento": date(1990, 5, 11),
                 "link_foto": "",
             },
             {
@@ -106,6 +108,7 @@ class _FakeListadoQuerySet:
                 "estado": "ACTIVO",
                 "codigo_sap": "SAP-12",
                 "sede": "Bogota",
+                "fnacimiento": date(1992, 5, 21),
                 "link_foto": "",
             },
         ]
@@ -561,11 +564,144 @@ class EmpleadosHandlerTests(SimpleTestCase):
         self.assertEqual(str(rows[0].get("movil") or ""), "TIRAN462")
         self.assertEqual(
             list(table.get("columns") or []),
-            ["cedula", "nombre", "apellido", "cargo", "area", "carpeta", "tipo_labor", "movil"],
+            ["cedula", "nombre", "apellido", "cargo", "area", "carpeta", "tipo_labor", "movil", "estado"],
+        )
+        self.assertNotIn("link_foto", list(table.get("columns") or []))
+        self.assertNotIn("codigo_sap", list(table.get("columns") or []))
+        self.assertEqual(
+            list(rows[0].keys()),
+            ["cedula", "nombre", "apellido", "cargo", "area", "carpeta", "tipo_labor", "movil", "estado"],
         )
         self.assertIn("integrantes de la movil tiran462", str(response.get("reply") or "").lower())
         self.assertIn("si deseas conocer algo especifico adicional de esta movil", str(response.get("reply") or "").lower())
         self.assertEqual(handler.service.last_list_query_params, {"movil": "TIRAN462"})
+
+    def test_handle_resuelve_detalle_por_supervisor_con_columnas_seguras(self):
+        handler = EmpleadosHandler(service=_FakeEmpleadoService())
+        intent = StructuredQueryIntent(
+            raw_query="mostrar personal por supervisor",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={"supervisor": "10203040", "estado": "ACTIVO"},
+            period={},
+            group_by=[],
+            metrics=[],
+            confidence=0.9,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={},
+            normalized_filters={"supervisor": "10203040", "estado": "ACTIVO"},
+            normalized_period={},
+            mapped_columns={"supervisor": "supervisor", "estado": "estado"},
+        )
+        execution_plan = QueryExecutionPlan(
+            strategy="capability",
+            reason="capability_selected_from_query_intelligence",
+            domain_code="empleados",
+            capability_id="empleados.detail.v1",
+            constraints={
+                "filters": {"supervisor": "10203040", "estado": "ACTIVO"},
+                "result_shape": "table",
+            },
+        )
+
+        with patch("apps.ia_dev.domains.empleados.handler.SessionMemoryStore.get_or_create", return_value=("sid-1", {})), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.update_context"
+        ), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.append_turn"
+        ), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.status",
+            return_value={"used_messages": 0},
+        ):
+            result = handler.handle(
+                capability_id="empleados.detail.v1",
+                message=intent.raw_query,
+                session_id="sid-1",
+                reset_memory=False,
+                run_context=RunContext.create(message=intent.raw_query, session_id="sid-1"),
+                planned_capability={"capability_id": "empleados.detail.v1"},
+                resolved_query=resolved_query,
+                execution_plan=execution_plan,
+            )
+
+        self.assertTrue(result.ok)
+        response = dict(result.response or {})
+        table = (response.get("data") or {}).get("table") or {}
+        rows = list(table.get("rows") or [])
+        self.assertEqual(
+            list(table.get("columns") or []),
+            ["cedula", "nombre", "apellido", "cargo", "area", "supervisor", "carpeta", "tipo_labor", "movil", "sede", "estado"],
+        )
+        self.assertNotIn("codigo_sap", list(rows[0].keys()))
+        self.assertNotIn("link_foto", list(rows[0].keys()))
+        self.assertNotIn("password", list(rows[0].keys()))
+
+    def test_handle_resuelve_detalle_de_cumpleanos_con_columnas_seguras(self):
+        handler = EmpleadosHandler(service=_FakeEmpleadoService())
+        intent = StructuredQueryIntent(
+            raw_query="empleados que cumplen anos este mes",
+            domain_code="empleados",
+            operation="detail",
+            template_id="detail_by_entity_and_period",
+            filters={"fnacimiento_month": "5", "estado": "ACTIVO"},
+            period={},
+            group_by=[],
+            metrics=["count"],
+            confidence=0.89,
+            source="rules",
+        )
+        resolved_query = ResolvedQuerySpec(
+            intent=intent,
+            semantic_context={},
+            normalized_filters={"fnacimiento_month": "5", "estado": "ACTIVO"},
+            normalized_period={},
+            mapped_columns={"fnacimiento_month": "fnacimiento", "estado": "estado"},
+        )
+        execution_plan = QueryExecutionPlan(
+            strategy="capability",
+            reason="capability_selected_from_query_intelligence",
+            domain_code="empleados",
+            capability_id="empleados.detail.v1",
+            constraints={
+                "filters": {"fnacimiento_month": "5", "estado": "ACTIVO"},
+                "result_shape": "table",
+            },
+        )
+
+        with patch("apps.ia_dev.domains.empleados.handler.SessionMemoryStore.get_or_create", return_value=("sid-1", {})), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.update_context"
+        ), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.append_turn"
+        ), patch(
+            "apps.ia_dev.domains.empleados.handler.SessionMemoryStore.status",
+            return_value={"used_messages": 0},
+        ):
+            result = handler.handle(
+                capability_id="empleados.detail.v1",
+                message=intent.raw_query,
+                session_id="sid-1",
+                reset_memory=False,
+                run_context=RunContext.create(message=intent.raw_query, session_id="sid-1"),
+                planned_capability={"capability_id": "empleados.detail.v1"},
+                resolved_query=resolved_query,
+                execution_plan=execution_plan,
+            )
+
+        self.assertTrue(result.ok)
+        response = dict(result.response or {})
+        table = (response.get("data") or {}).get("table") or {}
+        rows = list(table.get("rows") or [])
+        self.assertEqual(
+            list(table.get("columns") or []),
+            ["cedula", "nombre", "apellido", "cargo", "area", "fecha_nacimiento", "estado"],
+        )
+        self.assertEqual(str(rows[0].get("fecha_nacimiento") or ""), "1990-05-11")
+        self.assertNotIn("codigo_sap", list(rows[0].keys()))
+        self.assertNotIn("link_foto", list(rows[0].keys()))
+        self.assertNotIn("password", list(rows[0].keys()))
 
     def test_handle_descarta_search_si_ya_hay_identificador(self):
         handler = EmpleadosHandler(service=_FakeEmpleadoService())

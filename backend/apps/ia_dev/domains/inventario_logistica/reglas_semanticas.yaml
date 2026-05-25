@@ -44,6 +44,81 @@ reglas:
         - cedula
         - bodega
         - codigo
+  - id: inventario.route.serial_stock_dimension
+    descripcion: Stock serializado por estado, bodega, ubicacion o codigo usa la ruta declarada por dimension.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.serial_stock_dimension
+        - inventario.metric.serial_count_only
+      dd_sinonimos:
+        - inventario.family.serializados
+      ia_dev_capacidades_columna:
+        - estado
+        - bodega
+        - codigo
+  - id: inventario.route.risk_consumo_movil_sin_validar
+    descripcion: Riesgo de consumo movil sin validar usa la ruta declarada de serializados.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.risk_consumo_movil_sin_validar
+        - inventario.metric.serial_count_only
+      dd_sinonimos:
+        - inventario.family.serializados
+      ia_dev_capacidades_columna:
+        - serial
+        - codigo
+        - estado
+        - fecha
+  - id: inventario.route.consumption_top
+    descripcion: Los materiales mas consumidos se gobiernan por la ruta declarada de top de consumo.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.consumption_top
+      dd_sinonimos:
+        - inventario.intent.movement_history
+      ia_dev_capacidades_columna:
+        - codigo
+        - descripcion
+        - tipo
+        - fecha
+  - id: inventario.route.consumption_dimension
+    descripcion: El detalle de consumos filtrado por movil, cedula o periodo usa la ruta declarada por dimension operativa.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.consumption_top
+      dd_sinonimos:
+        - inventario.intent.movement_history
+        - inventario.entity.movil
+        - inventario.entity.cedula
+      ia_dev_capacidades_columna:
+        - codigo
+        - cantidad
+        - fecha
+        - movil
+        - cedula
+  - id: inventario.route.movement_detail
+    descripcion: El detalle operativo de movimientos sin agrupacion mensual usa la ruta declarada del dominio.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.movement_detail
+      dd_sinonimos:
+        - inventario.intent.movement_history
+      ia_dev_capacidades_columna:
+        - codigo
+        - fecha
+        - bodega
+  - id: inventario.route.reconciliation_operacion_hfc
+    descripcion: Consumo versus facturacion en operacion_hfc usa la ruta declarada de conciliacion HFC.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.reconciliation_operacion_hfc
+      dd_sinonimos:
+        - inventario.entity.bodega
+      ia_dev_capacidades_columna:
+        - codigo
+        - orden_trabajo
+        - tipo
+        - bodega
   - id: inventario.route.kardex_employee
     descripcion: Kardex por tecnico o empleado se resuelve por cedula.
     metadata_gobernada:
@@ -98,6 +173,22 @@ reglas:
       dd_sinonimos:
         - inventario.family.material_generico
       ia_dev_capacidades_columna:
+        - tipo
+  - id: inventario.route.critical_materials_by_employee
+    descripcion: Materiales criticos por empleado, tecnico, movil o cuadrilla usan la ruta declarada de criticidad por cobertura.
+    metadata_gobernada:
+      dd_reglas:
+        - inventario.route.critical_materials_by_employee
+      dd_sinonimos:
+        - inventario.entity.movil
+        - inventario.entity.cedula
+        - inventario.entity.bodega
+      ia_dev_capacidades_columna:
+        - cedula
+        - movil
+        - bodega
+        - codigo
+        - descripcion
         - tipo
   - id: inventario.metric.serial_count_only
     descripcion: Serializados y equipos se gobiernan por conteo, no por cantidad.

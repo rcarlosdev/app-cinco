@@ -251,6 +251,52 @@ class ChatRuntimeMetadataTests(SimpleTestCase):
             "empleados.count.active.v1",
         )
 
+    def test_attach_runtime_metadata_preserves_employee_pack_trace_when_present(self):
+        run_context = RunContext.create(message="personal activo hoy", session_id="sess-emp-pack", reset_memory=False)
+        run_context.metadata["semantic_orchestrator"] = {
+            "domain": "empleados",
+            "intent": "employee_count",
+            "selected_agent": "empleados_agent",
+        }
+        response = ChatApplicationService._attach_runtime_metadata(
+            response={
+                "reply": "Actualmente hay 866 empleados activos.",
+                "orchestrator": {"domain": "empleados", "intent": "employee_count"},
+                "data_sources": {},
+                "data": {
+                    "business_response": {
+                        "metadata": {
+                            "candidate_capability": "empleados.count.active.v1",
+                            "response_profile_usado": "empleados.count.active.summary",
+                            "paquete_capacidad_usado": "empleados",
+                            "version_paquete": "0.4.0",
+                            "semantic_trace": {
+                                "source": "capability_pack",
+                                "fallback_sombreado_usado": False,
+                                "legacy_mapping_used": False,
+                                "paquete_capacidad_usado": "empleados",
+                                "version_paquete": "0.4.0",
+                            },
+                        },
+                        "evidence_summary": {
+                            "response_profile_usado": "empleados.count.active.summary",
+                            "capability_pack": {
+                                "paquete_capacidad_usado": "empleados",
+                                "version_paquete": "0.4.0",
+                            },
+                        },
+                    }
+                },
+            },
+            run_context=run_context,
+            response_flow="handler",
+        )
+
+        explanation = dict((((response.get("task") or {}).get("current_run") or {}).get("semantic_explanation") or {}))
+        capability_pack = dict(explanation.get("capability_pack") or {})
+        self.assertEqual(str(capability_pack.get("paquete_capacidad_usado") or ""), "empleados")
+        self.assertEqual(str(capability_pack.get("version_paquete") or ""), "0.4.0")
+
     def test_resolve_query_intelligence_routes_certificados_altura_proximos_a_vencer_without_fallback(self):
         service = ChatApplicationService()
         message = "certificados de altura proximos a vencer del personal activo operativo"

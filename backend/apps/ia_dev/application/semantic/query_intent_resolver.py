@@ -188,6 +188,12 @@ class QueryIntentResolver:
         elif asks_summary_count:
             operation = "count"
         elif (
+            domain in {"empleados", "rrhh"}
+            and self._has_employee_listing_signal(normalized)
+            and not self._has_employee_status_metric_signal(normalized)
+        ):
+            operation = "detail"
+        elif (
             self._has_employee_population_status_signal(normalized=normalized, domain=domain)
             or self._has_employee_status_metric_signal(normalized)
         ) and not has_grouping_signal:
@@ -249,6 +255,14 @@ class QueryIntentResolver:
                 operation = "detail"
         if (
             domain in {"empleados", "rrhh"}
+            and operation == "detail"
+            and self._has_employee_listing_signal(normalized)
+            and not self._has_missingness_filter(filters=filters)
+        ):
+            group_by = []
+        if (
+            domain in {"empleados", "rrhh"}
+            and not (operation == "detail" and self._has_employee_listing_signal(normalized))
             and not self._has_missingness_filter(filters=filters)
             and self._is_general_employee_population_query(
                 normalized=normalized,
@@ -688,6 +702,11 @@ class QueryIntentResolver:
             if re.search(r"\b(?:cuadrilla|brigada|movil|empleado|tecnico)\b", normalized):
                 return "inventory_material_stock_mobile"
             return "inventory_material_stock_balance"
+        if (
+            normalizar_codigo_dominio(domain_code) in {"empleados", "rrhh"}
+            and operation == "detail"
+        ):
+            return "detail_by_entity_and_period"
         if (
             domain_code in {"empleados", "rrhh"}
             and QueryIntentResolver._has_group_dimension_signal(normalized, dimension_tokens=dimension_tokens)
@@ -1639,6 +1658,18 @@ class QueryIntentResolver:
         if cls._has_employee_active_signal(text) and cls._has_temporal_reference(text):
             return True
         return False
+
+    @classmethod
+    def _has_employee_listing_signal(cls, normalized: str) -> bool:
+        text = str(normalized or "")
+        if not re.search(r"\b(emplead\w*|colaborador(?:es)?|personal|persona(?:s)?|tecnico(?:s)?)\b", text):
+            return False
+        if any(token in text for token in ("distribucion", "agrup", "ranking", "top", "compar", "versus", "concentran")):
+            return False
+        return any(
+            token in text
+            for token in ("detalle", "mostrar", "muestra", "listar", "lista", "informacion", "info", "ficha", "datos")
+        )
 
     @classmethod
     def _is_general_employee_population_query(
