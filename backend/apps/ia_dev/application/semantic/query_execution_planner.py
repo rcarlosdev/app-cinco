@@ -59,12 +59,56 @@ class QueryExecutionPlanner:
             template_id=template_id,
             resolved_query=resolved_query,
         )
+        normalized_template_id = self._normalize_inventory_template_alignment(
+            domain_code=domain_code,
+            template_id=template_id,
+            capability_id=capability_id,
+            resolved_query=resolved_query,
+            constraints=constraints,
+        )
+        if normalized_template_id != template_id:
+            template_id = normalized_template_id
+            resolved_query.intent.template_id = normalized_template_id
+            constraints = self._build_constraints(resolved_query=resolved_query)
+            semantic_trace = self._semantic_trace_payload(resolved_query=resolved_query)
+            capability_id = self._resolve_capability_id(
+                domain_code=domain_code,
+                template_id=template_id,
+                resolved_query=resolved_query,
+            )
         raw_query_fallback_meta = self._resolve_raw_query_fallback_metadata(
             domain_code=domain_code,
             template_id=template_id,
             resolved_query=resolved_query,
         )
         capability_available = bool(capability_id and self._is_capability_rollout_enabled(capability_id))
+        if self._should_prefer_capability_strategy(
+            domain_code=domain_code,
+            template_id=template_id,
+            capability_id=capability_id,
+            resolved_query=resolved_query,
+            capability_available=capability_available,
+        ):
+            return QueryExecutionPlan(
+                strategy="capability",
+                reason="governed_handler_preferred_before_sql",
+                domain_code=domain_code,
+                capability_id=capability_id,
+                constraints=constraints,
+                policy={"allowed": True, "reason": "capability_first"},
+                metadata={
+                    "template_id": template_id,
+                    "operation": resolved_query.intent.operation,
+                    "semantic_trace": semantic_trace,
+                    **raw_query_fallback_meta,
+                    **self._build_analytics_router_metadata(
+                        domain_code=domain_code,
+                        capability_id=capability_id,
+                        pilot_analytics_candidate=False,
+                        decision="handler_modern",
+                    ),
+                },
+            )
         pilot_analytics_candidate = self.join_aware_sql_service.should_handle(
             resolved_query=resolved_query
         )
@@ -268,6 +312,25 @@ class QueryExecutionPlanner:
                 **analytics_router_metadata,
             },
         )
+
+    @staticmethod
+    def _should_prefer_capability_strategy(
+        *,
+        domain_code: str,
+        template_id: str,
+        capability_id: str | None,
+        resolved_query: ResolvedQuerySpec,
+        capability_available: bool,
+    ) -> bool:
+        if not capability_available:
+            return False
+        if str(domain_code or "").strip().lower() != "inventario_logistica":
+            return False
+        if str(template_id or "").strip().lower() != "inventory_provider_serial_validation":
+            return False
+        semantic_context = dict(resolved_query.semantic_context or {})
+        attachment_summary = dict(semantic_context.get("runtime_attachment_summary") or {})
+        return bool(attachment_summary.get("present") or int(attachment_summary.get("count") or 0) > 0)
 
     def _normalize_fallback_reason(
         self,
@@ -607,6 +670,50 @@ class QueryExecutionPlanner:
             )
             return {"ok": False, "error": f"sql_execution_error:{exc}"}
 
+    def execute_governed_select(
+        self,
+        *,
+        db_alias: str,
+        query: str,
+        params: list[Any] | tuple[Any, ...] | None = None,
+        allowed_tables: list[str],
+        allowed_columns: list[str],
+        declared_columns: list[str] | None = None,
+        allowed_relations: list[str] | None = None,
+        declared_relations: list[str] | None = None,
+        max_limit: int = 50000,
+    ) -> dict[str, Any]:
+        validation = self.query_policy.validate_sql_query(
+            query=query,
+            allowed_tables=allowed_tables,
+            allowed_columns=allowed_columns,
+            allowed_relations=allowed_relations,
+            declared_columns=declared_columns,
+            declared_relations=declared_relations,
+            max_limit=max_limit,
+        )
+        if not validation.allowed:
+            return {
+                "ok": False,
+                "error": f"governed_sql_invalid:{validation.reason}",
+                "validation": validation.metadata,
+            }
+
+        try:
+            with connections[str(db_alias or "").strip() or "default"].cursor() as cursor:
+                cursor.execute(str(query or "").strip(), list(params or []))
+                rows = cursor.fetchall()
+                columns = [str(getattr(col, "name", col[0]) or "") for col in (cursor.description or [])]
+            return {
+                "ok": True,
+                "columns": columns,
+                "rows": [{columns[idx]: row[idx] for idx in range(len(columns))} for row in rows],
+                "rowcount": int(len(rows)),
+                "validation": validation.metadata,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": f"governed_sql_execution_error:{exc}"}
+
     def _execute_supplemental_inventory_queries(
         self,
         *,
@@ -838,6 +945,51 @@ class QueryExecutionPlanner:
             "active_nodes": ["q", "gpt", "route"],
         }
 
+    @staticmethod
+    def _normalize_inventory_template_alignment(
+        *,
+        domain_code: str,
+        template_id: str,
+        capability_id: str,
+        resolved_query: ResolvedQuerySpec,
+        constraints: dict[str, Any],
+    ) -> str:
+        if str(domain_code or "").strip().lower() != "inventario_logistica":
+            return str(template_id or "").strip().lower()
+        normalized_template = str(template_id or "").strip().lower()
+        if str(capability_id or "").strip().lower() == "inventory_serial_stock_by_family_grouped_dimension":
+            filters = dict((constraints or {}).get("filters") or resolved_query.normalized_filters or {})
+            grouping_dimension = str(filters.get("grouping_dimension") or "").strip().lower()
+            group_by = {
+                str(item or "").strip().lower()
+                for item in list((constraints or {}).get("group_by") or resolved_query.intent.group_by or [])
+                if str(item or "").strip()
+            }
+            has_grouped_dimension = grouping_dimension in {"movil", "cedula", "bodega"} or bool(
+                group_by & {"movil", "cedula", "bodega"}
+            )
+            if has_grouped_dimension and str(filters.get("material_family") or "").strip():
+                return "inventory_serial_stock_by_family_grouped_dimension"
+        if str(capability_id or "").strip().lower() != "inventory_stock_balance_by_material_dimension":
+            return normalized_template
+        filters = dict((constraints or {}).get("filters") or resolved_query.normalized_filters or {})
+        grouping_dimension = str(filters.get("grouping_dimension") or "").strip().lower()
+        group_by = {
+            str(item or "").strip().lower()
+            for item in list((constraints or {}).get("group_by") or resolved_query.intent.group_by or [])
+            if str(item or "").strip()
+        }
+        has_grouped_dimension = grouping_dimension in {"movil", "cedula", "bodega"} or bool(
+            group_by & {"movil", "cedula", "bodega"}
+        )
+        if not has_grouped_dimension:
+            return normalized_template
+        if any(str(filters.get(key) or "").strip() for key in ("movil", "cedula")):
+            return normalized_template
+        if not any(str(filters.get(key) or "").strip() for key in ("codigo", "descripcion", "tipo", "material_family")):
+            return normalized_template
+        return "inventory_material_stock_grouped_dimension"
+
     def _resolve_capability_id(
         self,
         *,
@@ -938,6 +1090,21 @@ class QueryExecutionPlanner:
                 return "attendance.unjustified.summary.v1"
             return "attendance.unjustified.summary.v1"
         if normalized_domain == "inventario_logistica":
+            semantic_context = dict(resolved_query.semantic_context or {})
+            resolved_semantic = dict(semantic_context.get("resolved_semantic") or {})
+            binding = dict(
+                semantic_context.get("semantic_capability_registry")
+                or resolved_semantic.get("semantic_capability_registry")
+                or {}
+            )
+            binding_capability = str(
+                binding.get("candidate_capability")
+                or resolved_semantic.get("candidate_capability")
+                or (((semantic_context.get("business_query_semantic_plan") or {}).get("candidate_capability")))
+                or ""
+            ).strip()
+            if binding_capability:
+                return binding_capability
             if self._should_route_kardex_codigo_employee_to_employee(
                 domain_code=normalized_domain,
                 template_id=template_id,
@@ -948,6 +1115,8 @@ class QueryExecutionPlanner:
                 return "inventory_stock_balance_by_warehouse"
             if template_id == "inventory_material_stock_mobile":
                 return "inventory_stock_balance_by_mobile"
+            if template_id == "inventory_material_stock_grouped_dimension":
+                return "inventory_stock_balance_by_material_dimension"
             if template_id == "inventory_material_critical_by_employee":
                 return "inventory_stock_balance_by_mobile"
             if template_id == "inventory_material_stock_balance":
@@ -1064,9 +1233,13 @@ class QueryExecutionPlanner:
             template_id = str(resolved_query.intent.template_id or "").strip().lower()
             if template_id in {
                 "inventory_material_stock_mobile",
+                "inventory_material_stock_grouped_dimension",
                 "inventory_material_stock_balance",
                 "inventory_material_stock_by_warehouse",
                 "inventory_material_critical_by_employee",
+                "inventory_serial_stock_by_family_grouped_dimension",
+                "inventory_serial_stock_by_dimension",
+                "inventory_serial_employee_balance",
             }:
                 metrics = [metric for metric in metrics if metric not in {"count", "percentage"}]
                 chart_requested = False
@@ -1098,6 +1271,11 @@ class QueryExecutionPlanner:
             "semantic_plan": dict(
                 semantic_context.get("business_query_semantic_plan")
                 or semantic_context.get("inventory_semantic_plan")
+                or {}
+            ),
+            "semantic_binding": dict(
+                semantic_context.get("semantic_capability_registry")
+                or resolved_semantic.get("semantic_capability_registry")
                 or {}
             ),
             "rules_applied": list(resolved_semantic.get("rules_applied") or []),
@@ -1329,6 +1507,7 @@ class QueryExecutionPlanner:
             "inventory_material_stock_balance",
             "inventory_material_stock_by_warehouse",
             "inventory_material_stock_mobile",
+            "inventory_material_stock_grouped_dimension",
             "inventory_material_critical_by_employee",
         }:
             return self._build_inventory_material_stock_sql(
@@ -1382,6 +1561,14 @@ class QueryExecutionPlanner:
         if template_id == "inventory_consumption_billing_operacion_hfc":
             return self._build_inventory_consumption_billing_sql(
                 context=context,
+                limit=min(limit, 1000),
+            )
+
+        if template_id == "inventory_serial_stock_by_family_grouped_dimension":
+            return self._build_inventory_serial_family_grouped_dimension_sql(
+                context=context,
+                filters=filters,
+                group_by=list(resolved_query.intent.group_by or []),
                 limit=min(limit, 1000),
             )
 
@@ -1723,6 +1910,14 @@ class QueryExecutionPlanner:
                 filters=filters or {},
                 limit=limit,
                 catalog=catalog,
+            )
+
+        if template_id == "inventory_material_stock_grouped_dimension":
+            return self._build_inventory_grouped_dimension_balance_sql(
+                resolved_query=resolved_query,
+                context=context,
+                filters=filters or {},
+                limit=limit,
             )
 
         if template_id == "inventory_material_stock_mobile" and self._inventory_should_group_balance_by_employee(
@@ -2095,6 +2290,298 @@ class QueryExecutionPlanner:
         )
         return query, "inventory_material_stock_mobile", metadata
 
+    def _build_inventory_grouped_dimension_balance_sql(
+        self,
+        *,
+        resolved_query: ResolvedQuerySpec,
+        context: dict[str, Any],
+        filters: dict[str, Any],
+        limit: int,
+    ) -> tuple[str, str, dict[str, Any]]:
+        grouping_dimension = str(
+            filters.get("grouping_dimension")
+            or next(
+                (
+                    item
+                    for item in list(resolved_query.intent.group_by or [])
+                    if str(item or "").strip().lower() in {"movil", "cedula", "bodega"}
+                ),
+                "",
+            )
+            or ""
+        ).strip().lower()
+        if grouping_dimension in {"cuadrilla", "brigada"}:
+            grouping_dimension = "movil"
+        if grouping_dimension == "bodega":
+            return self._build_inventory_grouped_warehouse_balance_sql(
+                context=context,
+                filters=filters,
+                limit=limit,
+            )
+        return self._build_inventory_grouped_holder_dimension_balance_sql(
+            context=context,
+            filters=filters,
+            grouping_dimension=grouping_dimension or "movil",
+            limit=limit,
+        )
+
+    def _build_inventory_grouped_holder_dimension_balance_sql(
+        self,
+        *,
+        context: dict[str, Any],
+        filters: dict[str, Any],
+        grouping_dimension: str,
+        limit: int,
+    ) -> tuple[str, str, dict[str, Any]]:
+        movement = self._inventory_mobile_employee_stock_subqueries(context=context, filters={})
+        if not movement.get("ok"):
+            return "", str(movement.get("reason") or "inventory_stock_missing_dictionary_column"), dict(movement.get("metadata") or {})
+        personal = self._inventory_employee_mapping(context=context)
+        catalog = self._inventory_table_mapping(
+            context=context,
+            table_name="base_codigos",
+            required_columns=("codigo", "descripcion", "tipo"),
+        )
+        if not personal:
+            return "", "inventory_employee_mapping_missing_dictionary_column", {}
+        if not catalog.get("ok"):
+            return "", str(catalog.get("reason") or "inventory_catalog_missing_dictionary_column"), dict(catalog.get("metadata") or {})
+
+        cols = dict(personal.get("columns") or {})
+        employee_table = str(personal.get("table") or "").strip()
+        catalog_table = str(catalog.get("table") or "").strip()
+        catalog_cols = dict(catalog.get("columns") or {})
+        employee_label = self._inventory_employee_label_sql(
+            nombre_sql="emp.nombre",
+            apellido_sql="emp.apellido",
+        )
+        employee_subquery = (
+            "SELECT "
+            f"p.{cols['cedula']} AS cedula, "
+            f"COALESCE(MAX(p.{cols['movil']}), '') AS movil, "
+            f"COALESCE(MAX(p.{cols['nombre']}), '') AS nombre, "
+            f"COALESCE(MAX(p.{cols['apellido']}), '') AS apellido, "
+            f"COALESCE(MAX(p.{cols['estado']}), '') AS estado_empleado "
+            f"FROM {employee_table} AS p "
+            f"GROUP BY p.{cols['cedula']}"
+        )
+
+        dimension_select = "COALESCE(MAX(emp.movil), '')"
+        dimension_group = "COALESCE(emp.movil, '')"
+        extra_dimension_columns = (
+            "'' AS cedula, '' AS nombre, '' AS empleado, COALESCE(MAX(emp.movil), '') AS movil, '' AS bodega, "
+        )
+        if grouping_dimension == "cedula":
+            dimension_select = "mov.cedula"
+            dimension_group = "mov.cedula"
+            extra_dimension_columns = (
+                "mov.cedula AS cedula, "
+                "COALESCE(MAX(emp.nombre), '') AS nombre, "
+                f"{employee_label} AS empleado, "
+                "COALESCE(MAX(emp.movil), '') AS movil, "
+                "'' AS bodega, "
+            )
+
+        where_parts: list[str] = []
+        tipo_filter_sql = self._inventory_tipo_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['tipo']}",
+        )
+        if tipo_filter_sql:
+            where_parts.append(tipo_filter_sql)
+        codigo_value = self._first_filter_value(
+            filters=filters,
+            keys=("codigo", "codigo_material", "material_codigo"),
+        )
+        if codigo_value:
+            where_parts.append(f"mov.codigo = '{self._escape_literal(codigo_value)}'")
+        description_filter_sql = self._inventory_catalog_description_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['descripcion']}",
+        )
+        if description_filter_sql:
+            where_parts.append(description_filter_sql)
+        where_sql = f" WHERE {' AND '.join(where_parts)} " if where_parts else ""
+
+        query = (
+            "SELECT "
+            f"{dimension_select} AS dimension, "
+            f"{extra_dimension_columns}"
+            "mov.codigo AS codigo, "
+            f"COALESCE(MAX(cat.{catalog_cols['descripcion']}), '') AS descripcion, "
+            f"COALESCE(MAX(cat.{catalog_cols['tipo']}), '') AS tipo, "
+            "SUM(mov.entregas) AS entregas, "
+            "SUM(mov.devoluciones) AS devoluciones, "
+            "SUM(mov.consumos) AS consumos, "
+            "SUM(mov.cobros) AS cobros, "
+            "SUM(mov.entregas - mov.devoluciones - mov.consumos - mov.cobros) AS saldo, "
+            "SUM(mov.registros_cantidad_invalida) AS registros_cantidad_invalida "
+            f"FROM ({movement['sql']}) AS mov "
+            f"LEFT JOIN ({employee_subquery}) AS emp ON emp.cedula = mov.cedula "
+            f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = mov.codigo "
+            f"{where_sql}"
+            f"GROUP BY {dimension_group}, mov.codigo "
+            "ORDER BY dimension ASC, saldo DESC, mov.codigo ASC "
+            f"LIMIT {limit}"
+        )
+        metadata = self._inventory_sql_metadata(
+            table=str(movement.get("primary_table") or ""),
+            columns=[*list(movement.get("columns") or []), *list(cols.values()), *list(catalog_cols.values())],
+            metric_used="saldo",
+            aggregation_used=f"sum_movement_balance_by_{grouping_dimension}_code",
+            dimensions_used=[grouping_dimension, "codigo"],
+            concept_field=f"stock_agrupado_por_{grouping_dimension}",
+        )
+        metadata.update(
+            {
+                "tables_detected": sorted(
+                    set([*list(movement.get("tables") or []), employee_table.split(".")[-1], catalog_table.split(".")[-1]])
+                ),
+                "quantity_cast_policy": "case_when_regexp_then_cast_else_zero_report_invalid",
+                "formula_used": "saldo = entregas - devoluciones - consumos - cobros",
+                "balance_filter_policy": "include_positive_zero_negative",
+                "filters_applied": {
+                    key: value
+                    for key, value in {
+                        "codigo": codigo_value,
+                        "descripcion": str(filters.get("descripcion") or "").strip(),
+                        "tipo": filters.get("tipo"),
+                        "grouping_dimension": grouping_dimension,
+                    }.items()
+                    if value not in ("", None, [], ())
+                },
+                "grouped_dimension_balance": True,
+                "grouping_dimension": grouping_dimension,
+            }
+        )
+        metadata["joins_used"] = list(
+            dict.fromkeys(
+                [
+                    *list(metadata.get("joins_used") or []),
+                    "employee_detail_by_cedula",
+                    "catalog_by_codigo",
+                ]
+            )
+        )
+        return query, "inventory_material_stock_grouped_dimension", metadata
+
+    def _build_inventory_grouped_warehouse_balance_sql(
+        self,
+        *,
+        context: dict[str, Any],
+        filters: dict[str, Any],
+        limit: int,
+    ) -> tuple[str, str, dict[str, Any]]:
+        movement = self._inventory_material_stock_subqueries(context=context, by_warehouse=True)
+        if not movement.get("ok"):
+            return "", str(movement.get("reason") or "inventory_stock_missing_dictionary_column"), dict(movement.get("metadata") or {})
+        catalog = self._inventory_table_mapping(
+            context=context,
+            table_name="base_codigos",
+            required_columns=("codigo", "descripcion", "tipo"),
+        )
+        if not catalog.get("ok"):
+            return "", str(catalog.get("reason") or "inventory_catalog_missing_dictionary_column"), dict(catalog.get("metadata") or {})
+
+        catalog_table = str(catalog["table"])
+        catalog_cols = dict(catalog["columns"])
+        where_parts: list[str] = []
+        tipo_filter_sql = self._inventory_tipo_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['tipo']}",
+        )
+        if tipo_filter_sql:
+            where_parts.append(tipo_filter_sql)
+        codigo_value = self._first_filter_value(
+            filters=filters,
+            keys=("codigo", "codigo_material", "material_codigo"),
+        )
+        if codigo_value:
+            where_parts.append(f"mov.codigo = '{self._escape_literal(codigo_value)}'")
+        description_filter_sql = self._inventory_catalog_description_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['descripcion']}",
+        )
+        if description_filter_sql:
+            where_parts.append(description_filter_sql)
+        where_sql = f"WHERE {' AND '.join(where_parts)} " if where_parts else ""
+        query = (
+            "SELECT "
+            "mov.bodega AS dimension, "
+            "'' AS cedula, '' AS nombre, '' AS empleado, '' AS movil, mov.bodega AS bodega, "
+            "mov.codigo AS codigo, "
+            f"COALESCE(MAX(cat.{catalog_cols['descripcion']}), '') AS descripcion, "
+            f"COALESCE(MAX(cat.{catalog_cols['tipo']}), '') AS tipo, "
+            "SUM(mov.entregas) AS entregas, "
+            "SUM(mov.devoluciones) AS devoluciones, "
+            "SUM(mov.consumos) AS consumos, "
+            "SUM(mov.cobros) AS cobros, "
+            "SUM(mov.entradas - mov.entregas + mov.devoluciones - mov.consumos - mov.cobros - mov.traslados_otro_aliado - mov.traslados_bodega) AS saldo, "
+            "SUM(mov.registros_cantidad_invalida) AS registros_cantidad_invalida "
+            f"FROM ({movement['sql']}) AS mov "
+            f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = mov.codigo "
+            f"{where_sql}"
+            "GROUP BY mov.bodega, mov.codigo "
+            "ORDER BY dimension ASC, saldo DESC, mov.codigo ASC "
+            f"LIMIT {limit}"
+        )
+        metadata = self._inventory_sql_metadata(
+            table=str(movement.get("primary_table") or ""),
+            columns=[*list(movement.get("columns") or []), *list(catalog_cols.values())],
+            metric_used="saldo",
+            aggregation_used="sum_movement_balance_by_bodega_code",
+            dimensions_used=["bodega", "codigo"],
+            concept_field="stock_agrupado_por_bodega",
+        )
+        metadata.update(
+            {
+                "tables_detected": sorted(set([*list(movement.get("tables") or []), catalog_table.split(".")[-1]])),
+                "quantity_cast_policy": "case_when_regexp_then_cast_else_zero_report_invalid",
+                "formula_used": "entradas - entregas + devoluciones - consumos - cobros - traslados_otro_aliado - traslados_bodega",
+                "balance_filter_policy": "include_positive_zero_negative",
+                "filters_applied": {
+                    key: value
+                    for key, value in {
+                        "codigo": codigo_value,
+                        "descripcion": str(filters.get("descripcion") or "").strip(),
+                        "tipo": filters.get("tipo"),
+                        "grouping_dimension": "bodega",
+                    }.items()
+                    if value not in ("", None, [], ())
+                },
+                "grouped_dimension_balance": True,
+                "grouping_dimension": "bodega",
+            }
+        )
+        return query, "inventory_material_stock_grouped_dimension", metadata
+
+    def _inventory_catalog_description_filter_sql(
+        self,
+        *,
+        filters: dict[str, Any],
+        column_sql: str,
+    ) -> str:
+        description_value = str(filters.get("descripcion") or "").strip()
+        if not description_value:
+            return ""
+        return f"UPPER(COALESCE({column_sql}, '')) LIKE '%{self._escape_literal(description_value.upper())}%'"
+
+    def _inventory_serial_family_filter_sql(
+        self,
+        *,
+        filters: dict[str, Any],
+        column_sql: str,
+    ) -> str:
+        family_value = str(filters.get("material_family") or "").strip()
+        if not family_value:
+            return ""
+        match_mode = str(filters.get("material_family_match_mode") or "contains").strip().lower()
+        normalized_column = f"UPPER(TRIM(COALESCE({column_sql}, '')))"
+        escaped_value = self._escape_literal(family_value.upper())
+        if match_mode == "exact":
+            return f"{normalized_column} = '{escaped_value}'"
+        return f"{normalized_column} LIKE '%{escaped_value}%'"
+
     def _build_inventory_serial_employee_balance_sql(
         self,
         *,
@@ -2122,6 +2609,12 @@ class QueryExecutionPlanner:
         serial_cols = dict(serial_mapping.get("columns") or {})
         employee_cols = dict(personal.get("columns") or {})
         catalog_cols = dict(catalog.get("columns") or {})
+        serial_edit_col = self._inventory_optional_table_column(
+            context=context,
+            table_name="logistica_base_seriales",
+            logical_names=("edit",),
+            column_names=("edit",),
+        )
         serial_table = str(serial_mapping.get("table") or "").strip()
         employee_table = str(personal.get("table") or "").strip()
         catalog_table = str(catalog.get("table") or "").strip()
@@ -2142,10 +2635,6 @@ class QueryExecutionPlanner:
         where_sql = f"WHERE {' AND '.join(where_parts)} " if where_parts else ""
         employee_where = self._inventory_employee_filter_clause(context=context, table_alias="p", filters=filters)
         employee_where_sql = f" WHERE {employee_where}" if employee_where else ""
-        employee_label = self._inventory_employee_label_sql(
-            nombre_sql="emp.nombre",
-            apellido_sql="emp.apellido",
-        )
         employee_subquery = (
             "SELECT "
             f"p.{employee_cols['cedula']} AS cedula, "
@@ -2156,6 +2645,40 @@ class QueryExecutionPlanner:
             f"FROM {employee_table} AS p"
             f"{employee_where_sql} "
             f"GROUP BY p.{employee_cols['cedula']}"
+        )
+        fallback_join_sql = (
+            f"LEFT JOIN ({employee_subquery}) AS emp_edit ON emp_edit.cedula = s.{serial_edit_col} "
+            if serial_edit_col
+            else ""
+        )
+        resolved_nombre_sql = (
+            "COALESCE(MAX(emp.nombre), MAX(emp_edit.nombre), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.nombre), '')"
+        )
+        resolved_dimension_movil_sql = (
+            "COALESCE(emp.movil, emp_edit.movil, '')"
+            if serial_edit_col
+            else "COALESCE(emp.movil, '')"
+        )
+        resolved_apellido_sql = (
+            "COALESCE(MAX(emp.apellido), MAX(emp_edit.apellido), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.apellido), '')"
+        )
+        resolved_movil_sql = (
+            "COALESCE(MAX(emp.movil), MAX(emp_edit.movil), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.movil), '')"
+        )
+        resolved_estado_sql = (
+            "COALESCE(MAX(emp.estado_empleado), MAX(emp_edit.estado_empleado), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.estado_empleado), '')"
+        )
+        employee_label = self._inventory_employee_label_sql(
+            nombre_sql=resolved_nombre_sql,
+            apellido_sql=resolved_apellido_sql,
         )
         estado_expr = f"UPPER(COALESCE(s.{serial_cols['estado']}, ''))"
         en_movil_sql = f"CASE WHEN {estado_expr} LIKE '%MOVIL%' THEN 1 ELSE 0 END"
@@ -2169,19 +2692,20 @@ class QueryExecutionPlanner:
             f"COALESCE(MAX(cat.{catalog_cols['familia']}), '') AS familia, "
             f"COALESCE(MAX(s.{serial_cols['estado']}), '') AS estado, "
             f"s.{serial_cols['cedula']} AS cedula, "
-            "COALESCE(MAX(emp.nombre), '') AS nombre, "
+            f"{resolved_nombre_sql} AS nombre, "
             f"{employee_label} AS empleado, "
-            "COALESCE(MAX(emp.movil), '') AS movil, "
-            "COALESCE(MAX(emp.estado_empleado), '') AS estado_empleado, "
+            f"{resolved_movil_sql} AS movil, "
+            f"{resolved_estado_sql} AS estado_empleado, "
             f"SUM({en_movil_sql}) AS en_movil, "
             f"SUM({en_base_sql}) AS en_base, "
             f"SUM({cobro_sql}) AS cobros, "
             f"SUM({en_movil_sql} + {en_base_sql} - {cobro_sql}) AS saldo "
             f"FROM {serial_table} AS s "
             f"LEFT JOIN ({employee_subquery}) AS emp ON emp.cedula = s.{serial_cols['cedula']} "
+            f"{fallback_join_sql}"
             f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = s.{serial_cols['codigo']} "
             f"{where_sql}"
-            f"GROUP BY s.{serial_cols['numero_serial']}, s.{serial_cols['codigo']}, s.{serial_cols['cedula']}, COALESCE(emp.movil, '') "
+            f"GROUP BY s.{serial_cols['numero_serial']}, s.{serial_cols['codigo']}, s.{serial_cols['cedula']}, {resolved_dimension_movil_sql} "
             "ORDER BY movil ASC, cedula ASC, codigo ASC, serial ASC "
             f"LIMIT {limit}"
         )
@@ -2223,13 +2747,226 @@ class QueryExecutionPlanner:
                 },
                 "employee_stock_detail": True,
                 "state_employee_included": True,
+                "employee_enrichment_fallback_by_edit": bool(serial_edit_col),
             }
         )
         metadata["joins_used"] = [
             "employee_detail_by_cedula",
+            *([ "employee_detail_by_edit_fallback" ] if serial_edit_col else []),
             "serial_catalog_by_codigo",
         ]
         return query, "inventory_serial_employee_balance", metadata
+
+    def _build_inventory_serial_family_grouped_dimension_sql(
+        self,
+        *,
+        context: dict[str, Any],
+        filters: dict[str, Any],
+        group_by: list[str],
+        limit: int,
+    ) -> tuple[str, str, dict[str, Any]]:
+        serial_mapping = self._inventory_table_mapping(
+            context=context,
+            table_name="logistica_base_seriales",
+            required_columns=("numero_serial", "codigo", "estado", "cedula", "bodega"),
+        )
+        personal = self._inventory_employee_mapping(context=context)
+        catalog = self._inventory_table_mapping(
+            context=context,
+            table_name="base_codigo_seriales",
+            required_columns=("codigo", "descripcion", "familia"),
+        )
+        if not serial_mapping.get("ok"):
+            return "", str(serial_mapping.get("reason") or "inventory_serial_holder_missing_dictionary_column"), dict(serial_mapping.get("metadata") or {})
+        if not personal:
+            return "", "inventory_employee_mapping_missing_dictionary_column", {}
+        if not catalog.get("ok"):
+            return "", str(catalog.get("reason") or "inventory_serial_catalog_missing_dictionary_column"), dict(catalog.get("metadata") or {})
+        family_value = str(filters.get("material_family") or "").strip().upper()
+        if not family_value:
+            return "", "inventory_serial_family_missing_filter", {}
+        serial_cols = dict(serial_mapping.get("columns") or {})
+        employee_cols = dict(personal.get("columns") or {})
+        catalog_cols = dict(catalog.get("columns") or {})
+        serial_edit_col = self._inventory_optional_table_column(
+            context=context,
+            table_name="logistica_base_seriales",
+            logical_names=("edit",),
+            column_names=("edit",),
+        )
+        serial_table = str(serial_mapping.get("table") or "").strip()
+        employee_table = str(personal.get("table") or "").strip()
+        catalog_table = str(catalog.get("table") or "").strip()
+        if not serial_table or not employee_table or not catalog_table:
+            return "", "inventory_serial_holder_missing_dictionary_column", {}
+
+        dimension_name = next(
+            (
+                str(item or "").strip().lower()
+                for item in group_by
+                if str(item or "").strip().lower() in {"movil", "cedula", "bodega"}
+            ),
+            str(filters.get("grouping_dimension") or "").strip().lower() or "movil",
+        )
+        if dimension_name not in {"movil", "cedula", "bodega"}:
+            return "", "inventory_serial_stock_dimension_not_validated", {
+                "compiler": "inventory_semantic_sql",
+                "compiler_used": "inventory_semantic_sql",
+                "fallback_reason": "inventory_serial_stock_dimension_not_validated",
+                "db_alias": "logistica_cinco",
+            }
+
+        employee_subquery = (
+            "SELECT "
+            f"p.{employee_cols['cedula']} AS cedula, "
+            f"COALESCE(MAX(p.{employee_cols['movil']}), '') AS movil, "
+            f"COALESCE(MAX(p.{employee_cols['nombre']}), '') AS nombre, "
+            f"COALESCE(MAX(p.{employee_cols['apellido']}), '') AS apellido, "
+            f"COALESCE(MAX(p.{employee_cols['estado']}), '') AS estado_empleado "
+            f"FROM {employee_table} AS p "
+            f"GROUP BY p.{employee_cols['cedula']}"
+        )
+        fallback_join_sql = (
+            f"LEFT JOIN ({employee_subquery}) AS emp_edit ON emp_edit.cedula = s.{serial_edit_col} "
+            if serial_edit_col
+            else ""
+        )
+        resolved_dimension_movil_sql = (
+            "COALESCE(emp.movil, emp_edit.movil, '')" if serial_edit_col else "COALESCE(emp.movil, '')"
+        )
+        resolved_cedula_sql = (
+            f"COALESCE(emp.cedula, emp_edit.cedula, CAST(s.{serial_cols['cedula']} AS CHAR), CAST(s.{serial_edit_col} AS CHAR), '')"
+            if serial_edit_col
+            else f"CAST(s.{serial_cols['cedula']} AS CHAR)"
+        )
+        resolved_nombre_sql = (
+            "COALESCE(MAX(emp.nombre), MAX(emp_edit.nombre), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.nombre), '')"
+        )
+        resolved_apellido_sql = (
+            "COALESCE(MAX(emp.apellido), MAX(emp_edit.apellido), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.apellido), '')"
+        )
+        resolved_estado_sql = (
+            "COALESCE(MAX(emp.estado_empleado), MAX(emp_edit.estado_empleado), '')"
+            if serial_edit_col
+            else "COALESCE(MAX(emp.estado_empleado), '')"
+        )
+        employee_label = self._inventory_employee_label_sql(
+            nombre_sql=resolved_nombre_sql,
+            apellido_sql=resolved_apellido_sql,
+        )
+        if dimension_name == "movil":
+            dimension_sql = resolved_dimension_movil_sql
+            cedula_sql = resolved_cedula_sql
+            empleado_sql = employee_label
+            movil_sql = resolved_dimension_movil_sql
+            bodega_sql = "''"
+        elif dimension_name == "cedula":
+            dimension_sql = resolved_cedula_sql
+            cedula_sql = resolved_cedula_sql
+            empleado_sql = employee_label
+            movil_sql = resolved_dimension_movil_sql
+            bodega_sql = "''"
+        else:
+            dimension_sql = f"COALESCE(s.{serial_cols['bodega']}, '')"
+            cedula_sql = "''"
+            empleado_sql = "''"
+            movil_sql = "''"
+            bodega_sql = f"COALESCE(s.{serial_cols['bodega']}, '')"
+
+        estado_expr = f"UPPER(COALESCE(s.{serial_cols['estado']}, ''))"
+        en_movil_sql = f"CASE WHEN {estado_expr} LIKE '%MOVIL%' THEN 1 ELSE 0 END"
+        en_base_sql = f"CASE WHEN {estado_expr} LIKE '%BASE%' OR {estado_expr} LIKE '%BODEGA%' THEN 1 ELSE 0 END"
+        cobro_sql = f"CASE WHEN {estado_expr} LIKE '%COBRO%' THEN 1 ELSE 0 END"
+        serial_column = f"s.{serial_cols['numero_serial']}"
+        family_filter_sql = self._inventory_serial_family_filter_sql(
+            filters=filters,
+            column_sql=f"cat.{catalog_cols['familia']}",
+        )
+        where_parts = [family_filter_sql] if family_filter_sql else []
+        where_parts.append(f"UPPER(TRIM(COALESCE(s.{serial_cols['estado']}, ''))) LIKE '%MOVIL%'")
+        where_sql = f"WHERE {' AND '.join(where_parts)} " if where_parts else ""
+        group_by_sql = (
+            f"{dimension_sql}, {resolved_cedula_sql}, {resolved_dimension_movil_sql}, "
+            f"s.{serial_cols['codigo']}, cat.{catalog_cols['descripcion']}, cat.{catalog_cols['familia']}"
+            if dimension_name in {"movil", "cedula"}
+            else f"{dimension_sql}, s.{serial_cols['codigo']}, cat.{catalog_cols['descripcion']}, cat.{catalog_cols['familia']}"
+        )
+        query = (
+            "SELECT "
+            f"{dimension_sql} AS dimension, "
+            f"{cedula_sql} AS cedula, "
+            f"{resolved_nombre_sql} AS nombre, "
+            f"{resolved_apellido_sql} AS apellido, "
+            f"{empleado_sql} AS empleado, "
+            f"{movil_sql} AS movil, "
+            f"{resolved_estado_sql} AS estado_empleado, "
+            f"{bodega_sql} AS bodega, "
+            f"s.{serial_cols['codigo']} AS codigo, "
+            f"COALESCE(MAX(cat.{catalog_cols['descripcion']}), '') AS descripcion, "
+            f"COALESCE(MAX(cat.{catalog_cols['familia']}), '') AS familia, "
+            f"COUNT(DISTINCT {serial_column}) AS seriales_total, "
+            f"GROUP_CONCAT(DISTINCT {resolved_cedula_sql} ORDER BY {resolved_cedula_sql} SEPARATOR '; ') AS cedulas_asociadas, "
+            f"SUM({en_movil_sql}) AS en_movil, "
+            f"SUM({en_base_sql}) AS en_base, "
+            f"SUM({cobro_sql}) AS cobros, "
+            f"SUM({en_movil_sql} + {en_base_sql} - {cobro_sql}) AS saldo "
+            f"FROM {serial_table} AS s "
+            f"LEFT JOIN ({employee_subquery}) AS emp ON emp.cedula = s.{serial_cols['cedula']} "
+            f"{fallback_join_sql}"
+            f"LEFT JOIN {catalog_table} AS cat ON cat.{catalog_cols['codigo']} = s.{serial_cols['codigo']} "
+            f"{where_sql}"
+            f"GROUP BY {group_by_sql} "
+            "ORDER BY movil ASC, cedula ASC, codigo ASC "
+            f"LIMIT {limit}"
+        )
+        metadata = self._inventory_sql_metadata(
+            table=serial_table,
+            columns=[
+                *list(serial_cols.values()),
+                *list(employee_cols.values()),
+                *list(catalog_cols.values()),
+            ],
+            metric_used="saldo_serializado",
+            aggregation_used="serial_family_balance_by_dimension_and_code",
+            dimensions_used=[dimension_name, "codigo", "familia"],
+            concept_field="stock_serializado_familia_dimension",
+        )
+        metadata.update(
+            {
+                "tables_detected": sorted(
+                    set([serial_table.split(".")[-1], employee_table.split(".")[-1], catalog_table.split(".")[-1]])
+                ),
+                "formula_used": "saldo = en_movil + en_base - cobros",
+                "balance_filter_policy": "include_positive_zero_negative",
+                "serial_rules": {
+                    "en_movil": "estado contiene MOVIL",
+                    "en_base": "estado contiene BASE o BODEGA",
+                    "cobros": "estado contiene COBRO",
+                },
+                "filters_applied": {
+                    "material_family": family_value,
+                    "material_family_match_mode": str(filters.get("material_family_match_mode") or "contains"),
+                    "grouping_dimension": dimension_name,
+                    "estado": "MOVIL",
+                },
+                "grouping_dimension": dimension_name,
+                "catalog_family_exists": True,
+                "catalog_family_column": "base_codigo_seriales.familia",
+                "catalog_family_match_mode": str(filters.get("material_family_match_mode") or "contains"),
+                "serial_state_filter": "MOVIL",
+                "employee_enrichment_fallback_by_edit": bool(serial_edit_col),
+            }
+        )
+        metadata["joins_used"] = [
+            "employee_detail_by_cedula",
+            *([ "employee_detail_by_edit_fallback" ] if serial_edit_col else []),
+            "serial_catalog_by_codigo",
+        ]
+        return query, "inventory_serial_stock_by_family_grouped_dimension", metadata
 
     def _build_inventory_critical_materials_sql(
         self,
@@ -2784,6 +3521,32 @@ class QueryExecutionPlanner:
                 },
             }
         return {"ok": True, "table": table, "columns": columns}
+
+    def _inventory_optional_table_column(
+        self,
+        *,
+        context: dict[str, Any],
+        table_name: str,
+        logical_names: tuple[str, ...] = (),
+        column_names: tuple[str, ...] = (),
+    ) -> str:
+        table = self._resolve_table_for_required_columns(
+            context=context,
+            required_columns=(),
+            preferred_table_name=table_name,
+        )
+        if not table:
+            return ""
+        profile = self._find_context_profile_for_table(
+            context=context,
+            table_ref=table,
+            logical_names=logical_names,
+            column_names=column_names,
+        )
+        physical = str((profile or {}).get("column_name") or "").strip()
+        if physical and self._is_safe_identifier(physical):
+            return physical
+        return ""
 
     def _inventory_material_stock_subqueries(self, *, context: dict[str, Any], by_warehouse: bool) -> dict[str, Any]:
         required_by_table = {
@@ -4956,6 +5719,141 @@ class QueryExecutionPlanner:
             value = 500
         return max(1, min(value, 5000))
 
+    @staticmethod
+    def _inventory_grouped_dimension_value(
+        row: dict[str, Any],
+        *,
+        dimension_field: str,
+    ) -> str:
+        for key in (
+            dimension_field,
+            "dimension",
+            "movil",
+            "cedula",
+            "bodega",
+        ):
+            value = str((row or {}).get(key) or "").strip()
+            if value:
+                return value
+        return "SIN_DATO"
+
+    def _build_inventory_serial_dimension_subtotal_table(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        dimension_field: str,
+        result_meta: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not rows:
+            return None
+
+        aggregated: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            dimension_value = self._inventory_grouped_dimension_value(
+                row,
+                dimension_field=dimension_field,
+            )
+            bucket = aggregated.setdefault(
+                dimension_value,
+                {
+                    dimension_field: dimension_value,
+                    "codigos_distintos": set(),
+                    "seriales_total": 0.0,
+                    "en_movil": 0.0,
+                    "en_base": 0.0,
+                    "cobros": 0.0,
+                    "saldo": 0.0,
+                },
+            )
+            codigo = str(row.get("codigo") or "").strip()
+            if codigo:
+                bucket["codigos_distintos"].add(codigo)
+            for key in ("seriales_total", "en_movil", "en_base", "cobros", "saldo"):
+                bucket[key] = float(bucket.get(key) or 0) + float(row.get(key) or 0)
+
+        subtotal_rows = [
+            {
+                dimension_field: key,
+                "codigos_distintos": len(value["codigos_distintos"]),
+                "seriales_total": value["seriales_total"],
+                "en_movil": value["en_movil"],
+                "en_base": value["en_base"],
+                "cobros": value["cobros"],
+                "saldo": value["saldo"],
+            }
+            for key, value in aggregated.items()
+        ]
+        subtotal_rows.sort(
+            key=lambda item: (
+                -float(item.get("saldo") or 0),
+                str(item.get(dimension_field) or ""),
+            )
+        )
+
+        total_records = len(subtotal_rows)
+        returned_records = total_records
+        truncated = False
+        if bool(result_meta.get("truncated")):
+            truncated = True
+
+        return {
+            "name": f"subtotales_serializados_por_{dimension_field}",
+            "title": f"Subtotales por {dimension_field}",
+            "columns": [
+                dimension_field,
+                "codigos_distintos",
+                "seriales_total",
+                "en_movil",
+                "en_base",
+                "cobros",
+                "saldo",
+            ],
+            "rows": subtotal_rows,
+            "export_rows": subtotal_rows,
+            "rowcount": total_records,
+            "total_records": total_records,
+            "returned_records": returned_records,
+            "export_records": total_records,
+            "export_truncated": False,
+            "export_limit": total_records,
+            "truncated": truncated,
+            "limit": total_records,
+            "meta": {
+                "derived_from_result_set": True,
+                "partial_due_to_result_truncation": truncated,
+                "dimension_field": dimension_field,
+            },
+        }
+
+    def _extend_inventory_supplemental_tables(
+        self,
+        *,
+        response_profile_id: str,
+        rows: list[dict[str, Any]],
+        result_meta: dict[str, Any],
+        business_response: dict[str, Any] | None,
+        supplemental_tables: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        tables = [dict(item) for item in list(supplemental_tables or []) if isinstance(item, dict)]
+        if response_profile_id != "inventory.serial.stock.dimension.detail":
+            return tables
+
+        grouping_dimension = str(
+            dict((business_response or {}).get("metadata") or {}).get("filters", {}).get("grouping_dimension")
+            or ""
+        ).strip().lower()
+        dimension_field = grouping_dimension if grouping_dimension in {"movil", "cedula", "bodega"} else "dimension"
+        subtotal_table = self._build_inventory_serial_dimension_subtotal_table(
+            rows=rows,
+            dimension_field=dimension_field,
+            result_meta=result_meta,
+        )
+        if subtotal_table:
+            tables.append(subtotal_table)
+        return tables
+
     def _build_sql_response(
         self,
         *,
@@ -5045,11 +5943,108 @@ class QueryExecutionPlanner:
                 resolved_query=resolved_query.as_dict(),
                 rows=rows,
                 limitations=list(metadata.get("limitations") or []),
+                supplemental_tables=supplemental_tables,
+                result_set=dict(result_meta),
+                execution_metadata=metadata,
             )
             if str(business_response.get("dato") or "").strip():
                 reply = str(business_response.get("dato") or "").strip()
             if str(business_response.get("hallazgo") or "").strip():
                 findings = [{"title": "Alertas", "detail": str(business_response.get("hallazgo") or "").strip()}]
+            response_profile_id = str(
+                (dict(business_response.get("response_profile") or {})).get("id")
+                or (dict(business_response.get("metadata") or {})).get("response_profile_usado")
+                or ""
+            ).strip()
+            supplemental_tables = self._extend_inventory_supplemental_tables(
+                response_profile_id=response_profile_id,
+                rows=rows,
+                result_meta=result_meta,
+                business_response=business_response,
+                supplemental_tables=supplemental_tables,
+            )
+            business_response = build_inventory_business_response(
+                resolved_query=resolved_query.as_dict(),
+                rows=rows,
+                limitations=list(metadata.get("limitations") or []),
+                supplemental_tables=supplemental_tables,
+                result_set=dict(result_meta),
+                execution_metadata=metadata,
+            )
+            if str(business_response.get("dato") or "").strip():
+                reply = str(business_response.get("dato") or "").strip()
+            if str(business_response.get("hallazgo") or "").strip():
+                findings = [{"title": "Alertas", "detail": str(business_response.get("hallazgo") or "").strip()}]
+            if response_profile_id == "inventory.stock.dimension.summary":
+                grouping_dimension = str(
+                    (dict(business_response.get("metadata") or {})).get("filters", {}).get("grouping_dimension")
+                    or ""
+                ).strip().lower()
+                dimension_field = grouping_dimension if grouping_dimension in {"movil", "cedula", "bodega"} else "dimension"
+                total_saldo = sum(float((row or {}).get("saldo") or 0) for row in rows if isinstance(row, dict))
+                distinct_dimensions = {
+                    str(
+                        (row or {}).get(dimension_field)
+                        or (row or {}).get("dimension")
+                        or (row or {}).get("movil")
+                        or (row or {}).get("cedula")
+                        or (row or {}).get("bodega")
+                        or ""
+                    ).strip()
+                    for row in rows
+                    if isinstance(row, dict)
+                }
+                distinct_dimensions.discard("")
+                matching_codes = {
+                    str((row or {}).get("codigo") or "").strip()
+                    for row in rows
+                    if isinstance(row, dict) and str((row or {}).get("codigo") or "").strip()
+                }
+                kpis.update(
+                    {
+                        "total_saldo": total_saldo,
+                        "dimensiones_con_saldo": len(distinct_dimensions),
+                        "registros_evidencia": int(result_meta.get("returned_records") or len(rows)),
+                        "codigos_coincidentes": len(matching_codes),
+                    }
+                )
+            if response_profile_id == "inventory.serial.stock.dimension.detail":
+                grouping_dimension = str(
+                    (dict(business_response.get("metadata") or {})).get("filters", {}).get("grouping_dimension")
+                    or ""
+                ).strip().lower()
+                dimension_field = grouping_dimension if grouping_dimension in {"movil", "cedula", "bodega"} else "dimension"
+                total_saldo = sum(float((row or {}).get("saldo") or 0) for row in rows if isinstance(row, dict))
+                total_seriales = sum(
+                    float((row or {}).get("seriales_total") or 0) for row in rows if isinstance(row, dict)
+                )
+                distinct_dimensions = {
+                    str((row or {}).get(dimension_field) or "").strip()
+                    for row in rows
+                    if isinstance(row, dict)
+                    and str((row or {}).get(dimension_field) or "").strip()
+                    and float((row or {}).get("saldo") or 0) > 0
+                }
+                matching_codes = {
+                    str((row or {}).get("codigo") or "").strip()
+                    for row in rows
+                    if isinstance(row, dict) and str((row or {}).get("codigo") or "").strip()
+                }
+                kpis.update(
+                    {
+                        "total_saldo": total_saldo,
+                        "seriales_total": total_seriales,
+                        "dimensiones_con_saldo": len(distinct_dimensions),
+                        "codigos_coincidentes": len(matching_codes),
+                        "registros_evidencia": int(result_meta.get("returned_records") or len(rows)),
+                    }
+                )
+                if dimension_field == "movil":
+                    kpis["moviles_con_saldo"] = len(distinct_dimensions)
+                elif dimension_field == "cedula":
+                    kpis["tecnicos_con_saldo"] = len(distinct_dimensions)
+                elif dimension_field == "bodega":
+                    kpis["bodegas_con_saldo"] = len(distinct_dimensions)
             inventory_insights = [
                 str(business_response.get(key) or "").strip()
                 for key in ("hallazgo", "riesgo", "recomendacion")
@@ -5058,43 +6053,6 @@ class QueryExecutionPlanner:
             if inventory_insights:
                 insights = inventory_insights
         supplemental_tables = list(supplemental_tables or [])
-        if domain_code == "inventario_logistica" and supplemental_tables:
-            serial_table = next(
-                (item for item in supplemental_tables if str(item.get("name") or "") == "serializados_equipos"),
-                {},
-            )
-            serial_rowcount = int(serial_table.get("rowcount") or 0)
-            if not bool(serial_table.get("skipped")):
-                reply = (
-                    f"Se consolidaron {len(rows)} registros de materiales/ferretero y {serial_rowcount} registros "
-                    "de serializados/equipos para el alcance consultado."
-                )
-                findings = [
-                    {
-                        "title": "Bloques entregados",
-                        "detail": (
-                            "La respuesta incluye bloque de materiales/ferretero y bloque de serializados/equipos "
-                            "con cedula, movil y estado_empleado."
-                        ),
-                    }
-                ]
-                insights = [
-                    "Materiales: saldo = entregas - devoluciones - consumos - cobros.",
-                    "Serializados: saldo = en_movil + en_base - cobros.",
-                    "No se excluyeron empleados inactivos cuando aparecieron en el cruce historico.",
-                ]
-                if business_response:
-                    business_response["dato"] = reply
-                    business_response["hallazgo"] = findings[0]["detail"]
-                    business_response["recomendacion"] = "Si quieres, puedo resumir cualquiera de los dos bloques por movil, cedula o codigo."
-            elif business_response:
-                prior = str(business_response.get("hallazgo") or "").strip()
-                skip_reason = str(serial_table.get("reason") or "").strip()
-                business_response["hallazgo"] = (
-                    f"{prior} El bloque serializado no se genero: {skip_reason}.".strip()
-                    if prior
-                    else f"El bloque serializado no se genero: {skip_reason}."
-                )
         findings = locals().get("findings") or [
             {
                 "title": "Top hallazgo",

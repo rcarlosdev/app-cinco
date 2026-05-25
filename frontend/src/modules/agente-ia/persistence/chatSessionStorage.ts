@@ -1,6 +1,12 @@
 "use client";
 
-import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
+import type {
+  ChatAttachmentSummary,
+  ChatMessageModel,
+  NormalizedAssistantPayload,
+  NormalizedTable,
+} from "@/modules/programacion/ia-dev/chat/types";
+import type { IADevChatResponse } from "@/services/ia-dev.service";
 
 export type AgenteIAChatThread = {
   id: string;
@@ -31,6 +37,13 @@ type LegacyChatSessionState = {
 
 const CHAT_HISTORY_KEY = "agente-ia.chat-history.v2";
 const LEGACY_CHAT_SESSION_KEY = "agente-ia.chat-session.v1";
+const MAX_PERSISTED_CHATS = 12;
+const MAX_PERSISTED_MESSAGES_PER_CHAT = 40;
+const MAX_PERSISTED_MESSAGE_CHARS = 12000;
+const MAX_PERSISTED_INSIGHTS = 8;
+const MAX_PERSISTED_TABLE_ROWS = 24;
+const MAX_PERSISTED_EXTRA_TABLES = 2;
+const MAX_PERSISTED_CHARTS = 2;
 
 const safeParse = <T>(raw: string | null): T | null => {
   if (!raw) return null;
@@ -43,6 +56,16 @@ const safeParse = <T>(raw: string | null): T | null => {
 
 const sanitizeMessage = (message: ChatMessageModel): ChatMessageModel => {
   if (message.status !== "streaming") return message;
+  const backgroundStatus = String(
+    message.response?.task?.current_run?.background?.run_status ||
+      message.response?.task?.current_run?.status ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (["queued", "running", "resumed", "awaiting_approval", "paused"].includes(backgroundStatus)) {
+    return message;
+  }
 
   const interruptedContent =
     message.content.trim() ||
@@ -58,6 +81,130 @@ const sanitizeMessage = (message: ChatMessageModel): ChatMessageModel => {
 
 const sanitizeMessages = (messages: ChatMessageModel[] | undefined) =>
   Array.isArray(messages) ? messages.map((message) => sanitizeMessage(message)) : [];
+
+const truncateText = (value: string, maxLength: number) => {
+  const compact = value.trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, Math.max(0, maxLength - 3))}...`;
+};
+
+const sanitizeTableForStorage = (table: NormalizedTable | null): NormalizedTable | null => {
+  if (!table) return null;
+
+  const rows = table.rows.slice(0, MAX_PERSISTED_TABLE_ROWS);
+
+  return {
+    columns: table.columns,
+    rows,
+    exportRows: [],
+    rowcount: table.rowcount,
+    totalRecords: table.totalRecords,
+    returnedRecords: Math.min(table.returnedRecords, rows.length),
+    exportRecords: 0,
+    exportTruncated: true,
+    exportLimit: 0,
+    truncated: table.truncated || table.rows.length > rows.length,
+    limit: Math.min(table.limit || rows.length, rows.length),
+    exportArtifact: table.exportArtifact,
+  };
+};
+
+const sanitizeResponseForStorage = (
+  response: Partial<IADevChatResponse> | undefined,
+): Partial<IADevChatResponse> | undefined => {
+  if (!response) return undefined;
+  const data = response.data || {};
+  return {
+    session_id: response.session_id || "",
+    reply: response.reply || "",
+    task: response.task,
+    response_envelope: response.response_envelope,
+    orchestrator: response.orchestrator,
+    data: {
+      ...data,
+      table: data.table,
+      extra_tables: Array.isArray(data.extra_tables)
+        ? data.extra_tables.slice(0, MAX_PERSISTED_EXTRA_TABLES)
+        : [],
+    },
+    working_updates: Array.isArray(response.working_updates)
+      ? response.working_updates.slice(-4)
+      : [],
+    trace: Array.isArray(response.trace) ? response.trace.slice(-6) : [],
+    memory: response.memory,
+    reasoning: response.reasoning,
+  };
+};
+
+const sanitizeNormalizedForStorage = (
+  payload: NormalizedAssistantPayload | null | undefined,
+): NormalizedAssistantPayload | undefined => {
+  if (!payload) return undefined;
+
+  const insights = Array.isArray(payload.insights) ? payload.insights : [];
+  const charts = Array.isArray(payload.charts) ? payload.charts : [];
+  const extraTables = Array.isArray(payload.extraTables) ? payload.extraTables : [];
+  const labels = Array.isArray(payload.labels) ? payload.labels : [];
+  const series = Array.isArray(payload.series) ? payload.series : [];
+
+  return {
+    ...payload,
+    summary: truncateText(payload.summary || "", 4000),
+    insights: insights.slice(0, MAX_PERSISTED_INSIGHTS),
+    charts: charts.slice(0, MAX_PERSISTED_CHARTS),
+    chart: payload.chart ?? charts[0] ?? null,
+    table: sanitizeTableForStorage(payload.table),
+    extraTables: extraTables
+      .slice(0, MAX_PERSISTED_EXTRA_TABLES)
+      .map((table) => sanitizeTableForStorage(table))
+      .filter((table): table is NormalizedTable => table != null),
+    labels: labels.slice(0, MAX_PERSISTED_TABLE_ROWS),
+    series: series.slice(0, MAX_PERSISTED_TABLE_ROWS),
+    meta: {},
+  };
+};
+
+const sanitizeAttachmentsForStorage = (
+  attachments: ChatAttachmentSummary[] | undefined,
+) =>
+  Array.isArray(attachments)
+    ? attachments.slice(0, 6).map((attachment) => ({
+        id: attachment.id,
+        name: truncateText(attachment.name, 180),
+        mimeType: truncateText(attachment.mimeType || "", 120),
+        size: attachment.size,
+        kind: attachment.kind,
+      }))
+    : undefined;
+
+const sanitizeMessageForStorage = (message: ChatMessageModel): ChatMessageModel => ({
+  id: message.id,
+  role: message.role,
+  content: truncateText(message.content, MAX_PERSISTED_MESSAGE_CHARS),
+  createdAt: message.createdAt,
+  status: message.status,
+  attachments: sanitizeAttachmentsForStorage(message.attachments),
+  response: sanitizeResponseForStorage(message.response),
+  normalized: sanitizeNormalizedForStorage(message.normalized),
+  actions: Array.isArray(message.actions) ? message.actions.slice(0, 6) : undefined,
+  error: message.error ? truncateText(message.error, 1000) : undefined,
+});
+
+const sanitizeThreadForStorage = (thread: AgenteIAChatThread): AgenteIAChatThread =>
+  sanitizeThread({
+    ...thread,
+    messages: thread.messages
+      .slice(-MAX_PERSISTED_MESSAGES_PER_CHAT)
+      .map((message) => sanitizeMessageForStorage(sanitizeMessage(message))),
+  });
+
+const isQuotaExceededError = (error: unknown) =>
+  error instanceof DOMException &&
+  (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+
+const tryPersistHistory = (payload: AgenteIAChatHistoryState) => {
+  window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(payload));
+};
 
 const buildThreadTitle = (messages: ChatMessageModel[]) => {
   const firstUserMessage = messages.find((message) => message.role === "user");
@@ -159,14 +306,60 @@ export const saveAgenteIAChatHistory = (
 ) => {
   if (typeof window === "undefined") return;
 
-  const payload: AgenteIAChatHistoryState = {
+  const persistedChats = state.chats
+    .map((chat) => sanitizeThreadForStorage(chat))
+    .slice(0, MAX_PERSISTED_CHATS);
+  const persistedActiveChatId = persistedChats.some(
+    (chat) => chat.id === state.activeChatId,
+  )
+    ? state.activeChatId
+    : persistedChats[0]?.id ?? null;
+
+  const basePayload: AgenteIAChatHistoryState = {
     version: 2,
-    activeChatId: state.activeChatId,
-    chats: state.chats.map((chat) => sanitizeThread(chat)),
+    activeChatId: persistedActiveChatId,
+    chats: persistedChats,
     updatedAt: new Date().toISOString(),
   };
 
-  window.localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(payload));
+  try {
+    tryPersistHistory(basePayload);
+  } catch (error) {
+    if (!isQuotaExceededError(error)) {
+      throw error;
+    }
+
+    const lightweightPayload: AgenteIAChatHistoryState = {
+      ...basePayload,
+      chats: basePayload.chats.slice(0, 6).map((chat) => ({
+        ...chat,
+        messages: chat.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: truncateText(message.content, 2000),
+          createdAt: message.createdAt,
+          status: message.status,
+          attachments: sanitizeAttachmentsForStorage(message.attachments),
+          error: message.error,
+        })),
+      })),
+    };
+    lightweightPayload.activeChatId = lightweightPayload.chats.some(
+      (chat) => chat.id === lightweightPayload.activeChatId,
+    )
+      ? lightweightPayload.activeChatId
+      : lightweightPayload.chats[0]?.id ?? null;
+
+    try {
+      tryPersistHistory(lightweightPayload);
+    } catch (fallbackError) {
+      if (!isQuotaExceededError(fallbackError)) {
+        throw fallbackError;
+      }
+
+      window.localStorage.removeItem(CHAT_HISTORY_KEY);
+    }
+  }
 };
 
 export const clearAgenteIAChatHistory = () => {

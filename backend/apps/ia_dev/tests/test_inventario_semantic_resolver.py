@@ -26,6 +26,13 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         }
 
     def _resolve(self, message: str, operation: str = "detail"):
+        return self._resolve_with_context(
+            message=message,
+            operation=operation,
+            semantic_context={"inventory_catalog_families": ["DECO", "CPE RESIDENCIAL", "ONT", "ROUTER"]},
+        )
+
+    def _resolve_with_context(self, *, message: str, operation: str = "detail", semantic_context: dict | None = None):
         return self.resolver.resolve_query(
             message=message,
             intent=StructuredQueryIntent(
@@ -35,7 +42,21 @@ class InventarioSemanticResolverTests(SimpleTestCase):
                 template_id="",
                 confidence=0.8,
             ),
-            semantic_context={},
+            semantic_context=semantic_context or {},
+        )
+
+    def _resolve_with_attachment(self, *, message: str, operation: str = "detail"):
+        return self._resolve_with_context(
+            message=message,
+            operation=operation,
+            semantic_context={
+                "inventory_catalog_families": ["DECO", "CPE RESIDENCIAL", "ONT", "ROUTER"],
+                "runtime_attachment_summary": {
+                    "present": True,
+                    "count": 1,
+                    "names": ["seriales_proveedor.xlsx"],
+                },
+            },
         )
 
     def _semantic_plan(self, resolved):
@@ -159,20 +180,110 @@ class InventarioSemanticResolverTests(SimpleTestCase):
             "traceability_query",
         )
 
-    def test_consumo_movil_sin_validar(self):
-        resolved = self._resolve("equipos serializados en consumo movil sin validar")
+    def test_valida_seriales_adjuntos_proveedor_resuelve_capability_gobernada(self):
+        resolved = self._resolve_with_attachment(
+            message="Valida los seriales adjuntos, dados por el proveedor",
+            operation="validate_file",
+        )
 
-        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
-        self.assertEqual(str(inference.get("intent") or ""), "risk_detection")
-        self.assertEqual(str(inference.get("business_concept") or ""), "consumo_movil_sin_validar")
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_risk_consumo_movil_sin_validar")
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+        self.assertEqual(str(resolved.intent.operation or ""), "validate_file")
+        self.assertEqual(
+            str(((resolved.semantic_context.get("inventory_semantic_inference") or {}).get("business_concept") or "")),
+            "validacion_seriales_externos_contra_inventario_propio",
+        )
+        self.assertEqual(
+            str(((resolved.semantic_context.get("semantic_capability_registry") or {}).get("candidate_capability") or "")),
+            "inventory_provider_serial_validation",
+        )
+
+    def test_revisa_seriales_del_proveedor_con_adjunto_resuelve_capability_gobernada(self):
+        resolved = self._resolve_with_attachment(
+            message="Revisa estos seriales del proveedor",
+            operation="validate_file",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+        self.assertEqual(str(resolved.intent.operation or ""), "validate_file")
+        self.assertEqual(
+            str(((resolved.semantic_context.get("inventory_semantic_inference") or {}).get("expected_runtime_flow") or "")),
+            "handler",
+        )
+
+    def test_valida_seriales_con_adjunto_sin_repetir_proveedor_resuelve_capability_gobernada(self):
+        resolved = self._resolve_with_attachment(
+            message="Validar los seriales",
+            operation="validate_file",
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+        self.assertEqual(str(resolved.intent.operation or ""), "validate_file")
+        self.assertEqual(
+            str(((resolved.semantic_context.get("semantic_capability_registry") or {}).get("candidate_capability") or "")),
+            "inventory_provider_serial_validation",
+        )
+
+    def test_valida_seriales_sin_adjunto_no_fuerza_ruta_de_proveedor(self):
+        resolved = self._resolve("Valida los seriales", operation="detail")
+
+        self.assertNotEqual(str(resolved.intent.template_id or ""), "inventory_provider_serial_validation")
+
+    def test_consumo_movil_sin_validar(self):
+        cases = ["equipos serializados en consumo movil sin validar"]
+
+        for message in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message)
+                inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+                trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+
+                self.assertEqual(str(inference.get("intent") or ""), "risk_detection")
+                self.assertEqual(str(inference.get("business_concept") or ""), "consumo_movil_sin_validar")
+                self.assertEqual(str(resolved.intent.template_id or ""), "inventory_risk_consumo_movil_sin_validar")
+                self.assertEqual(str(trace.get("source") or ""), "capability_pack")
+                self.assertFalse(bool(trace.get("fallback_sombreado_usado")))
+                self.assertFalse(bool(trace.get("legacy_mapping_used")))
+                self.assertFalse(bool(trace.get("fallback_used")))
 
     def test_materiales_mas_consumidos_en_mayo(self):
-        resolved = self._resolve("materiales mas consumidos en mayo", operation="aggregate")
+        cases = [
+            "materiales mas consumidos en mayo",
+            "top de consumos de materiales en mayo",
+        ]
 
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_consumption_top")
-        self.assertIn("material", list(resolved.intent.group_by or []))
+        for message in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="aggregate")
+                trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+
+                self.assertEqual(str(resolved.intent.template_id or ""), "inventory_consumption_top")
+                if "materiales mas consumidos" in message:
+                    self.assertIn("material", list(resolved.intent.group_by or []))
+                self.assertEqual(str(resolved.normalized_filters.get("month") or ""), "5")
+                self.assertEqual(str(trace.get("source") or ""), "capability_pack")
+                self.assertFalse(bool(trace.get("legacy_mapping_used")))
+                self.assertFalse(bool(trace.get("fallback_used")))
+
+    def test_consumos_de_movil_en_mayo_resuelven_consumption_dimension_desde_capability_pack(self):
+        resolved = self._resolve("consumos de la movil TIRAN314 el 05 de mayo", operation="aggregate")
+        trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_consumption_by_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN314")
         self.assertEqual(str(resolved.normalized_filters.get("month") or ""), "5")
+        self.assertEqual(str(trace.get("source") or ""), "capability_pack")
+        self.assertFalse(bool(trace.get("legacy_mapping_used")))
+        self.assertFalse(bool(trace.get("fallback_used")))
+
+    def test_ingreso_del_codigo_resuelve_movement_detail_desde_capability_pack(self):
+        resolved = self._resolve("ingreso del codigo 1025507", operation="detail")
+        trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_movement_detail")
+        self.assertEqual(str(resolved.normalized_filters.get("codigo") or ""), "1025507")
+        self.assertEqual(str(trace.get("source") or ""), "capability_pack")
+        self.assertFalse(bool(trace.get("legacy_mapping_used")))
+        self.assertFalse(bool(trace.get("fallback_used")))
 
     def test_traslados_por_bodega_destino(self):
         resolved = self._resolve("traslados por bodega destino", operation="aggregate")
@@ -203,6 +314,75 @@ class InventarioSemanticResolverTests(SimpleTestCase):
 
         self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
         self.assertEqual(str(resolved.normalized_filters.get("stock_scope") or ""), "movil")
+
+    def test_saldo_en_moviles_de_material_resuelve_dimension_agrupada_por_descripcion(self):
+        resolved = self._resolve("saldo en moviles de CONECTOR RJ 45", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("descripcion") or ""), "CONECTOR RJ 45")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+        self.assertEqual(str(resolved.normalized_filters.get("grouping_dimension") or ""), "movil")
+
+    def test_saldo_por_movil_del_codigo_resuelve_dimension_agrupada_por_codigo(self):
+        resolved = self._resolve("saldo por movil del codigo 1025507", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("codigo") or ""), "1025507")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_inventario_de_material_por_cuadrilla_usa_dimension_movil(self):
+        resolved = self._resolve("inventario de CONECTOR RJ 45 por cuadrilla", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("descripcion") or ""), "CONECTOR RJ 45")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_saldo_en_moviles_de_deco_resuelve_familia_serializada_por_movil(self):
+        resolved = self._resolve("saldo en moviles de Deco", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family_match_mode") or ""), "contains")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_inventario_de_deco_por_cuadrilla_resuelve_familia_serializada(self):
+        resolved = self._resolve("inventario de Deco por cuadrilla", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_equipos_deco_en_moviles_resuelve_familia_serializada(self):
+        resolved = self._resolve("equipos Deco en moviles", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_saldo_en_moviles_de_cpe_residencial_resuelve_concepto_serializado_gobernado(self):
+        resolved = self._resolve("saldo en moviles de CPE residencial", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "CPE RESIDENCIAL")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
+
+    def test_saldo_en_moviles_de_deco_usa_busqueda_parcial_en_catalogo_serializado(self):
+        resolved = self._resolve_with_context(
+            message="saldo en moviles de Deco",
+            operation="aggregate",
+            semantic_context={"inventory_catalog_families": ["DECO HD", "DECO IPTV", "ONT", "ROUTER"]},
+        )
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family") or ""), "DECO")
+        self.assertEqual(str(resolved.normalized_filters.get("material_family_match_mode") or ""), "contains")
+
+    def test_existencias_de_ferretero_por_movil_resuelve_dimension_por_familia(self):
+        resolved = self._resolve("existencias de ferretero por movil", operation="aggregate")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "ferretero")
+        self.assertEqual(list(resolved.intent.group_by or []), ["movil"])
 
     def test_saldo_empleado_resuelve_stock_movil_por_cedula(self):
         resolved = self._resolve("saldo empleado 98672304", operation="stock_balance")
@@ -254,6 +434,62 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
         self.assertEqual(str(resolved.normalized_filters.get("codigo") or ""), "1025507")
 
+    def test_variacion_que_tiene_asignado_cuadrilla_resuelve_movil_con_bloque_dual(self):
+        resolved = self._resolve("qué tiene asignado la cuadrilla TIRAN224", operation="stock_balance")
+        plan = self._semantic_plan(resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_mobile")
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertEqual(str((plan.get("entity") or {}).get("field") or ""), "movil")
+        self.assertTrue(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_variacion_muestrame_lo_que_tiene_el_movil_resuelve_movil_con_bloque_dual(self):
+        resolved = self._resolve("muéstrame lo que tiene el móvil TIRAN224", operation="stock_balance")
+        plan = self._semantic_plan(resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertTrue(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_variacion_movimientos_del_tecnico_prioriza_cedula(self):
+        resolved = self._resolve("movimientos del técnico 5098747", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+
+    def test_variacion_entradas_y_salidas_de_cedula_prioriza_kardex_empleado(self):
+        resolved = self._resolve("entradas y salidas de 5098747", operation="detail")
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_kardex_by_employee")
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+
+    def test_variacion_material_de_claro_para_movil_resuelve_tipo_material(self):
+        resolved = self._resolve("solo material de claro de TIRAN224", operation="stock_balance")
+        plan = self._semantic_plan(resolved)
+
+        self.assertEqual(str(resolved.normalized_filters.get("movil") or ""), "TIRAN224")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "material")
+        self.assertFalse(bool((plan.get("scope") or {}).get("include_serialized")))
+
+    def test_variacion_ferreteria_asignada_al_tecnico_resuelve_tipo_ferretero(self):
+        resolved = self._resolve("ferretería asignada al técnico 5098747", operation="stock_balance")
+
+        self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "5098747")
+        self.assertEqual(str(resolved.normalized_filters.get("tipo") or ""), "ferretero")
+
+    def test_variacion_nombre_propio_sin_identificador_queda_bloqueada_para_aclaracion(self):
+        resolved = self._resolve("qué tiene Juan Pérez", operation="detail")
+        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+        self.assertEqual(str(inference.get("intent") or ""), "needs_clarification")
+        self.assertTrue(any("cédula" in item.lower() or "móvil" in item.lower() for item in list(resolved.warnings or [])))
+
+    def test_variacion_actas_sap_declara_limitacion(self):
+        resolved = self._resolve("actas SAP del empleado 5098747", operation="detail")
+        inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_document_generation_pending")
+        self.assertIn("documentos_sap_y_actas_no_habilitados", list(inference.get("limitations") or []))
+
     def test_saldo_material_claro_empleado_resuelve_tipo_material(self):
         resolved = self._resolve("saldo material claro empleado 5098747", operation="stock_balance")
 
@@ -304,14 +540,29 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         self.assertIn("cedula", list(resolved.intent.group_by or []))
         self.assertIn("codigo", list(resolved.intent.group_by or []))
 
-    def test_materiales_criticos_por_empleado_resuelve_template_dedicado(self):
-        resolved = self._resolve(
-            "materiales criticos por empleado en operacion_hfc cruzando saldo, cedula, movil y datos del empleado",
-            operation="aggregate",
-        )
+    def test_materiales_criticos_por_empleado_resuelve_template_dedicado_en_variaciones_semanticas(self):
+        cases = [
+            (
+                "materiales criticos por empleado en operacion_hfc cruzando saldo, cedula, movil y datos del empleado",
+                "operacion_hfc",
+                ["cedula"],
+            ),
+            ("materiales críticos por técnico en operacion_hfc", "operacion_hfc", ["cedula"]),
+            ("materiales críticos por móvil/cuadrilla en operacion_hfc", "operacion_hfc", ["movil"]),
+            ("criticidad de materiales por saldo y consumo en operacion_hfc", "operacion_hfc", []),
+            ("materiales con cobertura baja en operacion_hfc", "operacion_hfc", []),
+            ("materiales por debajo de umbral en operacion_hfc", "operacion_hfc", []),
+        ]
 
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_critical_by_employee")
-        self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+        for message, expected_bodega, expected_group_by in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="aggregate")
+                inference = dict(resolved.semantic_context.get("inventory_semantic_inference") or {})
+
+                self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_critical_by_employee")
+                self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), expected_bodega)
+                self.assertEqual(str(inference.get("business_concept") or ""), "materiales_criticos_por_empleado")
+                self.assertEqual(list(resolved.intent.group_by or []), expected_group_by)
 
     def test_equipos_cargados_a_movil_numerica_resuelve_serial_por_operador(self):
         resolved = self._resolve("equipos cargados a la movil 98562719", operation="detail")
@@ -320,17 +571,45 @@ class InventarioSemanticResolverTests(SimpleTestCase):
         self.assertEqual(str(resolved.normalized_filters.get("cedula") or ""), "98562719")
 
     def test_consumo_vs_facturacion_solo_sql_para_operacion_hfc(self):
-        resolved = self._resolve("consumo vs facturacion operacion_hfc", operation="aggregate")
+        cases = [
+            "consumo vs facturacion operacion_hfc",
+            "comparativo de consumo tecnico contra facturacion hfc",
+        ]
 
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_consumption_billing_operacion_hfc")
-        self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+        for message in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="aggregate")
+                trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+
+                self.assertEqual(str(resolved.intent.template_id or ""), "inventory_consumption_billing_operacion_hfc")
+                self.assertEqual(str(resolved.normalized_filters.get("bodega") or ""), "operacion_hfc")
+                self.assertEqual(str(trace.get("source") or ""), "capability_pack")
+                self.assertFalse(bool(trace.get("legacy_mapping_used")))
+                self.assertFalse(bool(trace.get("fallback_used")))
 
     def test_equipos_por_estado_usa_saldo_serializado_validado(self):
-        resolved = self._resolve("equipos por estado", operation="aggregate")
+        cases = [("equipos por estado", ["estado"])]
 
-        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_dimension")
-        self.assertEqual(list(resolved.intent.group_by or []), ["estado"])
-        self.assertNotIn("inventario_stock_pendiente_validacion_db_ai_dictionary", list(resolved.warnings or []))
+        for message, expected_group_by in cases:
+            with self.subTest(message=message):
+                resolved = self._resolve(message, operation="aggregate")
+                trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+
+                self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_dimension")
+                self.assertEqual(list(resolved.intent.group_by or []), expected_group_by)
+                self.assertNotIn("inventario_stock_pendiente_validacion_db_ai_dictionary", list(resolved.warnings or []))
+                self.assertEqual(str(trace.get("source") or ""), "capability_pack")
+                self.assertFalse(bool(trace.get("legacy_mapping_used")))
+                self.assertFalse(bool(trace.get("fallback_used")))
+
+    def test_trace_de_cobertura_del_pack_queda_publicada_en_binding_trace(self):
+        resolved = self._resolve("muÃ©strame lo que tiene el mÃ³vil TIRAN224", operation="stock_balance")
+
+        trace = dict(((resolved.semantic_context.get("resolved_semantic") or {}).get("binding_trace") or {}))
+        self.assertEqual(float(trace.get("capability_pack_coverage") or 0.0), 1.0)
+        self.assertGreater(int(trace.get("templates_pack_driven_count") or 0), 0)
+        self.assertEqual(int(trace.get("templates_legacy_allowed_count") or 0), 0)
+        self.assertEqual(list(trace.get("templates_missing_selection_rules") or []), [])
 
     def test_saldo_actual_de_cedula_no_inventa_responsable(self):
         resolved = self._resolve("saldo actual de la cÃ©dula 123456789", operation="aggregate")

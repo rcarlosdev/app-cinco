@@ -1,0 +1,172 @@
+evaluaciones:
+  - id: empleados_runtime_eval_v1
+    descripcion: >
+      Eval anti-hardcode para la fase actual de empleados con conteo simple,
+      agrupaciones declaradas, detalle seguro y cumpleanos gobernados por pack,
+      manteniendo fallback trazado solo en ambiguedades y rutas pendientes
+      declaradas.
+    casos:
+      - caso_id: empleados_personal_activo_hoy_pack
+        consulta: personal activo hoy
+        expectativa:
+          template_id: count_entities_by_status
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_por_area_pack
+        consulta: empleados por area
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_por_cargo_pack
+        consulta: cuantos empleados hay por cargo
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_por_sede_pack
+        consulta: agrupa empleados activos por sede
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_por_carpeta_pack
+        consulta: distribucion de personal por carpeta
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_por_supervisor_pack
+        consulta: empleados por supervisor
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: tecnicos_por_movil_pack
+        consulta: tecnicos por movil
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: detalle_empleado_por_cedula_pack
+        consulta: detalle del empleado 123456
+        expectativa:
+          template_id: detail_by_entity_and_period
+          candidate_capability: empleados.detail.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: datos_tecnico_por_cedula_pack
+        consulta: datos del tecnico 123456
+        expectativa:
+          template_id: detail_by_entity_and_period
+          candidate_capability: empleados.detail.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_movil_pack
+        consulta: empleados del movil TIRAN224
+        expectativa:
+          template_id: detail_by_entity_and_period
+          candidate_capability: empleados.detail.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: personal_sede_pack
+        consulta: mostrar personal de la sede norte
+        expectativa:
+          template_id: detail_by_entity_and_period
+          candidate_capability: empleados.detail.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: personal_supervisor_pack
+        consulta: mostrar personal por supervisor
+        expectativa:
+          template_id: detail_by_entity_and_period
+          candidate_capability: empleados.detail.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: listar_inactivos_pack
+        consulta: listar empleados inactivos
+        expectativa:
+          template_id: detail_by_entity_and_period
+          candidate_capability: empleados.detail.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: distribucion_personal_ambigua_fallback
+        consulta: distribucion de personal
+        expectativa:
+          source: legacy_shadow_fallback
+          legacy_retained_reason: empleados.limit.grouped_population_ambiguous_request
+      - caso_id: detalle_empleado_ambigua_fallback
+        consulta: informacion del empleado por cedula
+        expectativa:
+          source: legacy_shadow_fallback
+          legacy_retained_reason: empleados.limit.detail_ambiguous_request
+      - caso_id: empleados_cumpleanos_mayo_pack
+        consulta: cumpleanos de mayo
+        expectativa:
+          template_id: count_records_by_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_cumplen_este_mes_pack
+        consulta: empleados que cumplen anos este mes
+        expectativa:
+          template_id: count_records_by_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_cumpleanos_por_area_pack
+        consulta: cumpleanos de mayo por area
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_cumpleanos_por_mes_pack
+        consulta: cumpleanos por mes
+        expectativa:
+          template_id: aggregate_by_group_and_period
+          candidate_capability: empleados.count.active.v1
+          source: capability_pack
+          fallback_used: false
+          legacy_mapping_used: false
+      - caso_id: empleados_cumpleanos_hoy_fallback_trazado
+        consulta: cumpleanos de hoy
+        expectativa:
+          template_id: count_records_by_period
+          source: legacy_shadow_fallback
+          legacy_retained_reason: empleados.limit.birthday_ambiguous_period
+      - caso_id: empleados_cumpleanos_proximos_fallback_trazado
+        consulta: proximos cumpleanos de empleados activos
+        expectativa:
+          template_id: count_records_by_period
+          source: legacy_shadow_fallback
+          legacy_retained_reason: empleados.limit.birthday_ambiguous_period
+      - caso_id: empleados_alturas_proximos_vencer_moderno
+        consulta: certificados de altura proximos a vencer del personal activo operativo
+        expectativa:
+          template_id: count_entities_by_status
+          source: legacy_shadow_fallback
+          legacy_retained_reason: empleados.limit.heights_certificate_pending_pack

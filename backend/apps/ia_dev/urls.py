@@ -4,6 +4,7 @@ from apps.ia_dev.views import (
     IADevAttendancePeriodResolveView,
     IADevAsyncJobView,
     IADevChatView,
+    IADevChatTaskStatusView,
     IADevHealthView,
     IADevKnowledgeApproveView,
     IADevKnowledgeProposalView,
@@ -14,12 +15,18 @@ from apps.ia_dev.views import (
     IADevMemoryProposalView,
     IADevMemoryResetView,
     IADevObservabilitySummaryView,
+    IADevRuntimeGovernanceHealthView,
+    IADevRuntimeOperationsSummaryView,
+    IADevProviderSerialArtifactDownloadView,
+    IADevSemanticGapOperationsView,
+    IADevRuntimeTaskExplorerView,
     IADevTicketView,
     IADevUserMemoryView,
 )
 
 urlpatterns = [
     path("chat/", IADevChatView.as_view(), name="ia-dev-chat"),
+    path("chat/task-status/", IADevChatTaskStatusView.as_view(), name="ia-dev-chat-task-status"),
     path("attendance/period/resolve/", IADevAttendancePeriodResolveView.as_view(), name="ia-dev-attendance-period-resolve"),
     path("memory/reset/", IADevMemoryResetView.as_view(), name="ia-dev-memory-reset"),
     path("memory/user/", IADevUserMemoryView.as_view(), name="ia-dev-memory-user"),
@@ -34,4 +41,13 @@ urlpatterns = [
     path("knowledge/proposals/reject/", IADevKnowledgeRejectView.as_view(), name="ia-dev-knowledge-reject"),
     path("async/jobs/", IADevAsyncJobView.as_view(), name="ia-dev-async-job-status"),
     path("observability/summary/", IADevObservabilitySummaryView.as_view(), name="ia-dev-observability-summary"),
+    path("runtime/operations/summary/", IADevRuntimeOperationsSummaryView.as_view(), name="ia-dev-runtime-operations-summary"),
+    path("runtime/semantic-gaps/", IADevSemanticGapOperationsView.as_view(), name="ia-dev-runtime-semantic-gap-operations"),
+    path("runtime/tasks/explorer/", IADevRuntimeTaskExplorerView.as_view(), name="ia-dev-runtime-task-explorer"),
+    path(
+        "runtime/artifacts/provider-serial-validation/",
+        IADevProviderSerialArtifactDownloadView.as_view(),
+        name="ia-dev-provider-serial-artifact-download",
+    ),
+    path("runtime/governance/health/", IADevRuntimeGovernanceHealthView.as_view(), name="ia-dev-runtime-governance-health"),
 ]

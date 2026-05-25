@@ -6,8 +6,19 @@ import re
 import unicodedata
 from typing import Any, Callable
 
+from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.agent_contract_loader import AgentContractLoader
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.application.semantic.semantic_capability_registry import (
+    INVENTORY_INTENT_IDS_BY_TEMPLATE,
+    SemanticBindingRequest,
+    SemanticCapabilityRegistry,
+)
+from apps.ia_dev.domains.inventario_logistica.matcher_semantico_gobernado_inventario import (
+    MatcherSemanticoGobernadoInventario,
+)
+from apps.ia_dev.application.runtime.tool_registry_service import ToolRegistryService
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 
 
 class SemanticOrchestratorService:
@@ -47,10 +58,17 @@ class SemanticOrchestratorService:
         *,
         contract_loader: AgentContractLoader | None = None,
         llm_resolver: Callable[..., dict[str, Any]] | None = None,
+        gateway: OpenAIGatewayService | None = None,
+        tool_registry_service: ToolRegistryService | None = None,
     ) -> None:
         self.contract_loader = contract_loader or AgentContractLoader()
         self._llm_resolver = llm_resolver
-        self.model = resolve_model_name("semantic_orchestrator")
+        self.gateway = gateway or OpenAIGatewayService()
+        self.tool_registry_service = tool_registry_service or ToolRegistryService()
+        self.matcher_gobernado_inventario = MatcherSemanticoGobernadoInventario()
+        self.semantic_capability_registry = SemanticCapabilityRegistry(
+            tool_registry_service=self.tool_registry_service
+        )
 
     def orchestrate(
         self,
@@ -63,6 +81,8 @@ class SemanticOrchestratorService:
         domain_semantic_summary: dict[str, Any] | None,
         memory_context: dict[str, Any] | None,
         route_debug_hints: dict[str, Any] | None,
+        run_context: RunContext | None = None,
+        observability=None,
     ) -> dict[str, Any]:
         initial_contract = dict(agent_contract or {})
         dictionary_summary = dict(ai_dictionary_summary or {})
@@ -98,6 +118,8 @@ class SemanticOrchestratorService:
                     memory_context=memory_payload,
                     route_debug_hints=debug_hints,
                     deterministic_output=deterministic,
+                    run_context=run_context,
+                    observability=observability,
                 )
             except Exception:
                 llm_payload = None
@@ -129,12 +151,15 @@ class SemanticOrchestratorService:
     ) -> dict[str, Any]:
         del memory_context
         normalized = self._normalize(user_message)
+        match_gobernado = self.matcher_gobernado_inventario.resolver(mensaje=user_message, contexto_semantico={})
         domain = self._resolve_domain(
             normalized=normalized,
             candidate_domain=candidate_domain,
             candidate_agent=candidate_agent,
             contract_payload=contract_payload,
         )
+        if match_gobernado.get("coincidencia_gobernada") and str(match_gobernado.get("dominio_candidato") or "") == "inventario_logistica":
+            domain = "inventario_logistica"
         contract = self._resolve_contract(
             candidate_domain=domain,
             candidate_agent=candidate_agent,
@@ -144,6 +169,9 @@ class SemanticOrchestratorService:
 
         filters = self._extract_filters(normalized=normalized, raw_message=user_message)
         entities = self._extract_entities(normalized=normalized, raw_message=user_message)
+        if match_gobernado.get("coincidencia_gobernada"):
+            filters.update({key: value for key, value in dict(match_gobernado.get("filtros") or {}).items() if value not in (None, "")})
+            entities.update({key: value for key, value in dict(match_gobernado.get("entidades") or {}).items() if value not in (None, "")})
         dimensions = self._extract_dimensions(normalized=normalized)
         metrics = self._extract_metrics(normalized=normalized)
         scope = self._resolve_scope(normalized=normalized, filters=filters, entities=entities)
@@ -153,7 +181,12 @@ class SemanticOrchestratorService:
             contract_payload=contract,
             filters=filters,
             entities=entities,
+            dimensions=dimensions,
         )
+        if match_gobernado.get("coincidencia_gobernada") and domain == "inventario_logistica":
+            intent_id = self._mapear_intencion_inventario(match_gobernado=match_gobernado, intent_id_actual=intent_id)
+            capability_id = str(match_gobernado.get("capacidad_candidata") or capability_id or "")
+            confidence = 0.94 if not match_gobernado.get("requiere_aclaracion") else 0.58
 
         required_tables = self._intent_tables(contract_payload=contract, intent_id=intent_id)
         required_joins = self._resolve_required_joins(
@@ -197,6 +230,10 @@ class SemanticOrchestratorService:
                 capability_id=capability_id,
                 missing_filters=missing_required_filters,
             )
+        if bool(match_gobernado.get("requiere_aclaracion")):
+            risk_flags.append("real_ambiguity_detected")
+            needs_clarification = True
+            clarification_question = str(match_gobernado.get("pregunta_aclaracion") or "").strip() or clarification_question
 
         if confidence < self.MIN_CONFIDENCE:
             risk_flags.append("low_confidence")
@@ -243,6 +280,22 @@ class SemanticOrchestratorService:
                 needs_clarification=needs_clarification,
             ),
         }
+
+    @staticmethod
+    def _mapear_intencion_inventario(*, match_gobernado: dict[str, Any], intent_id_actual: str) -> str:
+        intencion = str(match_gobernado.get("intencion") or "").strip().lower()
+        capacidad = str(match_gobernado.get("capacidad_candidata") or "").strip().lower()
+        if capacidad == "inventory_stock_balance_by_mobile" or intencion == "stock_balance":
+            return "inventory_stock_by_mobile"
+        if capacidad == "inventory_kardex_by_employee":
+            return "inventory_kardex"
+        if capacidad == "inventory_kardex_consolidated":
+            return "inventory_kardex"
+        if capacidad == "inventory_serial_by_operational_holder":
+            return "inventory_serial_by_holder"
+        if capacidad == "inventory_document_generation_pending":
+            return "inventory_document_generation"
+        return str(intent_id_actual or "")
 
     def _validate_output(
         self,
@@ -444,10 +497,63 @@ class SemanticOrchestratorService:
         contract_payload: dict[str, Any],
         filters: dict[str, Any],
         entities: dict[str, Any],
+        dimensions: list[str] | None = None,
     ) -> tuple[str, str, float]:
-        del filters
+        filters = dict(filters or {})
+        dimensions = [str(item or "").strip().lower() for item in list(dimensions or []) if str(item or "").strip()]
+        if not str(filters.get("grouping_dimension") or "").strip():
+            for candidate in ("movil", "cedula", "bodega"):
+                if candidate in dimensions:
+                    filters["grouping_dimension"] = candidate
+                    break
         confidence = 0.72
         if domain == "inventario_logistica":
+            entity_payload = {}
+            for field, entity_type in (("cedula", "empleado"), ("movil", "movil"), ("codigo", "codigo"), ("serial", "serial")):
+                value = str((entities or {}).get(field) or filters.get(field) or "").strip()
+                if value:
+                    entity_payload = {"type": entity_type, "identifier": value, "field": field}
+                    break
+            intent_hint = ""
+            if any(token in normalized for token in ("acta", "spa", "sap")):
+                intent_hint = "document_generation"
+            elif any(token in normalized for token in ("equipo", "equipos", "serial", "serializados")) and any(
+                token in normalized for token in ("cargados", "asociados", "movil", "cuadrilla", "brigada", "cedula", "tecnico")
+            ):
+                intent_hint = "serial_holder_query"
+            elif any(token in normalized for token in ("kardex", "movimientos", "entradas y salidas")):
+                intent_hint = "movement_history"
+            elif "facturacion" in normalized or "facturaciÃ³n" in normalized:
+                intent_hint = "reconciliation_query"
+            elif "stock" in normalized or "saldo" in normalized or "inventario" in normalized or "sin stock" in normalized:
+                intent_hint = "stock_balance"
+            binding = self.semantic_capability_registry.resolve(
+                SemanticBindingRequest(
+                    domain=domain,
+                    message=normalized,
+                    intent=intent_hint,
+                    entity=entity_payload or None,
+                    normalized_filters=filters,
+                    group_by=dimensions,
+                    source_hints={
+                        "governed_match": dict(
+                            self.matcher_gobernado_inventario.resolver(
+                                mensaje=normalized,
+                                contexto_semantico={},
+                            )
+                            or {}
+                        ),
+                    },
+                )
+            )
+            capability_id = str(binding.candidate_capability or "").strip()
+            if capability_id:
+                intent_id = str(
+                    INVENTORY_INTENT_IDS_BY_TEMPLATE.get(str(binding.template_id or "").strip().lower())
+                    or self._inventory_intent_from_capability(capability_id)
+                    or "inventory_stock_by_mobile"
+                )
+                return intent_id, capability_id, max(float(binding.confidence or 0.0), 0.72)
             if any(token in normalized for token in ("equipo", "equipos", "serial", "serializados")) and any(
                 token in normalized for token in ("cargados", "asociados", "movil", "cuadrilla", "brigada", "cedula", "tecnico")
             ):
@@ -493,6 +599,21 @@ class SemanticOrchestratorService:
         return intent_id, capability_id, confidence
 
     @staticmethod
+    def _inventory_intent_from_capability(capability_id: str) -> str:
+        capability = str(capability_id or "").strip().lower()
+        if capability in {"inventory_stock_balance_by_mobile", "inventory_stock_balance_by_warehouse", "inventory_stock_balance"}:
+            return "inventory_stock_by_mobile"
+        if capability == "inventory_stock_balance_by_material_dimension":
+            return "inventory_stock_by_dimension"
+        if capability in {"inventory_kardex_by_employee", "inventory_kardex_consolidated"}:
+            return "inventory_kardex"
+        if capability == "inventory_serial_by_operational_holder":
+            return "inventory_serial_by_holder"
+        if capability == "inventory_document_generation_pending":
+            return "inventory_document_generation"
+        return ""
+
+    @staticmethod
     def _extract_filters(*, normalized: str, raw_message: str) -> dict[str, Any]:
         filters: dict[str, Any] = {}
         guarded_cedula = SemanticOrchestratorService._match_inventory_employee_stock_query(normalized)
@@ -501,6 +622,9 @@ class SemanticOrchestratorService:
             filters["stock_scope"] = "movil"
         if re.search(r"\boperacion[_\s-]?hfc\b", normalized):
             filters["bodega"] = "operacion_hfc"
+        explicit_code_match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([a-z0-9_-]+)\b", raw_message, re.IGNORECASE)
+        if explicit_code_match:
+            filters["codigo"] = str(explicit_code_match.group(1) or "").strip().upper()
         code_match = re.search(r"\bkardex\s+del?\s+c[oó]digo\s+([a-z0-9_-]+)\b", normalized)
         if code_match:
             filters["codigo"] = str(code_match.group(1) or "").strip().upper()
@@ -511,7 +635,7 @@ class SemanticOrchestratorService:
         if ot_match:
             filters["orden_trabajo"] = str(ot_match.group(1) or "").strip().upper()
         numeric_id = re.search(r"\b([0-9]{5,15})\b", raw_message)
-        if numeric_id:
+        if numeric_id and "codigo" not in filters:
             filters.setdefault("cedula", str(numeric_id.group(1) or "").strip())
         return filters
 
@@ -519,9 +643,12 @@ class SemanticOrchestratorService:
     def _extract_entities(*, normalized: str, raw_message: str) -> dict[str, Any]:
         entities: dict[str, Any] = {}
         guarded_cedula = SemanticOrchestratorService._match_inventory_employee_stock_query(normalized)
+        explicit_code_match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([a-z0-9_-]+)\b", raw_message, re.IGNORECASE)
         numeric_id = re.search(r"\b([0-9]{5,15})\b", raw_message)
         if guarded_cedula:
             entities["cedula"] = guarded_cedula
+        elif explicit_code_match:
+            entities["codigo"] = str(explicit_code_match.group(1) or "").strip().upper()
         elif numeric_id:
             entities["cedula"] = str(numeric_id.group(1) or "").strip()
         movil_match = re.search(r"\b([A-Z]{2,}[A-Z0-9_-]*\d{2,})\b", raw_message)
@@ -540,9 +667,16 @@ class SemanticOrchestratorService:
         dimensions: list[str] = []
         for token, dimension in (
             ("bodega", "bodega"),
+            ("almacen", "bodega"),
+            ("movil", "movil"),
+            ("móvil", "movil"),
             ("cuadrilla", "movil"),
-            ("tecnico", "responsable"),
-            ("técnico", "responsable"),
+            ("brigada", "movil"),
+            ("tecnico", "cedula"),
+            ("técnico", "cedula"),
+            ("empleado", "cedula"),
+            ("cedula", "cedula"),
+            ("cédula", "cedula"),
             ("area", "area"),
             ("cargo", "cargo"),
             ("supervisor", "supervisor"),
@@ -666,6 +800,8 @@ class SemanticOrchestratorService:
         memory_context: dict[str, Any],
         route_debug_hints: dict[str, Any],
         deterministic_output: dict[str, Any],
+        run_context: RunContext | None,
+        observability,
     ) -> dict[str, Any]:
         if self._llm_resolver is not None:
             return dict(
@@ -679,12 +815,11 @@ class SemanticOrchestratorService:
                     memory_context=memory_context,
                     route_debug_hints=route_debug_hints,
                     deterministic_output=deterministic_output,
+                    run_context=run_context,
+                    observability=observability,
                 )
                 or {}
             )
-        from openai import OpenAI
-
-        client = OpenAI(api_key=self._openai_api_key())
         prompt = {
             "user_message": user_message,
             "candidate_domain": str(candidate_domain or ""),
@@ -701,8 +836,27 @@ class SemanticOrchestratorService:
             "route_debug_hints": route_debug_hints,
             "deterministic_baseline": deterministic_output,
         }
-        response = client.responses.create(
-            model=self.model,
+        request = OpenAIGatewayRequest(
+            component="semantic_orchestrator_service",
+            model_route="semantic_orchestrator",
+            timeout_seconds=30,
+            retries=1,
+            trace_metadata={
+                "flow": "semantic_orchestrator",
+                "run_id": str((run_context.run_id if run_context else "") or ""),
+                "trace_id": str((run_context.trace_id if run_context else "") or ""),
+            },
+            metadata={"candidate_domain": str(candidate_domain or "")},
+            tools=self.tool_registry_service.list_openai_function_tools(
+                tool_ids=[
+                    ToolRegistryService.SEMANTIC_DICTIONARY_TOOL_ID,
+                    ToolRegistryService.SEMANTIC_DOMAIN_TOOL_ID,
+                    ToolRegistryService.SEMANTIC_MEMORY_TOOL_ID,
+                    ToolRegistryService.SEMANTIC_BASELINE_TOOL_ID,
+                    ToolRegistryService.SEMANTIC_ROUTE_HINTS_TOOL_ID,
+                ],
+            ),
+            tool_choice="auto",
             input=[
                 {
                     "role": "system",
@@ -712,7 +866,8 @@ class SemanticOrchestratorService:
                             "text": (
                                 "Devuelve solo JSON valido. No generes SQL. "
                                 "No inventes tablas, columnas, joins, execute, legacy ni cambios de base de datos. "
-                                "Respeta agent_contract y ai_dictionary como autoridad estructural."
+                                "Respeta agent_contract y ai_dictionary como autoridad estructural. "
+                                "Si necesitas evidencia adicional, usa solo las tools disponibles."
                             ),
                         }
                     ],
@@ -723,8 +878,121 @@ class SemanticOrchestratorService:
                 },
             ],
         )
-        payload = json.loads(str(getattr(response, "output_text", "") or "{}"))
+        if self._native_tools_enabled():
+            tool_loop = self.gateway.run_function_tool_loop(
+                request=request,
+                tool_executor=lambda function_call: self._execute_native_tool_call(
+                    function_call=function_call,
+                    ai_dictionary_summary=ai_dictionary_summary,
+                    domain_semantic_summary=domain_semantic_summary,
+                    memory_context=memory_context,
+                    route_debug_hints=route_debug_hints,
+                    deterministic_output=deterministic_output,
+                    run_context=run_context,
+                    observability=observability,
+                ),
+                on_tool_result=lambda trace: self._record_native_tool_trace(
+                    trace=trace,
+                    run_context=run_context,
+                    observability=observability,
+                ),
+            )
+            response = tool_loop.response
+            if run_context is not None:
+                run_context.metadata["response_native_tool_loop"] = {
+                    "component": "semantic_orchestrator_service",
+                    "response_ids": list(tool_loop.response_ids or []),
+                    "turns": int(tool_loop.turns or 0),
+                    "tool_trace_count": len(list(tool_loop.tool_traces or [])),
+                }
+        else:
+            response = self.gateway.create(request)
+        payload = json.loads(str(response.output_text or "{}"))
         return dict(payload or {})
+
+    def _execute_native_tool_call(
+        self,
+        *,
+        function_call: dict[str, Any],
+        ai_dictionary_summary: dict[str, Any],
+        domain_semantic_summary: dict[str, Any],
+        memory_context: dict[str, Any],
+        route_debug_hints: dict[str, Any],
+        deterministic_output: dict[str, Any],
+        run_context: RunContext | None,
+        observability,
+    ) -> dict[str, Any]:
+        del observability
+        tool_id = str(function_call.get("name") or "").strip()
+        output: dict[str, Any]
+        if tool_id == ToolRegistryService.SEMANTIC_DICTIONARY_TOOL_ID:
+            output = dict(ai_dictionary_summary or {})
+        elif tool_id == ToolRegistryService.SEMANTIC_DOMAIN_TOOL_ID:
+            output = dict(domain_semantic_summary or {})
+        elif tool_id == ToolRegistryService.SEMANTIC_MEMORY_TOOL_ID:
+            output = dict(memory_context or {})
+        elif tool_id == ToolRegistryService.SEMANTIC_BASELINE_TOOL_ID:
+            output = dict(deterministic_output or {})
+        elif tool_id == ToolRegistryService.SEMANTIC_ROUTE_HINTS_TOOL_ID:
+            output = dict(route_debug_hints or {})
+        else:
+            return {
+                "output": {"ok": False, "error": f"tool_not_supported:{tool_id}"},
+                "execution_status": "blocked",
+                "validation_status": "tool_not_supported",
+                "evidence_metadata": {"tool_id": tool_id},
+            }
+        return {
+            "output": output,
+            "execution_status": "completed",
+            "validation_status": "validated",
+            "evidence_metadata": {
+                "tool_id": tool_id,
+                "run_id": str((run_context.run_id if run_context else "") or ""),
+            },
+        }
+
+    def _record_native_tool_trace(
+        self,
+        *,
+        trace: dict[str, Any],
+        run_context: RunContext | None,
+        observability,
+    ) -> None:
+        if run_context is not None:
+            registry_trace = self.tool_registry_service.build_native_trace(
+                run_id=run_context.run_id,
+                trace_id=run_context.trace_id,
+                started_at=str(trace.get("started_at") or run_context.started_at_iso),
+                finished_at=str(trace.get("finished_at") or run_context.started_at_iso),
+                tool_id=str(trace.get("tool_name") or ""),
+                tool_call_id=str(trace.get("tool_call_id") or ""),
+                arguments=dict(trace.get("arguments") or {}),
+                duration_ms=int(trace.get("duration_ms") or 0),
+                execution_status=str(trace.get("execution_status") or ""),
+                validation_status=str(trace.get("validation_status") or ""),
+                output_payload=dict(trace.get("output_payload") or {}),
+                evidence_metadata=dict(trace.get("evidence_metadata") or {}),
+                model_response_id=str(trace.get("model_response_id") or ""),
+                loop_iteration=int(trace.get("loop_iteration") or 0),
+            )
+            native_traces = list(run_context.metadata.get("response_native_tool_trace") or [])
+            native_traces.append(registry_trace)
+            run_context.metadata["response_native_tool_trace"] = native_traces
+        if observability is not None and hasattr(observability, "record_event"):
+            observability.record_event(
+                event_type="response_native_tool_executed",
+                source="SemanticOrchestratorService",
+                duration_ms=int(trace.get("duration_ms") or 0),
+                meta={
+                    "tool_call_id": str(trace.get("tool_call_id") or ""),
+                    "tool_name": str(trace.get("tool_name") or ""),
+                    "execution_status": str(trace.get("execution_status") or ""),
+                    "validation_status": str(trace.get("validation_status") or ""),
+                    "model_response_id": str(trace.get("model_response_id") or ""),
+                    "loop_iteration": int(trace.get("loop_iteration") or 0),
+                },
+            )
 
     def _resolve_contract(
         self,
@@ -890,6 +1158,15 @@ class SemanticOrchestratorService:
     @staticmethod
     def _llm_enabled() -> bool:
         return str(os.getenv("IA_DEV_SEMANTIC_ORCHESTRATOR_OPENAI_ENABLED", "1") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    @staticmethod
+    def _native_tools_enabled() -> bool:
+        return str(os.getenv("IA_DEV_OPENAI_NATIVE_TOOLS_ENABLED", "1") or "").strip().lower() in {
             "1",
             "true",
             "yes",

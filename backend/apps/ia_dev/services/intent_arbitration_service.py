@@ -12,7 +12,8 @@ from apps.ia_dev.application.taxonomia_dominios import normalizar_codigo_dominio
 from apps.ia_dev.domains.inventario_logistica.semantic_inventory_resolver import (
     InventorySemanticResolver,
 )
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 
 
 logger = logging.getLogger(__name__)
@@ -28,11 +29,11 @@ class IntentArbitrationService:
     }
     ANALYTICS_DOMAINS = {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica", "inventario_materiales"}
 
-    def __init__(self):
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None):
         self.enable_openai = str(
             os.getenv("IA_DEV_USE_OPENAI_INTENT_ARBITRATION", "1") or ""
         ).strip().lower() in {"1", "true", "yes", "on"}
-        self.model = resolve_model_name("intent_arbitration")
+        self.gateway = gateway or OpenAIGatewayService()
         self.confidence_threshold = self._read_threshold(
             "IA_DEV_INTENT_ARBITRATION_CONFIDENCE_THRESHOLD",
             default=0.68,
@@ -148,12 +149,15 @@ class IntentArbitrationService:
         governance_payload: dict[str, Any],
         semantic_inference: dict[str, Any],
     ) -> dict[str, Any]:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=self._get_openai_api_key())
-        response = client.responses.create(
-            model=self.model,
-            input=[
+        response = self.gateway.create(
+            OpenAIGatewayRequest(
+                component="intent_arbitration_service",
+                model_route="intent_arbitration",
+                timeout_seconds=25,
+                retries=1,
+                trace_metadata={"flow": "intent_arbitration"},
+                metadata={"candidate_domain": str(candidate_domain or "")},
+                input=[
                 {
                     "role": "system",
                     "content": (
@@ -207,13 +211,14 @@ class IntentArbitrationService:
             "action_risk": action_payload,
             "knowledge_governance_signals": governance_payload,
             "semantic_inference": semantic_inference,
-        },
-        ensure_ascii=False,
+                        },
+                        ensure_ascii=False,
                     ),
                 },
-            ],
+                ],
+            )
         )
-        raw_text = str(getattr(response, "output_text", "") or "").strip()
+        raw_text = str(response.output_text or "").strip()
         match = re.search(r"\{.*\}", raw_text, re.DOTALL)
         return self._safe_json(match.group(0) if match else raw_text)
 
@@ -342,6 +347,12 @@ class IntentArbitrationService:
         should_use_handler = bool(decision.get("should_use_handler"))
         should_fallback = bool(decision.get("should_fallback"))
         executable_analytics = bool(semantic_inference.get("executable_analytics"))
+        governed_handler_analytics = bool(
+            final_domain == "inventario_logistica"
+            and str(semantic_inference.get("expected_runtime_flow") or "").strip().lower() == "handler"
+            and str(semantic_inference.get("implementation_status") or "").strip().lower()
+            == "ready_for_handler_execution"
+        )
         guarded_inventory_employee_stock = self._is_inventory_employee_stock_query(
             semantic_inference.get("original_question") or ""
         )
@@ -370,7 +381,9 @@ class IntentArbitrationService:
                 "La frase 'saldo ... empleado/tecnico <cedula>' corresponde a saldo de inventario por movil. "
                 "Se conserva inventario_logistica y empleados queda solo para enrichment."
             )
-        if final_intent in {"operational_question", "fallback"} and (executable_analytics or inventory_sql_executable):
+        if final_intent in {"operational_question", "fallback"} and (
+            executable_analytics or inventory_sql_executable or governed_handler_analytics
+        ):
             final_intent = "analytics_query"
             confidence = max(confidence, self.confidence_threshold)
             reasoning_summary = (
@@ -381,20 +394,28 @@ class IntentArbitrationService:
             should_fallback = False
 
         if final_intent == "analytics_query":
-            if executable_analytics:
+            if executable_analytics or governed_handler_analytics:
                 confidence = max(confidence, self.confidence_threshold)
                 low_confidence = False
             should_create_kpro = False
-            should_execute_query = (not low_confidence or executable_analytics) and final_domain not in {"", "general", "knowledge"}
-            should_use_sql_assisted = (
+            should_execute_query = (
+                not low_confidence or executable_analytics or governed_handler_analytics
+            ) and final_domain not in {"", "general", "knowledge"}
+            should_use_sql_assisted = bool(
                 should_execute_query
                 and has_real_data
                 and final_domain in {"ausentismo", "attendance", "empleados", "rrhh", "inventario_logistica"}
+                and not governed_handler_analytics
             )
-            should_use_handler = (
+            should_use_handler = bool(
                 should_execute_query
-                and not should_use_sql_assisted
-                and any(item.get("capability_id") for item in capabilities_payload)
+                and (
+                    governed_handler_analytics
+                    or (
+                        not should_use_sql_assisted
+                        and any(item.get("capability_id") for item in capabilities_payload)
+                    )
+                )
             )
 
         elif final_intent == "knowledge_change_request":
@@ -418,15 +439,16 @@ class IntentArbitrationService:
             should_use_sql_assisted = False
             should_use_handler = False
 
-        if low_confidence and not executable_analytics:
+        if low_confidence and not executable_analytics and not governed_handler_analytics:
             should_fallback = True
             should_execute_query = False
             should_use_sql_assisted = False
+            should_use_handler = False
             if not clarification:
                 clarification = (
                     "Aclara si buscas analitica de datos, un cambio de conocimiento o una accion operativa."
                 )
-        elif executable_analytics:
+        elif executable_analytics or governed_handler_analytics:
             should_fallback = False
             clarification = ""
 
@@ -440,7 +462,9 @@ class IntentArbitrationService:
             "should_create_kpro": bool(should_create_kpro),
             "should_use_sql_assisted": bool(should_use_sql_assisted),
             "should_use_handler": bool(should_use_handler),
-            "should_fallback": bool(should_fallback or (low_confidence and not executable_analytics)),
+            "should_fallback": bool(
+                should_fallback or (low_confidence and not executable_analytics and not governed_handler_analytics)
+            ),
             "confidence": confidence,
             "reasoning_summary": reasoning_summary[:280],
             "required_clarification": clarification[:280],

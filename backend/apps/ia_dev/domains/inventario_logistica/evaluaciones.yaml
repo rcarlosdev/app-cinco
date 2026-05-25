@@ -1,0 +1,32 @@
+evaluaciones:
+  - id: inventario_runtime_eval_v1
+    suite_python: apps.ia_dev.application.runtime.inventario_runtime_eval_suite.run_inventory_runtime_eval_suite
+    descripcion: Suite real P5 anti-hardcode para inventario_logistica.
+    casos_cubiertos:
+      - stock_cuadrilla_asignado
+      - stock_movil_muestrame
+      - stock_inventario_operativo_con_empleados
+      - stock_brigada_asignado
+      - stock_materiales_movil
+      - stock_tecnico_ferretero
+      - kardex_tecnico_movimientos
+      - kardex_tecnico_entradas_salidas
+      - kardex_codigo_para_empleado
+      - clarificacion_nombre_propio
+      - limitacion_actas_sap
+      - resultado_vacio_stock_tecnico
+      - fallback_sombreado_controlado
+  - id: inventario_provider_serial_validation_v1
+    suite_python: apps.ia_dev.tests.test_inventory_provider_serial_validation
+    descripcion: Validacion focalizada de seriales externos de proveedor contra inventario propio evidence-first.
+    casos_cubiertos:
+      - provider_file_numero_de_serie
+      - provider_file_columna_renombrada
+      - provider_file_serial_duplicado
+      - provider_file_match_base_actual
+      - provider_file_match_historico
+      - provider_file_no_encontrado
+      - provider_file_estado_movil_responsable
+      - provider_file_tabla_historica_inexistente
+      - provider_file_vacio
+      - provider_file_dashboard_evidence_first

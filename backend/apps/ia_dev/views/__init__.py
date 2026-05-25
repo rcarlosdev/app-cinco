@@ -2,12 +2,18 @@ from .chat_view import (
     IADevAttendancePeriodResolveView,
     IADevAsyncJobView,
     IADevChatView,
+    IADevChatTaskStatusView,
     IADevHealthView,
     IADevKnowledgeApproveView,
     IADevKnowledgeProposalView,
     IADevKnowledgeRejectView,
     IADevMemoryResetView,
     IADevObservabilitySummaryView,
+    IADevRuntimeGovernanceHealthView,
+    IADevRuntimeOperationsSummaryView,
+    IADevProviderSerialArtifactDownloadView,
+    IADevSemanticGapOperationsView,
+    IADevRuntimeTaskExplorerView,
     IADevTicketView,
 )
 from apps.ia_dev.interfaces.api.views.memory_view import (

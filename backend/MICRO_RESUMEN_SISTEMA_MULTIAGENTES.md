@@ -2,6 +2,783 @@ Micro resumen actualizado
 
 No reauditar arquitectura ni contratos. No tocar `fallback_policy`. No reabrir discovery del dominio. Continuar desde el estado actual de `inventario_logistica`.
 
+## Actualizacion 2026-05-25 Fase 1.3 anti-hardcode empleados cumpleanos gobernados
+
+Se migro la familia semantica de cumpleanos de `empleados` al `Capability Pack`,
+moviendo `count_records_by_period` a binding declarativo y habilitando tambien
+las rutas seguras de agrupacion y detalle por mes, sin tocar
+`QueryExecutionPlanner`, `fallback_policy`, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Templates de `empleados` ya pack-driven:
+
+- `count_entities_by_status`
+- `aggregate_by_group_and_period`
+- `detail_by_entity_and_period`
+- `count_records_by_period`
+
+Capabilities y rutas activas en esta fase:
+
+- `empleados.count.active.v1`
+  - `empleados.population.count`
+  - `empleados.population.grouped`
+  - `empleados.birthdays.count`
+- `empleados.detail.v1`
+  - `empleados.population.detail`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Cumpleanos gobernados por pack:
+
+- `cumpleanos de mayo`
+- `empleados que cumplen anos este mes`
+- `cumpleanos por mes`
+- `cumpleanos de mayo por area`
+- `cumpleanos de mayo por sede`
+- detalle seguro de cumpleanos por mes
+- privacidad:
+  - no exponer `password`
+  - no exponer `link_foto`
+  - no exponer `codigo_sap`
+  - no exponer otros campos sensibles fuera de `perfiles_respuesta.yaml`
+
+Fallback legacy retenido solo para cumpleanos cuando aplique:
+
+- periodo ambiguo no resoluble como `cumpleanos de hoy`
+- periodo ambiguo no resoluble como `proximos cumpleanos`
+- campo fecha no gobernado
+- metadata insuficiente
+
+Superficies que siguen en compatibilidad trazada:
+
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad requerida del registry para cumpleanos migrados:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+- `version_paquete = 0.4.0`
+
+Cobertura declarativa del pack de `empleados` en esta fase:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 4`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_chat_runtime_metadata --verbosity 2`
+- resultado: `137 tests` OK
+
+## Actualizacion 2026-05-25 Fase 1.2 anti-hardcode empleados detalle gobernado
+
+Se migro `detail_by_entity_and_period` al `Capability Pack` de `empleados`, manteniendo compatibilidad solo para ambiguedades y gaps declarados, sin tocar `QueryExecutionPlanner`, `fallback_policy`, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Templates de `empleados` ya pack-driven:
+
+- `count_entities_by_status`
+- `aggregate_by_group_and_period`
+- `detail_by_entity_and_period`
+
+Capabilities y rutas activas en esta fase:
+
+- `empleados.count.active.v1`
+  - `empleados.population.count`
+  - `empleados.population.grouped`
+- `empleados.detail.v1`
+  - `empleados.population.detail`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Detalle gobernado por pack:
+
+- identificadores verificables:
+  - `cedula`
+  - `movil`
+  - `nombre`
+- filtros declarados:
+  - `area`
+  - `cargo`
+  - `supervisor`
+  - `carpeta`
+  - `sede`
+  - `tipo_labor`
+  - `estado`
+- privacidad:
+  - no exponer `password`
+  - no exponer `link_foto`
+  - no exponer `codigo_sap`
+  - no exponer otros campos sensibles fuera de `perfiles_respuesta.yaml`
+
+Fallback legacy retenido solo para detalle cuando aplique:
+
+- entidad no verificable
+- filtro no declarado
+- consulta ambigua
+- metadata insuficiente
+
+Superficies que siguen en compatibilidad trazada:
+
+- `count_records_by_period` para cumpleanos
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad requerida del registry para detalle migrado:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+- `version_paquete = 0.3.0`
+
+Cobertura declarativa del pack de `empleados` en esta fase:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 3`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focalizadas esperadas:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_chat_runtime_metadata --verbosity 2`
+
+## Actualizacion 2026-05-24
+
+Se creo `backend/INVENTARIO_REGLAS_SEMANTICAS_HARDCODEADAS.md` como diagnostico tecnico de reglas semanticas hardcodeadas y heuristicas actuales en intencion, dominio, capability, routing, planner, response assembly y agentes.
+
+Estado de esta actualizacion:
+
+- solo documentacion
+- sin cambios funcionales de runtime
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin migraciones ni refactors
+
+## Actualizacion 2026-05-24 Fase 1 anti-hardcode empleados
+
+Se inicio la migracion anti-hardcode de `empleados` tomando como patron el cierre exitoso de `inventario_logistica`, pero sin mover autoridad de planner, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Artefactos nuevos del dominio `empleados`:
+
+- `backend/apps/ia_dev/domains/empleados/paquete_capacidades.yaml`
+- `backend/apps/ia_dev/domains/empleados/reglas_semanticas.yaml`
+- `backend/apps/ia_dev/domains/empleados/perfiles_respuesta.yaml`
+- `backend/apps/ia_dev/domains/empleados/politicas_aprobacion.yaml`
+- `backend/apps/ia_dev/domains/empleados/evaluaciones.yaml`
+- `backend/apps/ia_dev/domains/empleados/README_OPERATIVO.md`
+- `backend/apps/ia_dev/domains/empleados/paquete_capacidades_loader.py`
+- `backend/INVENTARIO_REGLAS_SEMANTICAS_EMPLEADOS.md`
+
+Primera capability gobernada por pack:
+
+- `count_entities_by_status`
+- capability: `empleados.count.active.v1`
+- ruta declarada: `empleados.population.count`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Superficies que siguen en compatibilidad trazada:
+
+- `aggregate_by_group_and_period`
+- `detail_by_entity_and_period`
+- `count_records_by_period` para cumpleanos
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad nueva del registry para `empleados`:
+
+- pack-driven:
+  - `source = capability_pack`
+  - `paquete_capacidad_usado = empleados`
+  - `version_paquete = 0.1.0`
+- compatibilidad temporal:
+  - `source = legacy_shadow_fallback`
+  - `legacy_retained_reason`
+
+Cobertura declarativa del pack inicial:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 1`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focales confirmadas en esta fase:
+
+- `apps.ia_dev.tests.test_empleados_handler`
+- `apps.ia_dev.tests.test_query_intelligence_layer`
+- `apps.ia_dev.tests.test_chat_runtime_metadata`
+- `apps.ia_dev.tests.test_semantic_capability_registry`
+
+Resultado observado:
+
+- `123 tests` OK en la suite focal ampliada
+- la consulta `personal activo hoy` ya deja traza gobernada por pack
+- `cumpleanos de mayo` queda trazado como `legacy_shadow_fallback`
+- `certificados de altura proximos a vencer` sigue resolviendo por la ruta moderna actual sin introducir capabilities nuevas
+
+## Actualizacion 2026-05-24 Fase 1.1 anti-hardcode empleados agrupaciones declarativas
+
+Se migro la segunda capability de `empleados` al `Capability Pack` moviendo `aggregate_by_group_and_period` a binding declarativo gobernado por pack, sin tocar `QueryExecutionPlanner`, `fallback_policy`, SQL ni runtime general.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios funcionales visibles en `inventario_logistica`
+- sin cambios en `ausentismo`
+
+Templates de `empleados` ya pack-driven:
+
+- `count_entities_by_status`
+- `aggregate_by_group_and_period`
+
+Capability y rutas activas en esta fase:
+
+- capability efectiva: `empleados.count.active.v1`
+- rutas declaradas:
+  - `empleados.population.count`
+  - `empleados.population.grouped`
+- `source = capability_pack`
+- `fallback_used = false`
+- `legacy_mapping_used = false`
+
+Agrupaciones gobernadas por pack:
+
+- `area`
+- `cargo`
+- `sede`
+- `carpeta`
+- `supervisor`
+- `movil`
+
+Fallback legacy retenido solo para:
+
+- agrupaciones con dimension no declarada
+- consultas ambiguas tipo `distribucion de personal` sin dimension explicita
+- gaps de metadata gobernada
+- `detail_by_entity_and_period`
+- `count_records_by_period` para cumpleanos
+- certificados de alturas
+- rotacion
+- missingness
+
+Trazabilidad requerida del registry para agrupaciones migradas:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+- `version_paquete = 0.2.0`
+
+Cobertura declarativa del pack de `empleados` en esta fase:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 2`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_empleados_handler apps.ia_dev.tests.test_chat_runtime_metadata --verbosity 2`
+- resultado: `126 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2 anti-hardcode inventario_logistica
+
+Se implemento la Fase 2 de migracion anti-hardcode para `inventario_logistica` moviendo la seleccion de `template_id` desde reglas Python del `SemanticCapabilityRegistry` hacia `semantic_bindings` declarativos del `Capability Pack`.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Seleccion declarativa de `template_id` ya gobernada por pack:
+
+- `inventory_material_stock_mobile`
+- `inventory_material_stock_grouped_dimension`
+- `inventory_serial_stock_by_family_grouped_dimension`
+- `inventory_material_stock_by_warehouse`
+- `inventory_material_stock_balance`
+- `inventory_material_critical_by_employee`
+- `inventory_kardex_by_employee`
+- `inventory_kardex_consolidated`
+- `inventory_serial_by_operational_holder`
+- `inventory_document_generation_pending`
+- `inventory_transfer_destination_not_available`
+- `inventory_traceability_by_serial`
+- `inventory_transfer_warehouse`
+- `inventory_transfer_other_ally`
+- `inventory_provider_serial_validation`
+
+Trace estable del registry:
+
+- match declarativo:
+  - `source = capability_pack`
+  - `fallback_used = false`
+  - `legacy_mapping_used = false`
+- sin match declarativo:
+  - `source = legacy_shadow_fallback`
+  - `fallback_used = true`
+  - `migration_pending = true`
+
+Legacy shadow fallback mantenido de forma explicita:
+
+- `_resolve_inventory_template_legacy` sigue vigente solo para templates no migrados a `semantic_bindings.selection_rules`
+- en esta fase ya no queda un caso focal confirmado en pruebas dentro de `inventario_logistica`
+- se conserva como compatibilidad temporal para cualquier template legacy futuro que todavia no tenga `selection_rules` declarados
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite --verbosity 2`
+- resultado: `73 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2.1 verificacion de cierre anti-hardcode
+
+Se agrego una validacion automatica de cobertura del `Capability Pack` de `inventario_logistica` para medir, auditar y acotar cualquier recaida a legacy antes de retirar `_resolve_inventory_template_legacy`.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Trazabilidad nueva publicada por loader/registry/evals:
+
+- `capability_pack_coverage`
+- `templates_pack_driven_count`
+- `templates_legacy_allowed_count`
+- `templates_missing_selection_rules`
+
+Cobertura declarativa medida sobre templates activos usados por pruebas/evals focales:
+
+- cobertura actual: `0.6875`
+- templates activos pack-driven: `11`
+- templates activos con legacy permitido explicito: `1`
+- templates activos pendientes de migracion declarativa:
+  - `inventory_consumption_billing_operacion_hfc`
+  - `inventory_consumption_top`
+  - `inventory_movement_detail`
+  - `inventory_risk_consumo_movil_sin_validar`
+  - `inventory_serial_stock_by_dimension`
+
+Politica vigente de legacy:
+
+- permitido solo para templates futuros no declarados
+- permitido para casos marcados `legacy_allowed`
+- permitido como fallback de seguridad cuando el pack este incompleto
+- `_resolve_inventory_template_legacy` no se retira en esta fase; queda medido y auditado
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite --verbosity 2`
+- resultado: `77 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2.2 cierre declarativo de templates activos pendientes
+
+Se migraron los 5 templates activos pendientes de `inventario_logistica` a `semantic_bindings.selection_rules` del `Capability Pack`, manteniendo `_resolve_inventory_template_legacy` como `shadow_fallback` para casos no cubiertos declarativamente.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Templates activos migrados en esta fase:
+
+- `inventory_consumption_billing_operacion_hfc`
+- `inventory_consumption_top`
+- `inventory_movement_detail`
+- `inventory_risk_consumo_movil_sin_validar`
+- `inventory_serial_stock_by_dimension`
+
+Cobertura declarativa activa medida por loader/registry/evals:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 16`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Perfiles y reglas declarativas agregadas para mantener paridad observable:
+
+- perfiles:
+  - `inventory.serial.dimension.summary`
+  - `inventory.risk.serial.detail`
+  - `inventory.consumption.top.summary`
+  - `inventory.movement.detail`
+  - `inventory.reconciliation.operacion_hfc`
+- reglas:
+  - `inventario.route.serial_stock_dimension`
+  - `inventario.route.risk_consumo_movil_sin_validar`
+  - `inventario.route.consumption_top`
+  - `inventario.route.movement_detail`
+  - `inventario.route.reconciliation_operacion_hfc`
+
+Legacy shadow fallback aun vigente por seguridad:
+
+- sigue existiendo para ambiguedades no declarativas como `que tiene Juan Perez`
+- sigue existiendo para templates legacy no activos en esta suite que todavia no tienen `selection_rules`
+- no se retiro `_resolve_inventory_template_legacy` en esta fase
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite --verbosity 2`
+- resultado: `82 tests` OK
+
+## Actualizacion 2026-05-24 Fase 2.3 retiro acotado de ramas legacy ya migradas
+
+Se retiraron de `_resolve_inventory_template_legacy` las ramas legacy especificas de los 5 templates activos que ya estaban cubiertos por `semantic_bindings.selection_rules`.
+
+Ramas legacy retiradas:
+
+- `inventory_consumption_billing_operacion_hfc`
+- `inventory_consumption_top`
+- `inventory_movement_detail`
+- `inventory_risk_consumo_movil_sin_validar`
+- `inventory_serial_stock_by_dimension`
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Trazas requeridas mantenidas para los 5 templates migrados:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+
+Legacy retenido y motivo:
+
+- ambiguedades no declarativas como `que tiene Juan Perez`
+  - `legacy_retained_reason = requiere aclaracion estructural y no corresponde a una seleccion declarativa de template`
+- templates futuros o no activos que todavia no tienen `selection_rules`
+  - `legacy_retained_reason = compatibilidad temporal fuera del alcance activo cubierto por evals`
+- rescate controlado cuando el pack este incompleto para rutas no retiradas en esta fase
+  - `legacy_retained_reason = seguridad operativa mientras existan superficies no declarativas fuera de estos 5 templates`
+
+Cobertura declarativa final confirmada:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 16`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+- conteo derivado `templates_missing_selection_rules = 0`
+
+## Actualizacion 2026-05-24 Fase 2.4 validacion ampliada de no-regresion
+
+Se cerro la validacion ampliada de no-regresion de `inventario_logistica` despues del retiro acotado de ramas legacy de los 5 templates migrados.
+
+Estado confirmado de esta actualizacion:
+
+- sin cambios en `QueryExecutionPlanner`
+- sin cambios en `fallback_policy`
+- sin cambios en SQL libre
+- sin cambios en runtime general
+- sin cambios en `empleados`
+- sin cambios en `ausentismo`
+
+Ampliacion aplicada:
+
+- la suite `inventario_runtime_eval_suite` ahora ejecuta `25` casos versionados
+- publica `minimum_validation_matrix` con los `12` casos minimos de cierre pedidos
+- traza explicitamente el caso ambiguo `que tiene Juan Perez` como `source = aclaracion_controlada`
+- publica `legacy_retained_reason = requiere_aclaracion_estructural_por_portador_no_verificable` para esa ambiguedad permitida
+
+Casos minimos cerrados en la matriz:
+
+- inventario generico por movil/cuadrilla
+- inventario por cedula
+- kardex por empleado
+- kardex codigo + empleado
+- seriales/equipos por familia
+- consumo vs facturacion operacion HFC
+- top consumos
+- movement detail
+- riesgo consumo movil sin validar
+- serial stock por dimension
+- materiales criticos
+- consulta ambigua con aclaracion controlada
+
+Trazas confirmadas para todos los casos pack-driven de esa matriz:
+
+- `source = capability_pack`
+- `legacy_mapping_used = false`
+- `fallback_used = false`
+
+Cobertura declarativa confirmada despues de ampliar la validacion:
+
+- `capability_pack_coverage = 1.0`
+- `templates_pack_driven_count = 17`
+- `templates_legacy_allowed_count = 0`
+- `templates_missing_selection_rules = []`
+
+Regresion complementaria cerrada durante esta validacion:
+
+- se declaro en el pack la ruta `inventory_consumption_by_dimension`
+- esto restablece la resolucion gobernada de consultas tipo `consumos de la movil TIRAN314 el 05 de mayo`
+- la cobertura sigue completa y sin recaida a legacy
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_eval_suite apps.ia_dev.tests.test_inventario_runtime_sql_alignment --verbosity 2`
+- resultado: `125 tests` OK
+
+## USO, MANEJO, ACTUALIZACION Y PERSISTENCIA DEL CONTEXTO
+
+Esta seccion es la autoridad operativa de continuidad para futuros chats, trabajo en equipo, Codex/VSC, implementaciones incrementales, auditorias parciales y migraciones futuras.
+
+### Como usar estos documentos
+
+- Leer siempre al inicio:
+  - `backend/MICRO_RESUMEN_SISTEMA_MULTIAGENTES.md`
+  - `backend/GUIA_CAPA_SEMANTICA_EMPRESA.md`
+  - `backend/OPERACION_RUNTIME_MULTIAGENTE.md`
+  - `backend/GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md`
+- Usar `MICRO_RESUMEN_SISTEMA_MULTIAGENTES.md` como fuente oficial de continuidad operativa:
+  - estado runtime vigente
+  - fases completadas
+  - contratos activos
+  - archivos y rutas oficiales relevantes
+  - pruebas relevantes ya ejecutadas
+  - decisiones y flujos runtime ya aprobados
+- Usar `GUIA_CAPA_SEMANTICA_EMPRESA.md` como fuente oficial de gobierno semantico y arquitectura conceptual estable:
+  - reglas estructurales
+  - responsabilidades de GPT/planner/tools/agents
+  - limites de autoridad
+  - lineamientos estables de modelado semantico
+- Usar `OPERACION_RUNTIME_MULTIAGENTE.md` como fuente oficial de operacion productiva del runtime:
+  - health checks
+  - alertas
+  - troubleshooting
+  - mantenimiento
+  - checklist de produccion
+  - endpoints y comandos operativos vigentes
+- Usar `GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md` como fuente oficial para construccion, extension, entrenamiento y validacion de dominios/agentes empresariales:
+  - como opera el sistema multiagente actual
+  - como crear nuevos dominios, agentes y procesos
+  - como crear Capability Packs
+  - como validar sin hardcodes
+  - como documentar y actualizar contexto persistido
+- Si estos documentos ya confirman un hecho, asumirlo como valido sin reabrir discovery salvo que exista un sintoma nuevo, concreto y verificable.
+
+### Que asumir sin revalidar
+
+- La arquitectura ya confirmada y los contratos ya persistidos.
+- El runtime actual y sus fases ya aplicadas.
+- El stack OpenAI vigente ya documentado en estos archivos.
+- La autoridad del planner.
+- La gobernanza de `ai_dictionary`.
+- El `task envelope` vigente.
+- El `tool registry` vigente.
+- El gateway unificado vigente.
+- El `agents runtime` vigente.
+- Las fases ya completadas, sus limites y compatibilidades.
+- Las rutas, archivos oficiales, flujos runtime y reglas ya confirmadas en estos documentos.
+
+### Que NO hacer
+
+- No hacer reauditorias masivas de arquitectura, runtime o contratos ya persistidos.
+- No redescubrir archivos, rutas, entrypoints, planners, gateways, tools ni reglas ya confirmadas.
+- No revalidar hechos ya persistidos salvo por sintoma nuevo y especifico.
+- No persistir ruido tecnico temporal, hallazgos efimeros o debugging pasajero.
+- No duplicar informacion ya documentada si basta con referenciarla o ampliarla en el lugar correcto.
+- No reescribir modulos, contratos o secciones documentales que ya estan alineados con el estado vigente.
+
+### Cuando actualizar cada documento
+
+Actualizar `MICRO_RESUMEN_SISTEMA_MULTIAGENTES.md` cuando cambie o se confirme de forma relevante:
+
+- continuidad operativa
+- estado runtime
+- fases
+- contratos
+- archivos o rutas oficiales de trabajo
+- pruebas relevantes
+- decisiones implementadas
+- runtime flows
+- limitaciones vigentes
+- handoffs, approvals o tracing relevantes
+- endpoints operativos nuevos o metadata operativa reutilizable
+
+Actualizar `GUIA_CAPA_SEMANTICA_EMPRESA.md` solo cuando cambie o se confirme de forma conceptual y estable:
+
+- gobierno semantico
+- reglas estructurales
+- responsabilidades entre GPT, planner, tools y agents
+- limites de autoridad
+- arquitectura conceptual de largo plazo
+
+Actualizar `OPERACION_RUNTIME_MULTIAGENTE.md` cuando cambie o se confirme de forma estable:
+
+- operacion productiva diaria
+- health checks
+- dashboards o endpoints operativos
+- alertas y troubleshooting
+- runbooks
+- checklist de produccion
+- degradacion, rollback y mantenimiento
+
+Actualizar `GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md` cuando cambie o se confirme de forma estable:
+
+- forma oficial de crear nuevos dominios o agentes
+- checklist de entrenamiento de tablas, relaciones, reglas y capacidades
+- estructura oficial de Capability Packs
+- criterios oficiales de validacion y pruebas focalizadas
+- diagnostico persistido de dominios empresariales
+
+Regla:
+
+- si el cambio es operativo, incremental o de continuidad, va al `MICRO_RESUMEN`
+- si el cambio redefine gobierno semantico o arquitectura conceptual estable, va a la `GUIA_CAPA_SEMANTICA`
+- si el cambio es runbook, monitoreo, soporte o troubleshooting operativo, va a `OPERACION_RUNTIME_MULTIAGENTE.md`
+- si el cambio redefine la forma oficial de construir, validar, empaquetar o migrar dominios/agentes empresariales, va a `GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md`
+
+### Que debe persistirse
+
+- decisiones arquitectonicas confirmadas
+- contratos vigentes
+- fases implementadas o cerradas
+- runtime flows oficiales
+- reglas semanticas confirmadas
+- pruebas relevantes para futuras continuidades
+- limitaciones vigentes y sus alcances
+- rutas oficiales y archivos de referencia
+- metadata importante para tracing y continuidad
+- handoffs, approvals y tracing relevantes
+- reglas utiles para evitar retrabajo en futuras sesiones
+
+### Que NO debe persistirse
+
+- logs temporales
+- errores efimeros sin valor de continuidad
+- debugging temporal
+- resultados triviales o facilmente reproducibles
+- ruido operacional sin impacto arquitectonico, semantico o contractual
+
+### Regla para futuros prompts
+
+Los futuros prompts pueden ser minimos y referenciar esta seccion en lugar de repetir bloques largos. Plantilla oficial:
+
+```md
+Contexto persistido oficial:
+- MICRO_RESUMEN_SISTEMA_MULTIAGENTES.md
+- GUIA_CAPA_SEMANTICA_EMPRESA.md
+- OPERACION_RUNTIME_MULTIAGENTE.md
+- GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md
+
+Antes de modificar codigo:
+1. Lee los cuatro documentos.
+2. Aplica la seccion:
+   "USO, MANEJO, ACTUALIZACION Y PERSISTENCIA DEL CONTEXTO".
+3. Trabaja solo sobre la tarea solicitada.
+```
+
+### Regla de continuidad
+
+Si durante una implementacion aparece una regla util para futuros chats, coordinacion de equipo, continuidad arquitectonica o evitar retrabajo, debe persistirse en el documento correcto:
+
+- `MICRO_RESUMEN_SISTEMA_MULTIAGENTES.md` si la regla es operativa, incremental o runtime
+- `GUIA_CAPA_SEMANTICA_EMPRESA.md` si la regla es estructural, semantica o conceptual estable
+- `OPERACION_RUNTIME_MULTIAGENTE.md` si la regla es operativa de soporte, monitoreo o produccion
+- `GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md` si la regla define como construir, migrar, validar o empaquetar dominios/agentes empresariales
+
+Persistir solo informacion reusable y con valor de continuidad futura.
+
+### Diferencia oficial entre ambos documentos
+
+`MICRO_RESUMEN_SISTEMA_MULTIAGENTES.md`:
+
+- continuidad operativa
+- estado runtime
+- fases
+- contratos
+- archivos relevantes
+- pruebas
+- decisiones
+- runtime flows
+- continuidad de trabajo
+
+`GUIA_CAPA_SEMANTICA_EMPRESA.md`:
+
+- gobierno semantico
+- reglas estructurales
+- responsabilidades GPT/planner/tools/agents
+- limites de autoridad
+- arquitectura conceptual estable
+
+`OPERACION_RUNTIME_MULTIAGENTE.md`:
+
+- health checks
+- monitoreo
+- alertas
+- troubleshooting
+- soporte y mantenimiento
+- checklist de produccion
+- endpoints operativos y runbooks
+
+`GUIA_DESARROLLO_AGENTES_EMPRESARIALES.md`:
+
+- guia oficial de construccion de agentes empresariales
+- entrenamiento de tablas, relaciones, reglas y capacidades
+- estructura de Capability Packs
+- validacion y pruebas anti-hardcode
+- diagnostico persistido de dominios actuales
+
+### Regla final de uso
+
+- Antes de modificar codigo o documentacion, leer los cuatro documentos y aplicar esta seccion.
+- Trabajar solo sobre la tarea solicitada.
+- No convertir cada sesion en una nueva auditoria total.
+- Cuando esta seccion cubra la instruccion, referenciarla en el prompt en vez de repetir bloques largos.
+
 ## Capa semantica empresarial vigente
 
 - Antes de `QueryExecutionPlanner`, `InventorySemanticResolver` produce `BusinessQuerySemanticPlan`.
@@ -10,6 +787,69 @@ No reauditar arquitectura ni contratos. No tocar `fallback_policy`. No reabrir d
   - `intent`
   - `entity`
   - `governed_physical_field`
+
+## Continuidad estable 2026-05-18: validacion de seriales externos de proveedor
+
+Capacidad estable incorporada en `inventario_logistica`:
+
+- `inventory_provider_serial_validation`
+- patron de dashboard: `inventory.serial.validation.provider_file`
+- concepto de negocio: `validacion_seriales_externos_contra_inventario_propio`
+
+Flujo confirmado:
+
+1. `/ia-dev/chat/` ya acepta `attachments` con contenido real en base64.
+2. `ChatApplicationService` persiste adjuntos en `RunContext.metadata["attachments"]`.
+3. `InventarioLogisticaHandler` ejecuta la capability gobernada.
+4. `ValidadorSerialesProveedorService`:
+   - lee `xlsx` o `csv`
+   - detecta columna de serial por semantica, no por nombre rigido
+   - conserva serial original y normaliza serial para busqueda
+   - detecta duplicados internos del archivo
+   - consulta primero tablas actuales y luego backups historicos existentes
+   - valida existencia de tablas historicas en `information_schema` antes de consultarlas
+   - usa `QueryExecutionPlanner.execute_governed_select(...)`
+   - chunking seguro por lotes
+   - prioriza evidencia actual sobre historica
+   - solo enriquece responsable si el estado contiene `MOVIL`
+5. `DashboardCompositionPlanner` ya soporta el patron `inventory.serial.validation.provider_file` con KPIs, rankings, charts y tablas drill-down evidence-first.
+
+Contrato estable por serial:
+
+- serial original del proveedor
+- material, denominacion y familia del proveedor cuando existan
+- encontrado si/no
+- fuente actual o historica
+- estado
+- flag `estado_contiene_movil`
+- movil y persona asociada solo si existe evidencia
+- bodega, codigo interno, descripcion interna, ultima fecha
+- trazabilidad de tablas consultadas
+- tablas historicas inexistentes
+- observacion operativa
+
+Limitaciones estables declaradas:
+
+- `attachment_required`
+- `provider_file_empty`
+- `serial_column_not_detected`
+- `attachment_too_large`
+
+Regla operativa estable de volumen:
+
+- si el adjunto de `inventory_provider_serial_validation` supera aproximadamente `1_000_000` bytes decodificados, el runtime debe encolarlo en `Background Runtime`
+- el motivo estable es volumen real de proveedor: un archivo de ~25k seriales genera payload y memoria no seguros para sync aunque la validacion funcional sea correcta
+- el seguimiento debe hacerse con `task.current_run.background`, `background_run_id` y progreso backend
+
+Comando operativo estable para validacion real por fases:
+
+- `python manage.py validate_provider_serial_file --attachment-path "<ruta>" --output "<salida.json>"`
+
+Pruebas focalizadas ejecutadas y verdes:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_provider_serial_validation --verbosity 2`
+- `python manage.py test apps.ia_dev.tests.test_runtime_capability_adapter apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver --verbosity 2`
+- `npm run typecheck` en `frontend/`
   - `grouping_dimension`
   - `inventory_family`
   - `scope`
@@ -968,3 +1808,2979 @@ Regla operativa persistida:
 - Si el rojo viene de `inventario_logistica`, distinguir entre:
   - fallo de runtime/planner
   - inconsistencia de metadata/YAML como relaciones con columnas no declaradas
+
+## Estado arquitectonico validado 2026-05-16
+
+No volver a reauditar el stack base de `backend/apps/ia_dev` salvo que cambien estos archivos:
+
+- `backend/apps/ia_dev/views/chat_view.py`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+- `backend/apps/ia_dev/application/runtime/runtime_capability_adapter.py`
+- `backend/apps/ia_dev/application/semantic/query_execution_planner.py`
+- `backend/apps/ia_dev/services/dictionary_tool_service.py`
+- `backend/apps/ia_dev/services/observability_service.py`
+- `backend/apps/ia_dev/application/memory/*`
+- `backend/apps/ia_dev/application/workflow/*`
+
+### Mapa oficial actual
+
+1. Entrada frontend
+
+- Vista final: `frontend/src/app/(private)/agente-ia/page.tsx`
+- Modulo raiz: `frontend/src/modules/agente-ia/AgenteIAModule.tsx`
+- Transporte: `frontend/src/modules/programacion/ia-dev/chat/hooks/useIADevChatTransport.ts`
+- Servicio HTTP final: `frontend/src/services/ia-dev.service.ts`
+- Endpoint principal: `POST /ia-dev/chat/`
+
+2. Runtime backend
+
+- Entry point HTTP: `backend/apps/ia_dev/views/chat_view.py`
+- Orquestador principal: `ChatApplicationService.run(...)`
+- Secuencia oficial:
+  1. bootstrap classification
+  2. carga de memoria
+  3. query intelligence
+  4. semantic normalization / canonical resolution / semantic orchestrator
+  5. planner SQL o capability handler
+  6. validacion de satisfaccion
+  7. persistencia de task state, memoria y observabilidad
+  8. ensamblado del `chat_response` para frontend
+
+3. Donde se ejecuta trabajo real
+
+- SQL asistido y consultas de inventario: `QueryExecutionPlanner.execute_sql_assisted(...)`
+- Ejecucion por capability no-SQL planner: `RuntimeCapabilityAdapter.execute(...)`
+- Handlers productivos actuales:
+  - `backend/apps/ia_dev/domains/empleados/handler.py`
+  - `backend/apps/ia_dev/domains/ausentismo/handler.py`
+  - `backend/apps/ia_dev/domains/transport/handler.py`
+- Inventario/logistica hoy ejecuta principalmente por planner deterministico y SQL seguro, no por tool call de OpenAI.
+
+4. Base de datos y fuentes
+
+- Multi DB Django:
+  - `default`: principal MySQL
+  - `azul`: personal/common
+  - `logistica_cinco`: logistica
+- Router:
+  - `common -> azul`
+  - `empleados -> azul`
+  - `authentication/security/operaciones -> default`
+- `ai_dictionary` sigue siendo la fuente estructural oficial.
+
+### OpenAI API realmente usada hoy
+
+- El proyecto ya usa `Responses API` en productivo.
+- No hay uso productivo confirmado de `Chat Completions`.
+- No hay uso productivo confirmado de `Assistants API`.
+- No hay integracion actual con `Agents SDK`.
+
+Servicios confirmados con `client.responses.create(...)`:
+
+- `query_intent_resolver.py`
+- `semantic_orchestrator_service.py`
+- `semantic_normalization_service.py`
+- `satisfaction_review_gate.py`
+- `cause_diagnostics_service.py`
+- `attendance_period_resolver_service.py`
+- `intent_service.py`
+- `intent_arbitration_service.py`
+- `orchestrator_legacy_runtime.py`
+
+Regla confirmada:
+
+- OpenAI hoy actua como clasificador, normalizador, arbitro semantico, reviewer y redactor.
+- OpenAI hoy NO gobierna un loop unico de tools.
+- OpenAI hoy NO recibe un registry operativo de function tools del negocio.
+
+### Tools / function calls actuales
+
+- No se encontro uso productivo de `tools=` ni `tool_choice` en llamadas a `Responses API`.
+- No se encontro loop de `function_call` / `function_call_output` controlado por el modelo como superficie principal del runtime.
+- Los `used_tools` actuales son etiquetas internas de ejecucion, no OpenAI function tools nativas.
+
+Herramientas reales actuales:
+
+- planner SQL seguro
+- handlers de dominio
+- servicios Python internos (`tool_ausentismo_service`, `tool_transport_service`, consultas de empleados, dictionary, memoria, tickets)
+- propuestas de memoria / conocimiento
+
+Conclusion oficial:
+
+- El sistema ya es parcialmente agentic en arquitectura interna, pero todavia no es un runtime de tareas unificado model-driven con `Responses API tools` + `Agents SDK`.
+
+### Semantic layer y memoria confirmadas
+
+- Snapshot y contexto por dominio salen de `DictionaryToolService`.
+- Tablas estructurales oficiales:
+  - `ai_dictionary.dd_dominios`
+  - `ai_dictionary.dd_tablas`
+  - `ai_dictionary.dd_campos`
+  - `ai_dictionary.dd_reglas`
+  - `ai_dictionary.dd_relaciones`
+  - `ai_dictionary.dd_sinonimos`
+  - `ai_dictionary.ia_dev_capacidades_columna`
+- Memoria persistente confirmada:
+  - `ia_dev_business_memory`
+  - `ia_dev_learned_memory_proposals`
+  - `ia_dev_learned_memory_approvals`
+  - `ia_dev_memory_audit_trail`
+  - `ia_dev_workflow_state`
+
+### Validadores y guardrails confirmados
+
+- `PolicyGuard`
+- `ResultSatisfactionValidator`
+- `SatisfactionReviewGate`
+- `agent_contract` + `fallback_policy`
+- `ApprovalPolicyService` para memoria
+- `TaskStateService` para estado persistido de ejecucion
+
+Regla confirmada:
+
+- Antes de ejecutar, el runtime puede bloquear por contrato, seguridad SQL, contexto faltante, arbitraje de intencion o satisfaccion insuficiente.
+- `QueryExecutionPlanner` sigue siendo autoridad unica para SQL seguro cuando la ruta es `sql_assisted`.
+
+### Trazabilidad y evidencia confirmadas
+
+- `RunContext` genera `run_id` y `trace_id`.
+- `ObservabilityService.record_event(...)` persiste eventos.
+- `TaskStateService.save(...)` guarda:
+  - pregunta original
+  - dominio detectado
+  - plan
+  - `executed_query`
+  - validacion
+  - fallback usado
+  - recomendaciones
+- `ReasoningLedgerService` arma `working_updates`.
+- `trace` viaja en el response contract.
+- `semantic_trace` queda en metadata del planner.
+- auditoria de memoria vive en `ia_dev_memory_audit_trail`.
+
+### Hallazgos criticos ya resueltos para futuros chats
+
+No volver a cuestionar estos hechos salvo cambio de codigo:
+
+- El endpoint oficial sigue siendo `/ia-dev/chat/`.
+- `ChatApplicationService` es la autoridad de orquestacion actual.
+- El runtime ya usa `Responses API`, pero de forma distribuida y sin function tools nativas.
+- El proyecto no esta sobre `Assistants API`.
+- El proyecto no usa `Agents SDK` hoy.
+- La ejecucion real ocurre en planner SQL y handlers Python, no en el modelo.
+- Existe semantic layer gobernada con `ai_dictionary`.
+- Existen validadores previos y posteriores a la ejecucion.
+- Existe task state persistido, auditoria de memoria y observabilidad.
+- El frontend puede intentar websocket, pero el path canonico comprobado en repo sigue siendo HTTP `/ia-dev/chat/`; el fallback sintetiza progreso local cuando no hay stream backend.
+
+### Brechas criticas ya confirmadas
+
+1. La consulta del usuario aun entra por superficie de `chat response`, no por un contrato explicito de `task / run / action`.
+2. Las tools de negocio no estan expuestas al modelo como function tools o MCP tools unificadas.
+3. No hay `Agents SDK` para handoffs, specialist-as-tool, tracing nativo ni guardrails del SDK.
+4. Las llamadas OpenAI estan dispersas en varios servicios y no pasan por un solo gateway/model policy runtime.
+5. No se esta usando `previous_response_id`, `store`, `background` ni un estado nativo de Responses para corridas largas.
+6. El frontend consume `reply + dashboard`, pero no una maquina de estados de tarea con `planned/executing/awaiting_approval/completed/failed`.
+
+### Modulos que SI se conservan en una migracion
+
+- `ChatApplicationService` como punto de integracion temporal
+- `QueryExecutionPlanner`
+- `DictionaryToolService`
+- `ResultSatisfactionValidator`
+- `SatisfactionReviewGate`
+- `PolicyGuard`
+- `ChatMemoryRuntimeService`
+- `MemoryGovernanceService`
+- `TaskStateService`
+- `ObservabilityService`
+- `ResponseAssembler` / `BusinessResponseComposerService`
+- handlers de dominio y servicios SQL ya auditados
+
+### Modulos que deben refactorizarse para target task-first
+
+- `chat_view.py` para aceptar y devolver `task envelope`
+- `ChatApplicationService` para separar `chat UX` de `task runtime`
+- llamadas OpenAI dispersas para centralizarlas en un gateway unico
+- surface frontend `AgenteIAModule` para mostrar estado de tarea y evidencia, no solo reply
+- flujo de tools para convertir servicios/handlers en registry declarativo de herramientas
+
+### Target oficial de migracion
+
+Objetivo aprobado para futuros chats:
+
+- cada consulta del usuario debe compilarse a una tarea ejecutable
+- el texto conversacional debe ser la capa de explicacion, no el producto principal
+- `Responses API` debe quedar como superficie unica de modelos
+- `Agents SDK` debe gobernar orquestacion, tools, handoffs, approvals y tracing
+- `ai_dictionary` + memoria de negocio deben seguir como autoridad estructural y contextual
+
+## Instruccion persistida para futuros chats
+
+Cuando la solicitud sea arquitectonica sobre IA Dev:
+
+1. asumir este estado como confirmado
+2. no reejecutar discovery masivo del repo
+3. revisar solo archivos si la tarea pide cambio puntual
+4. no volver a validar si usa `Responses API`: ya esta confirmado que si
+5. no volver a validar si usa `Agents SDK`: ya esta confirmado que no
+6. enfocar el trabajo en migracion task-first, registry de tools, approvals, evidencia y traces
+
+## Sesion 2026-05-16: Fase 1 TaskEnvelope + TaskRun
+
+Que se asumio sin revalidar:
+
+- `/ia-dev/chat/` sigue siendo el endpoint canonico.
+- `ChatApplicationService` sigue siendo el orquestador principal.
+- `QueryExecutionPlanner` no se toca y sigue siendo autoridad unica de SQL seguro.
+- `ai_dictionary` no cambia en esta fase.
+- el frontend actual sigue consumiendo `reply + data` y no debe romperse.
+
+Que se modifico:
+
+- `backend/apps/ia_dev/application/contracts/chat_contracts.py`
+  - el contrato HTTP ahora siempre incluye `task`.
+  - `task.current_run` expone:
+    - `run_id`
+    - `status`
+    - `domain`
+    - `intent`
+    - `plan`
+    - `required_tools`
+    - `validation`
+    - `evidence`
+    - `final_state`
+    - `reply`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - `_attach_runtime_metadata(...)` ahora construye el `TaskEnvelope` desde:
+    - `run_context`
+    - `task_state`
+    - `query_intelligence`
+    - metadata runtime existente
+  - no se cambio `QueryExecutionPlanner`.
+- `backend/apps/ia_dev/application/workflow/task_state_service.py`
+  - persiste `task_id` como alias estable de `workflow_key`.
+  - persiste tambien `status` plano y rastro de `task_id/run_id` en `history`.
+- `backend/apps/ia_dev/views/chat_view.py`
+  - asegura compatibilidad final sincronizando `task.current_run.reply` con el `reply` definitivo ya compuesto.
+- `frontend/src/services/ia-dev.service.ts`
+  - tipado del nuevo contrato `task`.
+- `frontend/src/modules/agente-ia/AgenteIAModule.tsx`
+  - mantiene compatibilidad usando `result.reply` y, si viniera vacio, cae a `result.task.current_run.reply`.
+
+Que quedo validado:
+
+- el backend sigue devolviendo `reply` top-level para la UI actual.
+- cada respuesta moderna ahora sale con `task_id` y `current_run`.
+- `required_tools` informa `query_execution_planner.sql_assisted` cuando la corrida fue planner SQL.
+- `validation`, `evidence` y `final_state` se rellenan desde la traza ya existente, sin crear un runtime nuevo.
+- no hubo migracion a `Agents SDK`.
+- no se tocaron `ai_dictionary` ni `QueryExecutionPlanner`.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_task_state_service apps.ia_dev.tests.test_chat_runtime_metadata`
+- `npm run typecheck`
+
+Resultado:
+
+- `22 tests`: OK
+- `TypeScript typecheck`: OK
+
+Estado vigente para futuros chats:
+
+- Fase 1 de `task-first` ya existe sobre `/ia-dev/chat/` sin romper el contrato anterior.
+- El producto visible para frontend sigue siendo `reply`, pero ya viaja un contrato paralelo `task`.
+- El `task_id` vigente en esta fase se alinea con `task_state.workflow_key` (`task_runtime:<run_id>`).
+- `task.current_run.reply` debe considerarse espejo del `reply` final, no una fuente narrativa distinta.
+- La siguiente fase puede profundizar en estados/approvals/evidencia sin rehacer esta base.
+
+## Sesion 2026-05-16: Fase 2 Tool Registry
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural y no se modifica.
+- `BusinessQuerySemanticPlan` sigue siendo la salida oficial de la capa semantica.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `fallback_policy` no se toca.
+- el sobre `task` de Fase 1 y el `reply` top-level deben seguir siendo compatibles.
+
+Que se modifico:
+
+- `backend/apps/ia_dev/application/contracts/tool_contracts.py`
+  - nuevos contratos tipados para:
+    - `ToolDefinition`
+    - `ToolExecutionPolicy`
+    - `ToolApprovalPolicy`
+    - `ToolExecutionTrace`
+- `backend/apps/ia_dev/application/runtime/tool_registry_service.py`
+  - nuevo registry declarativo unico.
+  - registra:
+    - tools de handlers por `capability_id`
+    - tool planner `query_execution_planner.sql_assisted`
+  - expone:
+    - `tool_id`
+    - `tool_definition`
+    - `input_schema`
+    - `output_schema`
+    - `execution_policy`
+    - `approval_policy`
+    - `audit_metadata`
+  - centraliza el mapeo `capability -> tool`.
+- `backend/apps/ia_dev/application/runtime/runtime_capability_adapter.py`
+  - deja de resolver solo por prefijo de handler y ahora adjunta metadata declarativa de tool.
+  - cada capability plan ahora publica `tool_id` y `tool_definition`.
+  - la ejecucion de handler devuelve tambien:
+    - `tool_id`
+    - `tool_definition`
+    - `tool_trace`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - construye `tool_execution` y `tool_execution_trace` para la corrida final.
+  - persiste esa traza dentro de `task_state`.
+  - publica la metadata de tools en:
+    - `task.current_run.tool_execution`
+    - `data_sources.runtime.tool_execution`
+- `backend/apps/ia_dev/application/contracts/chat_contracts.py`
+  - el contrato de `task.current_run` ahora tolera `tool_execution` sin romper compatibilidad.
+- `backend/apps/ia_dev/application/workflow/task_state_service.py`
+  - persiste:
+    - `tool_execution`
+    - `tool_execution_trace`
+  - agrega a `history`:
+    - `selected_tool_id`
+    - `tool_trace_count`
+
+Que quedo validado:
+
+- reasoning, planning y execution quedaron mas separados:
+  - razonamiento/semantica siguen en sus capas actuales
+  - el planner sigue decidiendo SQL
+  - la ejecucion de tools ahora tiene registry declarativo propio
+- los handlers productivos actuales quedaron registrados como tools declarativas.
+- `query_execution_planner.sql_assisted` ya existe como tool declarativa de planner.
+- la corrida final ahora deja traza persistida de tool con:
+  - definicion
+  - policy de ejecucion
+  - policy de aprobacion
+  - metadata de auditoria
+  - input/output resumido
+- no se migro todavia a `Agents SDK`.
+- no se rompio `reply` compatible.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_tool_registry_service apps.ia_dev.tests.test_task_state_service apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata`
+
+Resultado:
+
+- `27 tests`: OK
+
+Estado vigente para futuros chats:
+
+- Fase 1 `Task Envelope` sigue vigente y estable.
+- Fase 2 `Tool Registry` ya existe en backend con registry declarativo y traza persistida.
+- la lista `required_tools` sigue siendo compatible y el detalle rico vive en `tool_execution`.
+- el planner SQL sigue fuera del control del modelo y solo se expone como tool declarativa de runtime interno.
+- la siguiente fase debe atacar la unificacion de llamadas OpenAI en un gateway comun, sin rehacer el registry.
+
+## Hoja de ruta vigente
+
+- Fase 1 -> Task Envelope ✅ (OK - 2025-05-16 03:27)
+- Fase 2 -> Tool Registry ✅
+- Fase 3 -> Unified OpenAI Gateway
+- Fase 4 -> Responses API tools
+- Fase 5 -> Agents SDK
+- Fase 6 -> Handoffs + approvals
+- Fase 7 -> Background runs
+
+## Sesion 2026-05-16: Frontend task-first + evidence-first sin rediseño total
+
+Que se asumio sin revalidar:
+
+- El backend task-first ya estaba implementado.
+- `task.current_run.semantic_explanation` ya es la superficie saneada oficial para UX.
+- Los contratos `reply + task + data + evidence + semantic_explanation` no debian romperse.
+- `inventario_logistica`, `empleados` y `ausentismo` debian seguir compatibles.
+- No se reabria arquitectura backend ni transport actual.
+
+Que se modifico en frontend:
+
+- `frontend/src/modules/agente-ia/AgenteIAModule.tsx`
+  - ahora restaura el chat activo desde historial local en vez de abrir siempre uno nuevo.
+  - agrega acciones locales de renombrar, borrar, copiar respuesta, copiar informe y preparar consulta relacionada.
+  - conecta el chat, el panel lateral y el informe empresarial a un mismo `dashboardSnapshot`.
+- `frontend/src/modules/agente-ia/utils/buildDashboardSnapshot.ts`
+  - extiende el snapshot saneado con:
+    - estado de tarea
+    - estado breve de preparacion
+    - timeline
+    - capabilities y tools usadas
+    - approvals y background visibles
+    - aclaraciones y limitaciones
+    - resumen ejecutivo
+    - evidencia y validacion resumidas
+- `frontend/src/modules/agente-ia/components/HistoryPanel.tsx`
+  - deja de ser solo lista de chats y pasa a superficie `Historial | Herramientas | Caracteristicas`.
+- componentes nuevos:
+  - `BusinessReportPanel.tsx`
+  - `ChatHistoryPanel.tsx`
+  - `FeaturePanel.tsx`
+  - `TaskStatusBadge.tsx`
+  - `ToolsPanel.tsx`
+- componentes ajustados:
+  - `ChatPanel.tsx`
+  - `DashboardPanel.tsx`
+  - `MessageList.tsx`
+  - `SemanticExplanationPanel.tsx`
+  - `EvidenceSummaryPanel.tsx`
+  - `TaskTimeline.tsx`
+  - `types.ts`
+
+Reglas UX confirmadas para continuidad:
+
+- El chat izquierdo queda como superficie conversacional simple y humana.
+- El panel derecho queda como informe empresarial de la consulta.
+- La explicacion visible usa metadata saneada y no JSON crudo, SQL sensible, prompts ni chain-of-thought.
+- Historial, herramientas y caracteristicas viven en la zona lateral de soporte operativo sin rehacer el split-view.
+- La UX debe mostrar estado de tarea, evidencia, timeline y limitaciones sin convertirse en panel tecnico de debugging.
+
+Pruebas ejecutadas:
+
+- `npm.cmd run typecheck`
+- `npm.cmd run lint`
+
+Resultado:
+
+- `typecheck`: OK
+- `lint`: OK
+
+Limitaciones pendientes:
+
+- el historial usa `prompt/confirm` del navegador para renombrar y borrar; no se construyo modal dedicado.
+- el boton de exportacion del informe queda deshabilitado como placeholder claro mientras no exista soporte estable.
+- la vista de approvals y background depende de la metadata visible del payload actual; no inventa acciones si el endpoint no existe.
+
+## Sesion 2026-05-16: V1 flujo gobernado de revision de brechas semanticas
+
+Que se asumio sin revalidar:
+
+- P1-P7 siguen vigentes segun este micro-resumen.
+- `Continuous Runtime Learning V1` ya existe y registra en `ia_dictionary.registro_brechas_semanticas`.
+- `semantic_gap_registry_service.py` sigue registrando brechas sin autocorregir.
+- `RuntimeGovernanceService` ya exponia `continuous_runtime_learning`.
+- no se reauditan `QueryExecutionPlanner`, `ToolRegistryService`, `SemanticCapabilityRegistry`, `fallback_policy`, `OpenAI Gateway`, `Agents Runtime`, approvals base, background ni frontend.
+
+Que quedo implementado:
+
+- nueva capa operativa de revision:
+  - `backend/apps/ia_dev/application/runtime/semantic_gap_review_service.py`
+- estados de revision V1 en espanol:
+  - `nueva`
+  - `en_revision`
+  - `requiere_metadata`
+  - `requiere_sinonimo`
+  - `requiere_regla`
+  - `requiere_relacion`
+  - `requiere_capacidad`
+  - `requiere_tool`
+  - `requiere_agente`
+  - `requiere_aclaracion_usuario`
+  - `fuera_de_alcance`
+  - `resuelta`
+  - `descartada`
+- las propuestas gobernadas ahora quedan trazadas en metadata de la brecha con:
+  - `tipo_propuesta`
+  - `descripcion`
+  - `destino_sugerido`
+  - `valor_sugerido`
+  - `evidencia`
+  - `riesgo`
+  - `requiere_aprobacion`
+  - `estado_aprobacion`
+  - `aplicado_en`
+  - `validado_por_eval`
+- integracion con approvals:
+  - propuestas sensibles de metadata/capability/tool/agente generan `approval_runtime`
+  - la aplicacion gobernada queda bloqueada si no existe approval aprobada
+- integracion con evals P5:
+  - cada brecha puede vincular `evaluaciones_vinculadas`
+  - cada brecha puede vincular `casos_reales_reproducibles`
+  - la resolucion puede dejar `prueba_validacion`
+- deduplicacion:
+  - el registro evita duplicar brechas equivalentes abiertas aunque cambie `run_id`
+
+Superficie operativa nueva:
+
+- endpoint interno:
+  - `GET/POST /ia-dev/runtime/semantic-gaps/`
+- operaciones minimas:
+  - listar brechas pendientes
+  - agrupar por categoria
+  - ver brechas frecuentes
+  - marcar en revision
+  - marcar descartada
+  - marcar resuelta
+  - crear propuesta
+  - aprobar propuesta
+  - aplicar propuesta gobernada
+  - vincular eval
+- `RuntimeGovernanceService.build_runtime_operations_summary(...)` ahora incluye tambien:
+  - `gestion_brechas_semanticas`
+
+Trazabilidad nueva persistida por brecha:
+
+- `metadata.flujo_revision.estado_actual`
+- `metadata.flujo_revision.historial`
+- `metadata.flujo_revision.ultimo_revisor`
+- `metadata.flujo_revision.ultima_decision`
+- `metadata.flujo_revision.propuesta_mejora`
+- `metadata.flujo_revision.evaluaciones_vinculadas`
+- `metadata.flujo_revision.casos_reales_reproducibles`
+- referencias de aplicacion:
+  - `referencia_metadata_creada`
+  - `referencia_capacidad_creada`
+  - `referencia_agente_creado`
+
+Archivos modificados:
+
+- `backend/apps/ia_dev/application/runtime/semantic_gap_registry_service.py`
+- `backend/apps/ia_dev/application/runtime/semantic_gap_review_service.py`
+- `backend/apps/ia_dev/application/memory/repositories.py`
+- `backend/apps/ia_dev/services/sql_store.py`
+- `backend/apps/ia_dev/services/runtime_governance_service.py`
+- `backend/apps/ia_dev/views/chat_view.py`
+- `backend/apps/ia_dev/views/__init__.py`
+- `backend/apps/ia_dev/urls.py`
+- tests focalizados de brechas, metadata y endpoints
+
+Pruebas focalizadas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_gap_registry_service apps.ia_dev.tests.test_semantic_gap_review_service apps.ia_dev.tests.test_phase6_runtime_governance.Phase6GovernanceServiceTests.test_runtime_operations_summary_aggregates_task_runtime_state apps.ia_dev.tests.test_regression_endpoints.IADevRegressionEndpointsTests.test_semantic_gap_operations_endpoint_returns_operational_payload apps.ia_dev.tests.test_regression_endpoints.IADevRegressionEndpointsTests.test_semantic_gap_operations_endpoint_aprueba_propuesta apps.ia_dev.tests.test_chat_runtime_metadata.ChatRuntimeMetadataTests.test_attach_semantic_gap_learning_enriches_response_and_task_state`
+
+Resultado:
+
+- `21 tests`: OK
+
+Regla critica persistida:
+
+- el sistema puede registrar, clasificar, revisar y proponer mejoras sobre brechas reales
+- la aplicacion a metadata, capabilities, tools o agentes sigue siendo gobernada
+- no se escribe en `dd_*` ni se autocorrige ninguna autoridad estructural sin approval
+
+## Sesion 2026-05-16: Continuous Runtime Learning iniciado
+
+Que se asumio sin revalidar:
+
+- P1 completado.
+- P2 completado.
+- P3-B parcial estable.
+- P4 parcial estable alto.
+- P5 implementado.
+- P6 implementado.
+- P7 implementado para `inventario_logistica`.
+- `Capability Pack` de `inventario_logistica` activo.
+- `SemanticCapabilityRegistry` activo.
+- `evidence-first` activo.
+- `semantic_explanation` activo.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `ToolRegistryService` sigue siendo autoridad unica de `capability -> tool`.
+- `ai_dictionary` sigue siendo autoridad estructural.
+- no se toca `fallback_policy`, `OpenAI Gateway`, `Agents Runtime`, approvals ni background.
+
+Que quedo implementado:
+
+- Primera version de `Continuous Runtime Learning` como capacidad transversal post P1-P7.
+- Nueva tabla gobernada:
+  - `ia_dictionary.registro_brechas_semanticas`
+- Nuevo servicio tecnico:
+  - `backend/apps/ia_dev/application/runtime/semantic_gap_registry_service.py`
+- Integracion al cierre de `ChatApplicationService`:
+  - registra brechas accionables reales
+  - deja traza minima en:
+    - `task_state.state.continuous_runtime_learning`
+    - `task.current_run.evidence.continuous_runtime_learning`
+    - `task.current_run.semantic_explanation.continuous_runtime_learning`
+    - `data_sources.runtime.continuous_runtime_learning`
+- Integracion con P5:
+  - `inventario_runtime_eval_suite.py` ya puede registrar fallos P5 gobernados cuando se le pida explicitamente
+  - no autocorrige nada
+
+Categorias iniciales activas:
+
+- `falta_sinonimo`
+- `falta_regla`
+- `falta_relacion`
+- `falta_campo`
+- `falta_tabla`
+- `falta_capacidad`
+- `falta_tool`
+- `falta_agente`
+- `consulta_ambigua`
+- `fuera_de_alcance`
+- `evidencia_insuficiente`
+- `bloqueo_correcto`
+- `error_tecnico`
+- `fallback_excesivo`
+- `degradacion_semantica`
+
+Cuando se registra:
+
+- estado final `blocked`
+- aclaracion estructural requerida
+- limitacion declarada
+- capability sin resolver
+- tool faltante
+- evidencia insuficiente
+- planner bloqueado
+- fallback sombreado usado como senal de degradacion
+- error tecnico controlado
+- fallo P5 cuando se registra explicitamente desde la suite
+
+Consultas operativas minimas ya expuestas:
+
+- `brechas_nuevas`
+- `brechas_por_categoria`
+- `brechas_por_dominio`
+- `brechas_por_capacidad`
+- `brechas_frecuentes`
+- `brechas_resueltas`
+- `brechas_con_sugerencia_metadata`
+
+Como se revisa:
+
+- `RuntimeGovernanceService.build_runtime_operations_summary(...)` ahora incluye:
+  - `continuous_runtime_learning`
+- el backlog operativo puede revisarse desde esa superficie sin mezclarlo con observability cruda
+
+Que NO se aplica automaticamente:
+
+- nuevos sinonimos
+- nuevas reglas
+- nuevas relaciones
+- nuevas capabilities
+- nuevos tools
+- nuevos agentes
+- escrituras a `dd_*`
+- cambios a `ai_dictionary`
+- aprobaciones ni ejecuciones sensibles
+
+Regla persistida:
+
+- `Continuous Runtime Learning` no corrige solo.
+- registra, clasifica y propone mejoras gobernadas.
+
+Archivos relevantes nuevos/modificados:
+
+- `backend/apps/ia_dev/application/runtime/semantic_gap_registry_service.py`
+- `backend/apps/ia_dev/services/sql_store.py`
+- `backend/apps/ia_dev/application/memory/repositories.py`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+- `backend/apps/ia_dev/application/runtime/inventario_runtime_eval_suite.py`
+- `backend/apps/ia_dev/services/runtime_governance_service.py`
+
+Pruebas focalizadas validadas:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_gap_registry_service apps.ia_dev.tests.test_chat_runtime_metadata.ChatRuntimeMetadataTests.test_attach_semantic_gap_learning_enriches_response_and_task_state apps.ia_dev.tests.test_phase6_runtime_governance.Phase6GovernanceServiceTests.test_runtime_operations_summary_aggregates_task_runtime_state apps.ia_dev.tests.test_inventario_runtime_eval_suite`
+- resultado:
+  - `15 tests`: OK
+
+Incidencia heredada detectada fuera de este alcance:
+
+- `apps.ia_dev.tests.test_phase6_runtime_governance.Phase6RealDataDiagnoseTests.test_real_data_mode_reports_success_empty_and_critical_nulls`
+- causa:
+  - una expectativa heredada invoca `_build_sql_response(...)` con firma vieja sin `export_rows`
+- no pertenece a `Continuous Runtime Learning`
+
+## Sesion 2026-05-16: P7 Capability Packs / Agent Skills empresariales
+
+Que se asumio sin revalidar:
+
+- P1 completado.
+- P2 completado.
+- P3-B parcial estable.
+- P4 parcial estable alto.
+- P5 implementado.
+- P6 implementado.
+- `SemanticCapabilityRegistry` activo.
+- `metadata_gobernada_inventario.py` activo.
+- explicacion semantica saneada activa en backend y frontend.
+- `QueryExecutionPlanner`, `fallback_policy`, `ToolRegistryService`, `OpenAI Gateway`, `Agents Runtime`, approvals, background y contratos de respuesta no se reescriben.
+
+Que quedo implementado:
+
+- `inventario_logistica` ya tiene un `Capability Pack` empresarial gobernado y versionado.
+- artefactos nuevos del dominio:
+  - `backend/apps/ia_dev/domains/inventario_logistica/paquete_capacidades.yaml`
+  - `backend/apps/ia_dev/domains/inventario_logistica/reglas_semanticas.yaml`
+  - `backend/apps/ia_dev/domains/inventario_logistica/perfiles_respuesta.yaml`
+  - `backend/apps/ia_dev/domains/inventario_logistica/politicas_aprobacion.yaml`
+  - `backend/apps/ia_dev/domains/inventario_logistica/evaluaciones.yaml`
+  - `backend/apps/ia_dev/domains/inventario_logistica/README_OPERATIVO.md`
+- loader/validator nuevo:
+  - `backend/apps/ia_dev/domains/inventario_logistica/paquete_capacidades_loader.py`
+- el pack valida:
+  - dominio
+  - version
+  - capabilities declaradas
+  - tools existentes
+  - response profiles existentes
+  - reglas vinculadas a metadata gobernada
+  - evaluaciones asociadas
+  - limitaciones declaradas
+  - ausencia de SQL libre
+  - ausencia de prompts internos inseguros
+
+Integraciones activas:
+
+- `SemanticCapabilityRegistry`
+  - valida el `template_id`/`capability`/`response_profile` contra el pack
+  - publica en binding trace:
+    - `paquete_capacidad_usado`
+    - `version_paquete`
+    - `capacidades_declaradas`
+    - `reglas_declaradas`
+    - `perfiles_respuesta`
+    - `evaluaciones_asociadas`
+- `ToolRegistryService`
+  - el pack valida tools declaradas contra el registry vigente
+  - la autoridad `capability -> tool` sigue en `ToolRegistryService`
+- `metadata_gobernada_inventario.py`
+  - el pack no la reemplaza
+  - sus reglas y campos siguen siendo la referencia estructural para validacion
+- `response_assembler`
+  - conserva `response_profile` evidence-first
+  - ahora arrastra metadata del pack en `metadata`, `evidence_summary` y `semantic_trace`
+- `semantic_explanation`
+  - ahora expone un bloque `capability_pack` saneado al usuario/runtime trace
+- eval suite P5
+  - ahora exige traza del pack y no solo metadata semantica
+
+Regla estable P7:
+
+- el `Capability Pack` organiza, declara, valida y documenta capacidades del dominio
+- no reemplaza `ai_dictionary`
+- no reemplaza `QueryExecutionPlanner`
+- no reemplaza `ToolRegistryService`
+- no autoriza SQL
+- no inventa tablas o columnas
+
+Como crear nuevos packs despues de P7:
+
+1. crear `paquete_capacidades.yaml`
+2. declarar `reglas_semanticas.yaml`
+3. declarar `perfiles_respuesta.yaml`
+4. declarar `politicas_aprobacion.yaml`
+5. declarar `evaluaciones.yaml`
+6. vincular reglas a metadata gobernada real
+7. validar tools y perfiles existentes
+8. publicar traza del pack en binding, evidencia y `semantic_explanation`
+
+Estado P1-P7:
+
+- P1 metadata/capability-first inicial âœ…
+- P2 centralizacion intent/capability/tool/planner âœ…
+- P3 migracion parcial de reglas duras a metadata gobernada â— estable parcial
+- P4 response assembly evidence-first â— estable alto
+- P5 pruebas reales + evals anti-hardcode âœ…
+- P6 UI/UX de explicacion semantica âœ…
+- P7 Capability Packs / Agent Skills empresariales âœ… para `inventario_logistica`
+
+Nota oficial de roadmap:
+
+- despues de P7 inicia `Continuous Runtime Learning`
+- no implementar en P7:
+  - tabla de fallos
+  - aprendizaje operacional
+  - propuestas de metadata
+  - gaps
+  - metricas reales
+
+Pruebas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_capability_pack_loader apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_inventario_runtime_eval_suite apps.ia_dev.tests.test_chat_runtime_metadata`
+- `python manage.py test apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_sql_alignment apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_inventario_runtime_eval_suite apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata`
+
+Resultado:
+
+- `44 tests`: OK
+- `117 tests`: OK
+
+## Sesion 2026-05-16: P6 UI/UX de explicacion semantica
+
+Que se asumio sin revalidar:
+
+- P1 y P2 completados.
+- P3-B parcial estable.
+- P4 parcial estable alto.
+- P5 implementado con evals anti-hardcode.
+- `inventario_runtime_eval_suite.py` existe.
+- `inventario_logistica` ya responde evidence-first.
+- `SemanticCapabilityRegistry` y `metadata_gobernada_inventario.py` siguen activos.
+- No se reaudita arquitectura completa ni se tocan `QueryExecutionPlanner`, `fallback_policy`, `ToolRegistryService`, `OpenAI Gateway`, `Agents Runtime`, approvals, background, SQL builders, `ai_dictionary` ni contratos base.
+
+Que se implemento:
+
+- El backend ahora publica `task.current_run.semantic_explanation` como bloque saneado y derivado de metadata ya existente.
+- La explicacion se arma desde:
+  - `BusinessQuerySemanticPlan`
+  - `semantic_trace`
+  - `semantic_context`
+  - `response_profile`
+  - `evidence_summary`
+  - `task.current_run`
+  - `tool_execution`
+  - `validation`
+  - metadata de approvals y background
+- El frontend ahora muestra una UX dedicada para explicar:
+  - que entendio el sistema
+  - dominio e intencion
+  - entidad y filtros aplicados
+  - capability, herramienta y ruta usada
+  - validacion
+  - evidencia y limitaciones
+  - timeline de tarea
+  - indicadores de metadata gobernada, fallback sombreado, approvals y background
+- La vista mantiene compatibilidad con:
+  - `reply` top-level
+  - dashboard actual
+  - `data.table`
+  - `extra_tables`
+  - mobile y tablet
+
+Metadata expuesta al usuario:
+
+- `user_question`
+- `understood_as`
+- `domain`
+- `intent`
+- `entity`
+- `normalized_filters`
+- `selected_capability`
+- `selected_tool`
+- `planner_route_hint`
+- `validation_status`
+- `evidence_summary`
+- `limitations`
+- `clarification_needed`
+- `metadata_used`
+- `fallback_used`
+- `agents_involved`
+- `approvals_status`
+- `background_status`
+- `final_state`
+- `timeline`
+
+Que se oculta por seguridad:
+
+- prompts internos
+- chain-of-thought
+- traces crudos
+- SQL crudo sensible
+- secretos
+- payloads internos no saneados
+
+Archivos modificados:
+
+- `backend/apps/ia_dev/application/contracts/chat_contracts.py`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+- `backend/apps/ia_dev/tests/test_chat_response_contracts.py`
+- `backend/apps/ia_dev/tests/test_chat_runtime_metadata.py`
+- `frontend/src/services/ia-dev.service.ts`
+- `frontend/src/modules/programacion/ia-dev/chat/types.ts`
+- `frontend/src/modules/programacion/ia-dev/chat/utils/normalizeChatPayload.ts`
+- `frontend/src/modules/agente-ia/types.ts`
+- `frontend/src/modules/agente-ia/utils/buildDashboardSnapshot.ts`
+- `frontend/src/modules/agente-ia/components/DashboardRenderer.tsx`
+- `frontend/src/modules/agente-ia/components/SemanticExplanationPanel.tsx`
+- `frontend/src/modules/agente-ia/components/TaskTimeline.tsx`
+- `frontend/src/modules/agente-ia/components/EvidenceSummaryPanel.tsx`
+- `frontend/src/modules/agente-ia/components/ValidationStatusPanel.tsx`
+
+Pruebas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_business_response_composer_service`
+- `npm run typecheck`
+
+Resultado:
+
+- `28 tests`: OK
+- frontend `typecheck`: OK
+
+Avance oficial P1-P7:
+
+- P1 âœ…
+- P2 âœ…
+- P3-B parcial estable
+- P4 parcial estable alto
+- P5 âœ…
+- P6 âœ… `UI/UX de explicacion semantica`
+- P7 pendiente `Capability Packs / Agent Skills empresariales`
+
+Siguiente paso:
+
+- P7 debe empaquetar capabilities y skills empresariales reutilizables sobre esta base.
+- No implementar todavia `Continuous Runtime Learning` dentro de P6.
+
+## Sesion 2026-05-16: P5 evals reales y anti-hardcode en inventario
+
+Que se asumio sin revalidar:
+
+- P1 completado.
+- P2-A completado.
+- P2-B completado.
+- P3-A completado.
+- P3-B parcial estable.
+- P4 parcial estable alto.
+- `SemanticCapabilityRegistry` activo.
+- `metadata_gobernada_inventario.py` activo.
+- `inventario_logistica` evidence-first activo.
+- `patterns/legacy` siguen solo como fallback sombreado.
+- no se toca `QueryExecutionPlanner` como autoridad SQL, `fallback_policy`, `ToolRegistryService`, `OpenAI Gateway`, `Agents Runtime`, approvals, background, frontend ni contratos `reply/task/data/evidence/status`.
+
+Que quedo implementado:
+
+- nueva suite focalizada de P5 en:
+  - `backend/apps/ia_dev/application/runtime/inventario_runtime_eval_suite.py`
+  - dataset versionado `p5_inventario_runtime_eval_v1`
+- la suite evalua el flujo real:
+  - `InventorySemanticResolver`
+  - `SemanticCapabilityRegistry`
+  - `QueryExecutionPlanner`
+  - `build_inventory_business_response(...)`
+- evaluadores simples incorporados:
+  - `semantic correctness`
+  - `capability correctness`
+  - `planner route correctness`
+  - `evidence correctness`
+  - `clarification correctness`
+  - `limitation correctness`
+  - `anti-hardcode validation`
+- traza minima por caso:
+  - `eval_result`
+  - `eval_reason`
+  - `semantic_confidence`
+  - `fallback_detected`
+  - `metadata_used`
+  - `suspected_hardcode`
+- casos reales cubiertos con variaciones semanticas:
+  - cuadrilla / movil / brigada `TIRAN224`
+  - tecnico / empleado / cedula `5098747`
+  - `ferreteria`
+  - `movimientos`
+  - `entradas y salidas`
+  - `historial del codigo 1025507 para 5098747`
+  - `actas SAP`
+  - nombre propio ambiguo
+  - resultado vacio
+  - ruido textual adicional
+
+Ajuste anti-hardcode incorporado en runtime:
+
+- `backend/apps/ia_dev/domains/inventario_logistica/semantic_inventory_resolver.py`
+  - ahora reconoce `codigo` y `código`
+  - ahora reconoce cedula operacional en frases tipo `historial ... para 5098747`
+  - esto elimina dependencia innecesaria de wording exacto para una familia real de consultas de kardex por empleado
+
+Metricas P5 obtenidas con dataset versionado:
+
+- `13` preguntas evaluadas
+- `12` casos pasaron
+- `1` caso fallo de forma controlada
+- clasificacion:
+  - `10` `correcto`
+  - `1` `aclaracion_valida`
+  - `1` `limitacion_valida`
+  - `1` `capability_incorrecta`
+- `metadata_usage_count = 18`
+- `metadata_usage_ratio = 1.0`
+- `evidence_coverage_count = 18`
+- `evidence_coverage_ratio = 1.0`
+- `fallback_usage_count = 1`
+- `fallback_usage_ratio = 0.0556`
+- `clarification_ratio = 0.0556`
+- `limitation_ratio = 0.0556`
+- `suspected_hardcode_count = 0`
+
+Fallbacks y gaps detectados:
+
+- la familia `critical_materials_declared` ya valida variaciones semanticas gobernadas sin caer al binding legacy:
+  - `materiales criticos por empleado`
+  - `materiales criticos por tecnico`
+  - `materiales criticos por movil/cuadrilla`
+  - `criticidad por saldo y consumo`
+  - `cobertura baja`
+  - `por debajo de umbral`
+- el `fallback_usage_count` residual de esta suite queda asociado a la ruta de limitacion declarada y no a `inventory_material_critical_by_employee`
+
+Pruebas ejecutadas y estado:
+
+- `python manage.py test apps.ia_dev.tests.test_inventario_runtime_eval_suite apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_semantic_capability_registry`
+- resultado:
+  - `58 tests`: OK
+- `python manage.py test apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata`
+- resultado:
+  - `25 tests`: OK
+- comprobacion ampliada:
+  - `python manage.py test apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_sql_alignment apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata`
+- resultado:
+  - reaparecen solo los `2` fallos heredados ya persistidos antes de P5:
+    - `test_planner_builds_transfer_warehouse_without_destination_column`
+    - `test_planner_builds_transfer_other_ally`
+  - ambos siguen fuera del alcance funcional de P5 y no fueron introducidos por esta iteracion
+
+Readiness para `Continuous Runtime Learning`:
+
+- P5 no implementa tablas ni runtime learning.
+- si deja listo el shape minimo reusable para una futura persistencia transversal:
+  - `pregunta_original`
+  - `grupo_semantico`
+  - `clasificacion`
+  - `eval_reason`
+  - `template_id`
+  - `candidate_capability`
+  - `planner_reason`
+  - `response_status`
+  - `semantic_confidence`
+  - `fallback_detected`
+  - `metadata_used`
+  - `suspected_hardcode`
+
+Estado P5:
+
+- P5 🟡 parcial estable alto
+- la capa de eval ya existe, detecta degradacion real y valida evidencia/governance
+- queda un gap controlado visible cuando desaparece metadata gobernada y el fallback legacy cambia la capability de kardex
+
+Avance global P1-P7:
+
+- P1 ✅ inventario metadata/capability-first inicial
+- P2 ✅ centralizar mapping intent/capability/tool/planner
+- P3 🟡 migrar reglas duras a `ai_dictionary` y `dd_*` parcial estable
+- P4 🟡 evidence-first response assembly parcial estable alto
+- P5 🟡 pruebas reales + evals anti-hardcode parcial estable alto
+- P6 siguiente paso: UI/UX de explicacion semantica
+- P7 pendiente: Capability Packs / Agent Skills empresariales
+
+## Sesion 2026-05-16: P4 evidence-first response assembly en inventario
+
+Que se asumio sin revalidar:
+
+- P1 completado.
+- P2-A completado.
+- P2-B completado.
+- P3-A completado.
+- P3-B parcial estable.
+- `SemanticCapabilityRegistry` ya existe para `inventario_logistica`.
+- `metadata_gobernada_inventario.py` ya existe.
+- `patterns` y `legacy` siguen solo como fallback sombreado.
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- no se toca `fallback_policy`, `ToolRegistryService`, `OpenAI Gateway`, `Agents Runtime`, approvals, background ni frontend.
+
+Que quedo implementado:
+
+- `backend/apps/ia_dev/domains/inventario_logistica/response_assembler.py`
+  - la respuesta de inventario ahora se arma primero desde:
+    - `BusinessQuerySemanticPlan`
+    - `semantic_context`
+    - `semantic_capability_registry`
+    - `response_profile`
+    - `result_set`
+    - `extra_tables`
+    - `limitations`
+  - ya no depende principalmente de frases del usuario ni de `reply` previo para cerrar exito, vacio, aclaracion o limitacion.
+  - agrega:
+    - `response_profile` estructurado
+    - `evidence_summary` estructurado
+    - metadata de traza:
+      - `response_profile_usado`
+      - `evidence_sources_used`
+      - `semantic_context_used`
+      - `fallback_narrativo_usado`
+      - `missing_evidence_reason`
+      - `semantic_trace`
+  - estados evidence-first manejados:
+    - `success`
+    - `clarification_required`
+    - `limitation_declared`
+    - `empty_result`
+
+- `backend/apps/ia_dev/application/semantic/query_execution_planner.py`
+  - para `inventario_logistica`, el planner ahora entrega al assembler:
+    - `result_set`
+    - `supplemental_tables`
+    - `execution_metadata`
+  - se redujo el armado narrativo hardcodeado posterior para doble bloque; la autoridad de cierre pasa al assembler del dominio.
+
+- `backend/apps/ia_dev/application/orchestration/business_response_composer_service.py`
+  - si existe `data.business_response`, el `reply` final pasa a derivarse de ese bloque estructurado y no del texto tecnico previo.
+  - el composer enriquece la salida con evidencia runtime:
+    - validacion
+    - tool execution
+    - runtime trace
+
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - `task.current_run.evidence` ahora expone tambien:
+    - `response_profile_usado`
+    - `evidence_sources_used`
+    - `semantic_context_used`
+    - `fallback_narrativo_usado`
+    - `missing_evidence_reason`
+
+Que respuestas ya quedaron evidence-first:
+
+- inventario operativo por movil/cuadrilla/empleado
+- inventario generico dual block materiales + serializados cuando aplica
+- kardex por empleado/codigo
+- aclaracion estructural por portador ambiguo
+- limitacion declarada para SAP o documentacion no habilitada
+- resultado vacio explicado desde `result_set` y filtros ejecutados
+
+Fallback narrativo que aun queda:
+
+- perfiles no modelados especificamente en `inventario_logistica` caen en resumen generico evidence-first del dominio
+- otros dominios fuera de `inventario_logistica` siguen usando parte del composer transversal heredado
+- `response_assembler` transversal legacy sigue existiendo para rutas no migradas a P4
+
+Pruebas focalizadas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_business_response_composer_service apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_semantic_capability_registry`
+
+Resultado:
+
+- `39 tests`: OK
+
+Prueba ampliada relevante:
+
+- `python manage.py test apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventario_runtime_sql_alignment apps.ia_dev.tests.test_inventory_business_query_semantic_plan apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_semantic_capability_registry`
+
+Resultado:
+
+- la parte nueva de P4 quedo estable
+- aparecieron 2 fallos existentes o fuera del alcance P4 en `test_inventario_runtime_sql_alignment`:
+  - `test_planner_builds_transfer_warehouse_without_destination_column`
+  - `test_planner_builds_transfer_other_ally`
+- ambos fallan por `plan.reason` de rutas `transfer_*`, no por response assembly evidence-first
+
+Estado P4:
+
+- `inventario_logistica`: parcial estable alto
+- transversal: ajuste pequeno y seguro en composer/task evidence
+
+Avance global P1-P7:
+
+- P1 ✅ inventario metadata/capability-first inicial
+- P2 ✅ centralizar mapping intent/capability/tool/planner
+- P3 🟡 migrar reglas duras a `ai_dictionary` y `dd_*` parcial estable
+- P4 🟡 evidence-first response assembly parcial estable
+- P5 siguiente paso: pruebas reales + evals anti-hardcode
+- P6 pendiente: UI/UX de explicacion semantica
+- P7 pendiente: Capability Packs / Agent Skills empresariales
+
+Nota de roadmap:
+
+- P1-P7 siguen siendo la arquitectura funcional
+- despues de P7 viene la linea transversal `Continuous Runtime Learning`
+- ahi entran tabla de fallos, aprendizaje operacional, propuestas de metadata, gaps y metricas reales
+- P4 no implementa `Continuous Runtime Learning`; solo deja trazabilidad util para futuras fases
+
+## Sesion 2026-05-16: P3-B gobierno metadata-first de reglas duras en inventario
+
+Que se asumio sin revalidar:
+
+- P1 completado.
+- P2-A completado.
+- P2-B completado.
+- `SemanticCapabilityRegistry` sigue siendo la autoridad unica de binding semantico.
+- `ToolRegistryService` sigue siendo la autoridad unica de `capability -> tool_id`.
+- `QueryExecutionPlanner` sigue siendo la autoridad unica de SQL seguro.
+- no se toca `fallback_policy`, approvals, background, agents runtime, OpenAI gateway, frontend ni contratos `reply/task/data/evidence/status`.
+
+Que quedo implementado en P3-B:
+
+- se agrego metadata gobernada reutilizable para `inventario_logistica` en:
+  - `dd_sinonimos`
+  - `dd_reglas`
+  - `ia_dev_capacidades_columna`
+- `InventoryDictionarySyncService.build_preview(...)` y `sync(...)` ya incluyen:
+  - `dd_reglas_preview_count`
+  - `ia_dev_capacidades_columna_preview_count`
+  - upsert controlado de `ia_dev_capacidades_columna`
+- `SemanticCapabilityRegistry` ya prioriza metadata gobernada para resolver:
+  - `template_id`
+  - `candidate_capability`
+  - `planner_route_hint`
+  - `response_profile`
+  - `output_profile`
+- `MatcherSemanticoGobernadoInventario` ya consume metadata gobernada para sinonimia y reglas P3-B prioritarias.
+- el legado queda como fallback sombreado y no como autoridad primaria.
+
+Reglas migradas a metadata gobernada:
+
+- `dd_sinonimos`
+  - `material claro`
+  - `material de claro`
+  - `ferretero`
+  - `material ferretero`
+  - `material`
+  - `cuadrilla`
+  - `brigada`
+  - `movil`
+  - `móvil`
+  - `tecnico`
+  - `técnico`
+  - `empleado`
+  - `cedula`
+  - `cédula`
+  - `kardex`
+  - `movimientos`
+  - `entradas y salidas`
+  - `serial`
+  - `seriales`
+  - `equipo`
+  - `equipos`
+  - `CPE`
+  - `bodega`
+  - `operacion_hfc`
+- `dd_reglas`
+  - `identificador numerico => cedula`
+  - `identificador alfanumerico operativo => movil`
+  - `inventario generico sin familia explicita => dual block`
+  - `material claro => tipo = material`
+  - `ferretero => tipo = ferretero`
+  - `material generico => tipo IN (material, ferretero)`
+  - `serializados/equipos => conteo, no cantidad`
+  - `saldos incluyen positivos, cero y negativos`
+  - `kardex: entrega suma`
+  - `kardex: devolucion, consumo y cobro restan`
+  - `kardex: saldo acumulado cronologico`
+  - `actas/SAP/documentos => limitacion declarada`
+  - `bodega destino => limitacion declarada por metadata faltante`
+- `ia_dev_capacidades_columna`
+  - afinidad gobernada para:
+    - `cedula`
+    - `movil`
+    - `codigo`
+    - `serial`
+    - `bodega`
+    - `tipo`
+    - `estado`
+    - `fecha`
+    - `orden_trabajo`
+    - `familia`
+    - `descripcion`
+
+Trazabilidad nueva persistida:
+
+- `regla_metadata_usada`
+- `fuente_dd`
+- `fallback_sombreado_usado`
+- `regla_legacy_detectada`
+- `regla_migrada`
+
+Donde queda visible:
+
+- `semantic_context.inventory_governed_match`
+- `semantic_context.semantic_capability_registry`
+- `semantic_context.resolved_semantic.semantic_capability_registry`
+- `semantic_context.resolved_semantic.binding_trace`
+
+Que quedo como fallback sombreado temporal:
+
+- `INVENTORY_TEMPLATE_BINDINGS` en `semantic_capability_registry.py`
+- `_resolve_inventory_template_legacy(...)`
+- heuristicas heredadas no prioritarias fuera de las familias P3-B migradas
+- parte del arbol legacy de `semantic_inventory_resolver.py` para intents no priorizados en esta sesion
+
+Que no se elimino aun y por que:
+
+- no se elimino el mapa legacy completo porque la equivalencia total de todas las rutas de inventario todavia no esta demostrada por tests anti-hardcode para cada intent heredado.
+- no se movieron formulas SQL, joins efectivos ni guardrails de compilacion a metadata.
+- no se ajusto `dd_relaciones` en esta sesion porque no aparecio una necesidad segura adicional validada por P3-A para los casos priorizados.
+
+Estado P3-B:
+
+- `P3-B`: parcial estable
+- criterio cumplido:
+  - metadata primero
+  - lectura desde metadata
+  - comparacion contra legacy
+  - fallback sombreado
+  - sin mover autoridad SQL ni tool binding
+
+Pruebas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_inventario_dictionary_sync apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_semantic_orchestrator_service apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_chat_response_contracts`
+- `python manage.py test apps.ia_dev.tests.test_inventory_business_query_semantic_plan apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_query_intelligence_layer`
+
+Resultado:
+
+- `153 tests`: OK
+
+Casos reales cubiertos en la sesion:
+
+- `que tiene asignado la cuadrilla TIRAN224`
+- `muestrame lo que tiene el movil TIRAN224`
+- `movimientos del tecnico 5098747`
+- `entradas y salidas de 5098747`
+- `solo material de claro de TIRAN224`
+- `ferreteria asignada al tecnico 5098747`
+- `que tiene Juan Perez`
+- `actas SAP del empleado 5098747`
+
+Avance global P1-P7:
+
+- P1 `inventario metadata/capability-first inicial` -> vigente
+- P2 `centralizar mapping intent/capability/tool/planner` -> vigente
+- P3 `migrar reglas duras a ai_dictionary/dd_*` -> en progreso; P3-B parcial estable
+- P4 `evidence-first response assembly general` -> siguiente foco recomendado
+- P5 `pruebas reales + evals anti-hardcode` -> pendiente de ampliar
+- P6 `UI/UX de explicacion semantica` -> sin cambios
+- P7 `Capability Packs / Agent Skills empresariales` -> sin cambios
+
+Riesgos vigentes:
+
+- el runtime todavia conserva mapas legacy de compatibilidad para rutas no cubiertas por las reglas P3-B priorizadas.
+- `ia_dev_capacidades_columna` sigue siendo afinidad por campo; el binding semantico rico sigue apoyandose tambien en `dd_reglas`.
+- falta ampliar tests anti-hardcode para demostrar cuando ya se puedan retirar mas listas legacy.
+
+Proximos pasos recomendados para P4:
+
+- hacer que `response_assembler` consuma preferentemente `response_profile`, `binding_trace` y `semantic_trace` en vez de heuristicas por texto o `row_keys`.
+- ampliar casos reales obligatorios faltantes:
+  - `inventario operativo de TIRAN224 con empleados`
+  - `que saldo tiene 5098747`
+  - `revisa inventario del tecnico 5098747`
+  - `historial del codigo 1025507 para 5098747`
+  - `materiales del movil TIRAN224`
+- agregar evals anti-hardcode para demostrar cuando ya se puedan retirar mas listas legacy.
+
+## Sesion 2026-05-16: P3-A diagnostico de migracion de reglas duras a gobierno metadata
+
+Que se asumio sin revalidar:
+
+- P1 completado.
+- P2-A completado.
+- P2-B completado.
+- `SemanticCapabilityRegistry` ya existe para `inventario_logistica`.
+- `patterns` quedan como fallback sombreado.
+- `QueryExecutionPlanner` sigue siendo la unica autoridad SQL.
+- no se toca `fallback_policy`, `ToolRegistryService`, `OpenAI Gateway`, `Agents Runtime`, approvals, background ni frontend.
+
+Que quedo confirmado:
+
+- La deuda principal de `inventario_logistica` ya no esta en SQL sino en reglas semanticas duplicadas entre:
+  - `matcher_semantico_gobernado_inventario.py`
+  - `semantic_inventory_resolver.py`
+  - `semantic_capability_registry.py`
+  - `business_query_semantic_plan.py`
+  - `query_intent_resolver.py`
+  - `semantic_orchestrator_service.py`
+  - `query_execution_planner.py`
+  - `response_assembler.py`
+- Los hardcodes detectados se concentran en:
+  - sinonimos
+  - regex de identificadores
+  - reglas de negocio compuestas
+  - `template_id -> capability -> planner_route_hint -> response_profile`
+  - heuristicas narrativas por `row_keys`
+- `runtime_capability_adapter` ya respeta primero `semantic_capability_registry` para inventario y no es el cuello principal de P3.
+
+Reglas detectadas y clasificadas:
+
+- Deben migrar a `dd_sinonimos`:
+  - `inventario|stock|saldo|existencia`
+  - `movil|cuadrilla|brigada`
+  - `kardex|movimientos|entradas y salidas`
+  - `material claro|material de claro`
+  - `ferretero|ferreteria|material ferretero`
+  - `serial|seriales|equipos|cpe`
+  - `sap|acta|actas`
+- Deben migrar a `dd_reglas`:
+  - numerico => `cedula`
+  - alfanumerico operativo => `movil`
+  - `material claro => tipo=material`
+  - `ferretero => tipo=ferretero`
+  - `material generico => tipo in (material, ferretero)`
+  - inventario generico => doble bloque materiales + serializados
+  - serializados => conteo
+  - saldo incluye positivos, cero y negativos
+  - kardex por empleado/codigo
+  - limitaciones `SAP/actas/documentos`
+  - `bodega destino` como bloqueo por metadata faltante
+- Deben migrar a `dd_relaciones`:
+  - `movil -> cedulas`
+  - enrichment historico con personal
+  - dependencias con catalogos de materiales y serializados
+- Deben migrar a `dd_campos`:
+  - `cedula`, `movil`, `codigo`, `serial`, `bodega`
+- Deben migrar a `ia_dev_capacidades_columna`:
+  - binding `intent/entity/filter/output -> template_id/capability/planner_route_hint/response_profile`
+- Deben quedarse en codigo:
+  - formulas SQL
+  - casteos numericos
+  - guardrails de compilacion
+  - joins efectivos
+  - validaciones de seguridad
+- Pueden quedar como fallback sombreado temporal:
+  - `_resolve_inventory_template_legacy(...)`
+  - `_resolve_template_id(...)` heredado
+  - `_resolve_capability(...)` heredado
+  - heuristicas de `response_assembler`
+- Hardcode critico a eliminar:
+  - `INVENTORY_TEMPLATE_BINDINGS`
+  - `INVENTORY_INTENT_IDS_BY_TEMPLATE`
+  - duplicaciones de regex/routing entre resolver, intent resolver, orchestrator y planner
+
+Plan P3-B priorizado:
+
+1. mover alias y conceptos base a `dd_sinonimos` y `dd_campos`
+2. mover reglas P1 core a `dd_reglas`
+3. sacar `template_id/capability/route/response_profile` de mapas Python hacia `ia_dev_capacidades_columna`
+4. gobernar limitaciones declaradas y bloqueos conocidos en metadata
+5. dejar los hardcodes viejos solo como fallback sombreado con traza
+6. eliminar hardcode cuando exista cobertura de tests anti-hardcode
+
+Riesgos persistidos:
+
+- divergencia temporal entre metadata nueva y fallback heredado
+- planner ocultando inconsistencias si sigue remapeando capability por `template_id`
+- `response_assembler` contradiciendo `response_profile` por heuristicas de `row_keys`
+- aliases demasiado amplios capturando consultas de otros dominios
+- seriales numericos colisionando con la regla `numerico => cedula` si no se condiciona por intent/familia
+
+Pruebas necesarias para P3-B:
+
+- no regresion de casos P1:
+  - `que tiene asignado la cuadrilla TIRAN224`
+  - `muestrame lo que tiene el movil TIRAN224`
+  - `movimientos del tecnico 5098747`
+  - `entradas y salidas de 5098747`
+  - `solo material de claro de TIRAN224`
+  - `ferreteria asignada al tecnico 5098747`
+  - `actas SAP del empleado 5098747`
+- tests anti-hardcode:
+  - registry resolviendo desde `dd_sinonimos`
+  - binding resolviendo desde `ia_dev_capacidades_columna`
+  - `legacy_mapping_used` trazado solo cuando falte metadata
+- tests de planner:
+  - no cambia autoridad SQL
+  - `dual_block` sigue gobernado
+  - limitaciones siguen declaradas
+- tests de respuesta:
+  - `response_assembler` prioriza `response_profile` y `semantic_trace`
+
+Documento oficial generado:
+
+- `backend/DIAGNOSTICO_P3A_GOBIERNO_REGLAS_DURAS_INVENTARIO.md`
+
+Avance oficial P1-P7:
+
+- P1 `Inventario metadata/capability-first inicial` âœ…
+- P2 `Centralizar mapping intent/capability/tool/planner` âœ…
+- P3-A `Diagnostico y plan seguro de migracion de reglas duras a dd_*` âœ…
+- P3-B pendiente: extraccion controlada a metadata gobernada
+- P4 pendiente: evidence-first response assembly general
+- P5 pendiente: pruebas reales + evals anti-hardcode
+- P6 pendiente: UI/UX de explicacion semantica
+- P7 pendiente: capability packs / agent skills empresariales
+
+## Sesion 2026-05-16: P2-B Semantic Capability Registry read-only para inventario_logistica
+
+Que se asumio sin revalidar:
+
+- P1 de inventario ya estaba completado y validado.
+- P2-A ya habia dejado definido el corte de autoridad.
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de estrategia final y SQL seguro.
+- `ToolRegistryService` sigue siendo la unica autoridad de `capability -> tool_id`.
+- no se tocan `fallback_policy`, empleados, ausentismo ni transport en esta iteracion.
+
+Que quedo implementado:
+
+- nuevo `SemanticCapabilityRegistry` en:
+  - `backend/apps/ia_dev/application/semantic/semantic_capability_registry.py`
+- el registry ahora centraliza para `inventario_logistica`:
+  - `intent + entity + filters + output -> template_id`
+  - `template_id -> candidate_capability`
+  - `candidate_capability -> planner_route_hint`
+  - `candidate_capability/template -> response_profile`
+  - `candidate_capability -> tool_id` consumiendo `ToolRegistryService`
+- el registry deja trace read-only con:
+  - `source`
+  - `matched_rules`
+  - `consulted_metadata`
+  - `confidence`
+  - `fallback_used`
+  - `unresolved_reason`
+  - `legacy_mapping_used`
+  - `legacy_reason`
+  - `migration_target`
+
+Integracion gradual aplicada:
+
+- `semantic_inventory_resolver.py`
+  - ya resuelve `binding_decision` desde el registry
+  - el viejo `template_map` deja de ser autoridad principal
+  - el trace queda publicado en:
+    - `semantic_context.semantic_capability_registry`
+    - `semantic_context.resolved_semantic.semantic_capability_registry`
+    - `semantic_context.resolved_semantic.binding_trace`
+- `business_query_semantic_plan.py`
+  - consume el binding del registry para poblar:
+    - `candidate_capability`
+    - `output`
+    - metadata de `template_id/planner_route_hint/response_profile/tool_id`
+  - los mappings heredados quedan como fallback sombreado
+- `query_intent_resolver.py`
+  - para inventario ya puede pedir `template_id` al registry antes de caer al mapping heredado
+- `semantic_orchestrator_service.py`
+  - para inventario prioriza el registry para decidir `capability` semantica candidata
+  - sus heuristicas previas quedan como sombra de compatibilidad
+- `runtime_capability_adapter.py`
+  - ya puede leer `candidate_capability` desde el binding persistido en `resolved_query.semantic_context`
+- `query_execution_planner.py`
+  - ya prioriza `candidate_capability` proveniente del registry/semantic context antes del remapeo legacy por `template_id`
+  - `metadata.semantic_trace` ahora incluye `semantic_binding`
+- `response_assembler.py`
+  - ya recibe y expone en metadata:
+    - `template_id`
+    - `candidate_capability`
+    - `planner_route_hint`
+    - `response_profile`
+    - `tool_id`
+
+Estado P2 actualizado:
+
+- P1 âœ… Inventario metadata/capability-first inicial
+- P2 âœ… Centralizar mapping intent/capability/tool/planner
+- P2-B âœ… `SemanticCapabilityRegistry` read-only implementado para `inventario_logistica`
+- P3 pendiente -> migrar mas reglas duras a `ai_dictionary/dd_*`
+- P4 pendiente -> evidence-first response assembly general
+- P5 pendiente -> pruebas reales + evals anti-hardcode
+- P6 pendiente -> UI/UX de explicacion semantica
+
+Duplicaciones que aun quedan como fallback sombreado:
+
+- heuristicas heredadas en `semantic_orchestrator_service.py` para inventario
+- remapeos legacy por `template_id` en `query_execution_planner.py`
+- helpers heredados de output/capability en `business_query_semantic_plan.py`
+- matcher/patrones siguen proponiendo familia e intencion, pero ya no deben ser la autoridad final cuando existe binding del registry
+
+Siguiente paso confirmado para P3:
+
+- mover mas reglas de inventario desde heuristicas Python a `dd_reglas`, `dd_sinonimos` e `ia_dev_capacidades_columna`
+- reducir los fallbacks legacy del planner y del orchestrator hasta dejar el registry como unica autoridad semantica efectiva de inventario
+- ampliar el mismo patron despues a otros dominios, pero no antes de cerrar la deuda restante de inventario
+
+Pruebas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_semantic_capability_registry apps.ia_dev.tests.test_inventario_semantic_resolver apps.ia_dev.tests.test_inventory_business_query_semantic_plan apps.ia_dev.tests.test_semantic_orchestrator_service`
+- `python manage.py test apps.ia_dev.tests.test_inventario_runtime_sql_alignment apps.ia_dev.tests.test_semantic_orchestrator_service apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_tool_registry_service`
+
+Resultado:
+
+- `135 tests`: OK
+
+## Sesion 2026-05-16: P2-A centralizacion de mappings intent/capability/tool/planner
+
+Que se asumio sin revalidar:
+
+- existe `matcher_semantico_gobernado_inventario.py`
+- los patterns quedan como fallback sombreado y no como autoridad
+- `response_assembler` debe preferir plan/contexto y no la frase del usuario
+- `QueryExecutionPlanner` sigue siendo la unica autoridad SQL
+- no se tocan `ai_dictionary`, `fallback_policy`, `task envelope`, `tool registry` base, gateway, agents runtime, approvals, background ni frontend
+
+Que se hizo:
+
+- diagnostico focalizado de duplicaciones actuales entre:
+  - `semantic_inventory_resolver.py`
+  - `matcher_semantico_gobernado_inventario.py`
+  - `semantic_orchestrator_service.py`
+  - `query_intent_resolver.py`
+  - `runtime_capability_adapter.py`
+  - `business_query_semantic_plan.py`
+  - `tool_registry_service.py`
+  - `query_execution_planner.py`
+- se documento el diseno propuesto en:
+  - `backend/DIAGNOSTICO_P2A_SEMANTIC_CAPABILITY_REGISTRY.md`
+
+Hallazgo principal:
+
+- hoy el binding `intent/entity/filter/output -> capability/template/route/response` esta repartido entre matcher, resolver, intent resolver, orchestrator, adapter y planner
+- la duplicacion mas critica esta en:
+  - `candidate_capability`
+  - `template_id`
+  - `planner route`
+  - `response profile`
+- `tool_id` ya esta razonablemente centralizado en `ToolRegistryService`
+
+Diseno propuesto:
+
+- crear `SemanticCapabilityRegistry` como autoridad unica de binding semantico para:
+  - `intent`
+  - `entity`
+  - `normalized_filters`
+  - `output profile`
+  - `candidate_capability`
+  - `template_id`
+  - `planner_route_hint`
+  - `response_profile`
+- mantener la separacion:
+  - `SemanticCapabilityRegistry` => binding semantico
+  - `ToolRegistryService` => `capability -> tool_id`
+  - `QueryExecutionPlanner` => estrategia y SQL seguro
+
+Que no se toco:
+
+- `ai_dictionary`
+- `QueryExecutionPlanner` como autoridad SQL
+- `fallback_policy`
+- `task envelope`
+- `tool registry` base
+- `gateway`
+- `agents runtime`
+- approvals
+- background
+- frontend
+
+Estado de la fase:
+
+- P2-A completado
+- diseno propuesto y persistido
+- sin refactor grande implementado aun
+
+Que queda para P2-B:
+
+1. crear `SemanticCapabilityRegistry` read-only para inventario
+2. mover al registry los mappings de `template_id/candidate_capability/response_profile`
+3. hacer que `semantic_inventory_resolver` y `business_query_semantic_plan` consuman ese registry
+4. dejar `semantic_orchestrator_service` en modo consumidor y no autoridad paralela
+5. reducir el remapeo de capability en `query_execution_planner` a compatibilidad temporal auditada
+
+Pruebas:
+
+- no se corrieron pruebas runtime en P2-A porque no hubo cambio de codigo productivo
+- la sesion fue solo de diagnostico, diseno y persistencia documental
+
+## Sesion 2026-05-16: Endurecimiento y operacion enterprise sobre runtime task-first
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary`, `BusinessQuerySemanticPlan`, `QueryExecutionPlanner`, `fallback_policy`, `task envelope`, `tool registry`, `unified gateway`, `agents runtime`, `approvals runtime` y `background runtime` mantienen su autoridad vigente.
+- no se agregan capas arquitectonicas mayores ni se reemplaza el runtime actual.
+- la prioridad de esta etapa es estabilidad, governance, trazabilidad y operacion real.
+
+Que se modifico:
+
+- `backend/apps/ia_dev/application/runtime/runtime_hardening_service.py`
+  - policy central ligera para:
+    - limites de tool loop
+    - limites de tool calls por corrida
+    - deteccion de loops repetidos
+    - limites de retries/background duration/approval wait
+    - redaccion de datos sensibles
+    - correlation metadata
+    - idempotency key
+    - runtime metrics derivadas
+- `backend/apps/ia_dev/application/runtime/approval_runtime_service.py`
+  - approvals ahora persisten:
+    - `expires_at`
+    - `approval_role_matrix`
+    - `correlation`
+  - la evidencia sensible queda saneada antes de persistirse.
+- `backend/apps/ia_dev/application/runtime/background_runtime_service.py`
+  - cola background idempotente para la misma tool activa.
+  - timeout efectivo acotado por policy runtime.
+  - approval expirado bloquea resume seguro.
+  - retries agotados generan `dead_letter`.
+  - se agrega enforcement reutilizable de expiracion.
+- `backend/apps/ia_dev/application/workflow/task_state_service.py`
+  - persiste:
+    - `correlation`
+    - `governance`
+    - `runtime_metrics`
+    - `dead_letter`
+  - el estado calcula metricas operativas resumidas por corrida.
+- `backend/apps/ia_dev/infrastructure/ai/openai_gateway_service.py`
+  - agrega correlation uniforme en metadata.
+  - endurece el function tool loop con:
+    - max rounds efectivos
+    - max tool calls por corrida
+    - bloqueo de repeated tool loops
+  - sanea argumentos/evidence/output de traces nativas antes de persistirlas.
+- `backend/apps/ia_dev/application/runtime/runtime_capability_adapter.py`
+  - expone `correlation` e `idempotency_key` en metadata runtime.
+- `backend/apps/ia_dev/application/runtime/tool_registry_service.py`
+  - agrega metadata de sensibilidad y matriz de approval por tool.
+- `backend/apps/ia_dev/services/runtime_governance_service.py`
+  - agrega:
+    - `build_runtime_operations_summary(...)`
+    - `build_task_trace_explorer(...)`
+  - consolida:
+    - estados runtime
+    - approval backlog
+    - background failures
+    - dead-letter
+    - correlation y trace explorer saneado
+- `backend/apps/ia_dev/views/chat_view.py`
+  - expone endpoints operativos nuevos:
+    - `GET /ia-dev/runtime/operations/summary/`
+    - `GET /ia-dev/runtime/tasks/explorer/`
+    - `GET /ia-dev/runtime/governance/health/`
+- documentacion operativa:
+  - `backend/OPERACION_RUNTIME_MULTIAGENTE.md`
+
+Hardening y governance confirmados:
+
+- loop agentic infinito mitigado por:
+  - `IA_DEV_MAX_TOOL_LOOP_ROUNDS`
+  - `IA_DEV_MAX_TOOL_CALLS_PER_RUN`
+  - `IA_DEV_MAX_REPEAT_TOOL_CALLS`
+- background endurecido con:
+  - `IA_DEV_MAX_BACKGROUND_RETRIES`
+  - `IA_DEV_MAX_BACKGROUND_DURATION_SECONDS`
+  - `dead_letter`
+  - `queue_run` idempotente
+- approvals endurecidos con:
+  - `IA_DEV_MAX_APPROVAL_WAIT_SECONDS`
+  - expiracion de approval
+  - role matrix persistida
+- evidencia sensible saneada en approvals, traces nativas y background evidence.
+- correlation y lineage operativo disponible por corrida.
+
+Metricas operativas disponibles:
+
+- `task_state.state.runtime_metrics`
+- `task_state.state.governance`
+- `task_state.state.correlation`
+- `task_state.state.dead_letter`
+- `task_state.state.background.retry`
+- `task_state.state.approvals[*].expires_at`
+- `observability` summary existente
+- `RuntimeGovernanceService.build_monitor_summary(...)`
+- `RuntimeGovernanceService.build_pilot_report(...)`
+- `RuntimeGovernanceService.build_runtime_operations_summary(...)`
+- `RuntimeGovernanceService.build_task_trace_explorer(...)`
+- `GET /ia-dev/runtime/operations/summary/`
+- `GET /ia-dev/runtime/tasks/explorer/`
+- `GET /ia-dev/runtime/governance/health/`
+
+Politicas y limites nuevos vigentes:
+
+- no permitir mas tool loops repetidos identicos que el maximo configurado.
+- no permitir resumes de approvals expirados.
+- no permitir crecimiento indefinido de retries de background.
+- no persistir evidencia sensible en claro en traces de runtime endurecido.
+
+Riesgos/limitaciones vigentes:
+
+- el circuit breaker distribuido e inmune a reinicios no queda implementado todavia; el endurecimiento actual cubre limites por corrida y loops repetidos en proceso.
+- no se agrego endpoint nuevo de approvals ni dashboard frontend dedicado; se expusieron endpoints backend operativos y trazas saneadas para soporte.
+- no se tocaron `semantic layer`, planner SQL, fallback base ni contratos de negocio.
+
+Checklist operativo de produccion:
+
+- verificar limites `IA_DEV_MAX_*`
+- verificar observabilidad habilitada
+- revisar `dead_letter` y `runtime_metrics`
+- revisar approvals expirados o pendientes
+- usar `runtime/operations/summary` para backlog operativo
+- usar `runtime/tasks/explorer` para correlation, lineage y traces saneadas
+- usar `runtime/governance/health` para health enterprise por dominio
+- usar `correlation_id`, `run_id` y `trace_id` para troubleshooting
+- no hacer bypass de approvals ni de planner
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_task_state_service apps.ia_dev.tests.test_approval_runtime_service apps.ia_dev.tests.test_background_runtime_service apps.ia_dev.tests.test_tool_registry_service apps.ia_dev.tests.test_openai_gateway_service`
+- `python manage.py test apps.ia_dev.tests.test_background_end_to_end_flows apps.ia_dev.tests.test_chat_runtime_metadata`
+- `python manage.py test apps.ia_dev.tests.test_phase6_runtime_governance.Phase6GovernanceServiceTests.test_runtime_operations_summary_aggregates_task_runtime_state apps.ia_dev.tests.test_phase6_runtime_governance.Phase6GovernanceServiceTests.test_task_trace_explorer_returns_sanitized_operational_view apps.ia_dev.tests.test_regression_endpoints.IADevRegressionEndpointsTests.test_runtime_operations_summary_endpoint_returns_payload apps.ia_dev.tests.test_regression_endpoints.IADevRegressionEndpointsTests.test_runtime_task_explorer_endpoint_requires_lookup_identifier apps.ia_dev.tests.test_regression_endpoints.IADevRegressionEndpointsTests.test_runtime_task_explorer_endpoint_returns_not_found_when_missing apps.ia_dev.tests.test_regression_endpoints.IADevRegressionEndpointsTests.test_runtime_governance_health_endpoint_returns_monitor_and_pilot_health`
+
+Resultado:
+
+- `55 tests`: OK
+- `6 tests` focalizados de operacion/governance: OK
+
+Estado vigente para futuros chats:
+
+- Fase 1 -> Task Envelope ✅
+- Fase 2 -> Tool Registry ✅
+- Fase 3 -> Unified OpenAI Gateway ✅
+- Fase 4 -> Responses API tools ✅
+- Fase 5 -> Agents SDK Orchestration ✅
+- Fase 6 -> Handoffs + approvals ✅
+- Fase 7 -> Background runs ✅
+- etapa nueva activa:
+  - endurecimiento operativo del runtime
+  - governance reforzado
+  - observabilidad y trazabilidad ampliadas
+  - limites enterprise basicos ya persistidos
+  - explorer operativo de tareas y trazas saneadas disponible por API
+
+## Sesion 2026-05-16: Fase 7 Background Runs + validacion end-to-end
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural.
+- `BusinessQuerySemanticPlan` no cambia.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `fallback_policy`, semantic layer, SQL authority, tool registry base, gateway base, agents runtime base y approvals base no se reemplazan.
+- `ChatApplicationService` sigue siendo el orquestador principal.
+
+Que se modifico:
+
+- nuevos contratos runtime:
+  - `backend/apps/ia_dev/application/contracts/background_run_contracts.py`
+  - soporta:
+    - `background_run_id`
+    - `job_id`
+    - `queue_status`
+    - `run_status`
+    - `polling`
+    - `resume_token`
+    - `checkpoint`
+    - `partial_evidence`
+    - `final_evidence`
+    - `cancellation`
+    - `failure_reason`
+    - `retry`
+    - `timeout`
+- nuevos servicios:
+  - `backend/apps/ia_dev/application/runtime/background_runtime_service.py`
+  - `backend/apps/ia_dev/application/runtime/checkpoint_service.py`
+- `backend/apps/ia_dev/application/workflow/task_state_service.py`
+  - nuevos estados soportados:
+    - `queued`
+    - `running`
+    - `paused`
+    - `resumed`
+    - `cancelled`
+    - `expired`
+  - persiste:
+    - `background`
+    - `background_trace`
+    - `checkpoints`
+  - agrega helpers:
+    - `update_state(...)`
+    - `find_by_resume_token(...)`
+    - `find_by_background_run_id(...)`
+- `backend/apps/ia_dev/application/runtime/runtime_capability_adapter.py`
+  - si una tool entra por policy de background:
+    - no rompe el flujo sync existente
+    - puede devolver `background_pending`
+    - deja metadata para polling
+  - si una tool requiere approval:
+    - deja `awaiting_approval`
+    - siembra `resume_token`
+    - sincroniza background state con approval state
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - ahora expone:
+    - `task.current_run.background`
+    - `data_sources.runtime.background`
+    - `data_sources.runtime.background_trace`
+    - `data_sources.runtime.checkpoints`
+  - agrega helpers:
+    - `poll_background_run(...)`
+    - `resume_background_run(...)`
+    - `cancel_background_run(...)`
+  - mantiene compatibilidad con:
+    - `reply` top-level
+    - `task.current_run.reply`
+    - dashboard y payload actual
+- `backend/apps/ia_dev/application/contracts/chat_contracts.py`
+  - `task.current_run` ahora soporta `background` sin romper el contrato actual.
+- `backend/apps/ia_dev/application/runtime/tool_registry_service.py`
+  - si una capability declara `policy_tags` como `supports_background` o `long_running`, la tool queda marcada con `supports_background=True`.
+
+Estados runtime/background vigentes:
+
+- `queued`
+- `running`
+- `awaiting_approval`
+- `paused`
+- `resumed`
+- `completed`
+- `failed`
+- `cancelled`
+- `expired`
+
+Eventos de observabilidad ya soportados por esta fase:
+
+- `background_run_queued`
+- `background_run_started`
+- `background_run_checkpoint`
+- `background_run_awaiting_approval`
+- `background_run_resumed`
+- `background_run_completed`
+- `background_run_failed`
+- `background_run_cancelled`
+
+Persistencia/tracing oficial desde esta fase:
+
+- `task.current_run.background`
+- `task.current_run.status`
+- `task.current_run.evidence`
+- `task_state.state.background`
+- `task_state.state.background_trace`
+- `task_state.state.checkpoints`
+- `data_sources.runtime.background`
+- `data_sources.runtime.background_trace`
+- `data_sources.runtime.checkpoints`
+- las trazas de:
+  - `agent_trace`
+  - `tool_execution_trace`
+  - `approval_trace`
+  - `handoff_trace`
+  ya no se pierden al reanudar o cancelar.
+
+Poll / resume / cancel oficial de esta fase:
+
+- polling por:
+  - `run_id`
+  - `background_run_id`
+  - `resume_token`
+- resume gobernado por:
+  - approval previa
+  - `resume_token`
+  - evidencia antes y despues de approval
+- cancelacion:
+  - deja `cancelled`
+  - conserva evidencia parcial y trazas previas
+
+Contrato vigente para `GET /ia-dev/chat/task-status/` en `inventory_provider_serial_validation`:
+
+- si `run_status` esta en `queued`, `running` o `resumed`, la respuesta debe ser liviana
+- en ese estado no debe reenviar `response_snapshot` pesado, tablas completas ni `extra_tables`
+- el payload operativo minimo queda en `task.current_run.evidence.background_progress` y `data.meta.background_job`
+- campos minimos esperados:
+  - `background_run_id`
+  - `status`
+  - `rows_processed`
+  - `total_estimated`
+  - `percentage`
+  - `phase`
+  - `current_chunk`
+  - `total_chunks`
+  - `found_so_far`
+  - `not_found_so_far`
+  - `movil_so_far`
+  - `enriched_responsible_so_far`
+  - `attachment_name`
+  - `artifact_id`
+  - `updated_at`
+- cuando la corrida pasa a `completed`, `failed`, `partial`, `cancelled` o `expired`, el endpoint vuelve a exponer el snapshot final o parcial completo
+
+Persistencia operativa vigente para archivos grandes:
+
+- el runtime persiste `partial_evidence` por checkpoint barato
+- los contadores de progreso se mantienen incrementales y persistidos:
+  - procesados
+  - encontrados
+  - no encontrados
+  - moviles
+  - responsables enriquecidos
+- el resultado parcial real puede publicar `artifact_id` antes del cierre final
+- recargar frontend no cancela la corrida ni pierde el `background_run_id`
+
+Que quedo validado:
+
+- Caso A: consulta normal sync mantiene `task envelope`, `tool registry`, gateway y respuesta compatible.
+- Caso B: native tool call conserva `tool_execution_trace`.
+- Caso C: multiagent handoff conserva `agent_trace` y `handoff_trace`.
+- Caso D: approval required deja `awaiting_approval`, `approval_request` y `resume_token`.
+- Caso E: resume after approval conserva trazas previas y posteriores y puede cerrar `completed`.
+- Caso F: background long run deja `queued`, polling, checkpoints y completion controlada.
+- Caso G: cancel/failure no pierden evidencia ni trazas previas.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_background_runtime_service apps.ia_dev.tests.test_background_end_to_end_flows apps.ia_dev.tests.test_task_state_service apps.ia_dev.tests.test_runtime_capability_adapter apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_tool_registry_service apps.ia_dev.tests.test_openai_gateway_service`
+- `python manage.py test apps.ia_dev.tests.test_approval_runtime_service apps.ia_dev.tests.test_agents_runtime_service`
+
+Resultado:
+
+- `56 tests`: OK
+
+Limitaciones actuales:
+
+- esta fase deja contratos, persistencia, polling, checkpoints, cancelacion y resume gobernado, pero todavia no publica endpoint productivo dedicado para polling/cancel/resume externo.
+- no se implemento un worker productivo ni cola distribuida; la fase gobierna estado y duracion dentro del runtime actual.
+- no se habilitaron escrituras autonomas destructivas.
+- background no cambia autoridad:
+  - `QueryExecutionPlanner` sigue mandando en SQL seguro
+  - `ai_dictionary` sigue mandando en estructura
+  - approvals siguen gobernando acciones sensibles
+- el resume productivo hoy queda listo por contrato y servicio; la reanudacion automatica por infraestructura externa queda para una fase posterior.
+
+Estado vigente para futuros chats:
+
+- Fase 1 -> Task Envelope ✅
+- Fase 2 -> Tool Registry ✅
+- Fase 3 -> Unified OpenAI Gateway ✅
+- Fase 4 -> Responses API tools ✅
+- Fase 5 -> Agents SDK Orchestration ✅
+- Fase 6 -> Handoffs + approvals ✅
+- Fase 7 -> Background runs ✅
+
+## Sesion 2026-05-16: Fase 6 Handoffs + approvals
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural.
+- `BusinessQuerySemanticPlan` no cambia.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `fallback_policy`, frontend, semantic layer, task envelope, tool registry, gateway unificado y runtime deterministico no se reemplazan.
+- esta fase agrega gobierno de handoffs y approvals sobre el runtime actual; no habilita background runs productivos, escrituras autonomas ni bypass de validadores.
+
+Que se modifico:
+
+- nuevos contratos:
+  - `backend/apps/ia_dev/application/contracts/runtime_governance_contracts.py`
+  - contratos para:
+    - `approval_request_id`
+    - `approval_type`
+    - `requested_by_agent`
+    - `target_tool`
+    - `target_action`
+    - `risk_level`
+    - `reason`
+    - `required_role`
+    - `approval_status`
+    - `approved_by`
+    - `approved_at`
+    - `rejected_reason`
+    - `resume_token`
+    - `evidence_before_approval`
+    - `evidence_after_approval`
+- `backend/apps/ia_dev/application/contracts/tool_contracts.py`
+  - `approval_policy` ahora expone:
+    - `approval_type`
+    - `required_role`
+    - `risk_level`
+- nuevos servicios:
+  - `backend/apps/ia_dev/application/runtime/approval_runtime_service.py`
+  - `backend/apps/ia_dev/application/runtime/handoff_trace_service.py`
+- `backend/apps/ia_dev/application/runtime/tool_registry_service.py`
+  - las tools read-only y `query_execution_planner.sql_assisted` quedan auto-aprobadas.
+  - las capabilities con `policy_tag requires_approval` publican policy manual con:
+    - `approval_type: human_review`
+    - `required_role: governance`
+    - `risk_level: high`
+- `backend/apps/ia_dev/application/runtime/runtime_capability_adapter.py`
+  - bloquea ejecucion de tools sensibles sin approval.
+  - crea `approval_request` + `resume_token`.
+  - persiste en `run_context.metadata.approval_runtime`:
+    - `approvals`
+    - `approval_trace`
+    - `status`
+  - emite evento `runtime_approval_requested`.
+- `backend/apps/ia_dev/application/agents/agents_runtime_service.py`
+  - los handoffs ahora se registran como handoff gobernado con `handoff_id`, `target_tool`, evidencia y traza dedicada.
+  - expone:
+    - `handoffs`
+    - `handoff_trace`
+  - emite evento `agents_runtime_handoff_trace_recorded`.
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - si una tool requiere approval y aun no existe:
+    - no ejecuta la accion
+    - responde evidencia previa
+    - deja la tarea en `awaiting_approval`
+  - persiste y publica:
+    - `task.current_run.approvals`
+    - `task.current_run.handoffs`
+    - `task.current_run.status`
+    - `task_state.state.approvals`
+    - `task_state.state.approval_trace`
+    - `task_state.state.handoffs`
+    - `task_state.state.handoff_trace`
+    - `data_sources.runtime.approvals`
+    - `data_sources.runtime.approval_trace`
+    - `data_sources.runtime.handoff_trace`
+- `backend/apps/ia_dev/application/workflow/task_state_service.py`
+  - nuevos estados soportados:
+    - `planned`
+    - `executing`
+    - `awaiting_approval`
+    - `approved`
+    - `rejected`
+    - `blocked`
+    - `completed`
+    - `failed`
+  - mantiene compatibilidad con estados previos ya persistidos.
+- `backend/apps/ia_dev/application/contracts/chat_contracts.py`
+  - `task.current_run` ahora soporta `approvals` sin romper `reply` top-level ni dashboard actual.
+
+Politicas iniciales ya activas:
+
+1. read-only seguro:
+   - no requiere approval
+2. SQL seguro validado por `QueryExecutionPlanner`:
+   - no requiere approval
+3. tools con `requires_approval`:
+   - no ejecutan sin approval
+   - dejan `awaiting_approval`
+   - devuelven evidencia previa y `resume_token`
+4. tools destructivas:
+   - no se habilitaron todavia
+
+Persistencia/tracing vigente desde esta fase:
+
+- `task.current_run.approvals`
+- `task.current_run.handoffs`
+- `task.current_run.status`
+- `task_state.state.approval_trace`
+- `task_state.state.handoff_trace`
+- eventos:
+  - `runtime_approval_requested`
+  - `agents_runtime_handoff`
+  - `agents_runtime_handoff_trace_recorded`
+
+Que quedo validado:
+
+- Fase 6 agrega gobierno sobre el runtime actual y no reemplaza `QueryExecutionPlanner`, `ai_dictionary`, `Tool Registry`, `OpenAI Gateway` ni `Agents Runtime`.
+- los handoffs manager -> specialist ya dejan `handoff_id`, `target_tool`, evidencia y traza persistible.
+- las tools sensibles ya no pueden ejecutarse sin approval del runtime.
+- la pausa/reanudacion queda preparada via `resume_token`.
+- `reply` top-level, `task envelope`, dashboard y runtime deterministico siguen compatibles.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_approval_policy_service apps.ia_dev.tests.test_approval_runtime_service apps.ia_dev.tests.test_runtime_capability_adapter apps.ia_dev.tests.test_agents_runtime_service apps.ia_dev.tests.test_task_state_service apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_chat_runtime_metadata`
+- `python manage.py test apps.ia_dev.tests.test_tool_registry_service`
+
+Resultado:
+
+- `39 tests`: OK
+
+Limitaciones actuales:
+
+- esta fase deja contratos y runtime para pause/resume y human-in-the-loop, pero no publica todavia un endpoint productivo de aprobacion/reanudacion externa.
+- no se habilitaron escrituras autonomas, background runs productivos ni tools destructivas.
+- el approval actual se activa por policy declarativa de tool; no mueve autoridad de negocio al modelo.
+
+Estado vigente para futuros chats:
+
+- Fase 1 -> Task Envelope ✅
+- Fase 2 -> Tool Registry ✅
+- Fase 3 -> Unified OpenAI Gateway ✅
+- Fase 4 -> Responses API tools ✅
+- Fase 5 -> Agents SDK Orchestration ✅
+- Fase 6 -> Handoffs + approvals ✅
+- Fase 7 -> Background runs
+
+## Sesion 2026-05-16: Fase 5 Agents SDK Orchestration Layer
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural.
+- `BusinessQuerySemanticPlan` no cambia.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `fallback_policy`, task envelope, frontend, semantic layer, runtime SQL authority y tool registry vigente no se reemplazan.
+- `ChatApplicationService` sigue siendo el orquestador principal y esta fase solo lo envuelve con coordinacion multiagente.
+
+Que se modifico:
+
+- nueva capa `backend/apps/ia_dev/application/agents/`
+  - `agents_runtime_service.py`
+  - `agents_registry.py`
+  - `manager_agent.py`
+  - `specialists/`
+    - `inventory_agent.py`
+    - `empleados_agent.py`
+    - `ausentismo_agent.py`
+    - `semantic_resolution_agent.py`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - integra la capa de agents despues de `semantic_orchestrator`.
+  - persiste `agents`, `handoffs`, `agent_trace` y bootstrap en `task_state`.
+  - publica metadata de agentes en `task.current_run` y `data_sources.runtime`.
+- `backend/apps/ia_dev/application/contracts/chat_contracts.py`
+  - `task.current_run` ahora soporta:
+    - `agents`
+    - `handoffs`
+- `backend/apps/ia_dev/application/workflow/task_state_service.py`
+  - persiste:
+    - `agents`
+    - `handoffs`
+    - `agent_trace`
+    - `agents_runtime_bootstrap`
+  - agrega a `history`:
+    - `agent_count`
+    - `handoff_count`
+- `backend/apps/ia_dev/application/runtime/service_runtime_bootstrap.py`
+  - nuevo flag default:
+    - `IA_DEV_AGENTS_RUNTIME_ENABLED=1`
+
+Agentes creados:
+
+- `manager_agent`
+- `inventory_agent`
+- `empleados_agent`
+- `ausentismo_agent`
+- `semantic_resolution_agent`
+
+Routing implementado:
+
+- el manager agent usa la salida ya gobernada de:
+  - `intent_arbitration`
+  - `semantic_orchestrator`
+  - `candidate_domain`
+  - `candidate_intent`
+  - `candidate_capability`
+- delega especialistas como `agents-as-tools` via registry:
+  - `agent.delegate.inventory_agent`
+  - `agent.delegate.empleados_agent`
+  - `agent.delegate.ausentismo_agent`
+  - `agent.delegate.semantic_resolution_agent`
+- no hay hardcode por frases completas; la seleccion usa dominio/intencion/capability ya resueltos por el runtime.
+
+Tracing agregado:
+
+- persistencia en `task_state.state`:
+  - `agents`
+  - `handoffs`
+  - `agent_trace`
+  - `agents_runtime_bootstrap`
+- exposicion en respuesta:
+  - `task.current_run.agents`
+  - `task.current_run.handoffs`
+  - `data_sources.runtime.agents`
+  - `data_sources.runtime.handoffs`
+  - `data_sources.runtime.agent_trace`
+- eventos nuevos:
+  - `agents_runtime_manager_selected`
+  - `agents_runtime_handoff`
+  - `agents_runtime_specialist_completed`
+  - `agents_runtime_resolved`
+
+Metadata nueva:
+
+- `task.current_run.evidence.agent_count`
+- `task.current_run.evidence.handoff_count`
+- `task.current_run.final_state.agents_sdk`
+- `task_state.state.history[*].agent_count`
+- `task_state.state.history[*].handoff_count`
+
+Handoffs soportados:
+
+- handoff manager -> specialist auditado
+- origen y destino persistidos como:
+  - `handoff_origin`
+  - `handoff_target`
+- esta fase deja la estructura lista para approvals futuras, pero no activa aprobaciones humanas completas.
+
+Que quedo validado:
+
+- `Agents SDK` queda integrado como capa oficial de coordinacion sobre el runtime actual.
+- el bootstrap detecta si existe SDK nativo; si no, usa implementacion segura sobre `OpenAIGatewayService` + function tool loop.
+- el manager coordina y delega; los especialistas no reemplazan planners, handlers ni validadores.
+- `reply` top-level, `task envelope`, planner trace, tool trace, semantic trace y dashboard actual siguen compatibles.
+- la autoridad de SQL sigue fuera del modelo.
+
+Limitaciones actuales:
+
+- el entorno actual no trae instalado el paquete oficial del Agents SDK; la capa corre en modo compatible `gateway_function_loop`.
+- los especialistas actuales coordinan y recomiendan tools declarativas; no introducen escrituras autonomas, background runs productivos ni approvals humanas.
+- no se habilitaron tools destructivas ni bypass de validadores.
+- no se reemplazo `ChatApplicationService`.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_agents_runtime_service apps.ia_dev.tests.test_chat_response_contracts apps.ia_dev.tests.test_task_state_service apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_openai_gateway_service apps.ia_dev.tests.test_tool_registry_service apps.ia_dev.tests.test_semantic_orchestrator_service`
+
+Resultado:
+
+- `48 tests`: OK
+
+Estado vigente para futuros chats:
+
+- Fase 1 `Task Envelope` vigente.
+- Fase 2 `Tool Registry` vigente.
+- Fase 3 `Unified OpenAI Gateway` vigente.
+- Fase 4 `Responses API tools` vigente.
+- Fase 5 `Agents SDK` ya existe como capa de coordinacion multiagente sobre el runtime actual.
+- el manager agent no es autoridad de negocio ni de SQL.
+- `QueryExecutionPlanner`, `ai_dictionary`, validadores y runtime deterministico siguen mandando.
+- la siguiente fase debe profundizar approvals/handoffs/background sin rehacer esta base.
+
+## Hoja de ruta vigente final
+
+- Fase 1 -> Task Envelope ✅
+- Fase 2 -> Tool Registry ✅
+- Fase 3 -> Unified OpenAI Gateway ✅
+- Fase 4 -> Responses API tools ✅
+- Fase 5 -> Agents SDK ✅
+- Fase 6 -> Handoffs + approvals
+- Fase 7 -> Background runs
+
+## Sesion 2026-05-16: Diagnostico focalizado pattern-first vs metadata-first
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural.
+- `BusinessQuerySemanticPlan` sigue siendo la capa oficial previa al planner.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `Tool Registry`, `Agents Runtime`, approvals, background y `fallback_policy` no se reauditan en esta tarea.
+
+Hallazgos utiles para continuidad:
+
+- La autoridad de ejecucion sigue bien gobernada en:
+  - `semantic_business_resolver`
+  - `tool_registry_service`
+  - `query_execution_planner`
+- Persisten rutas transicionales `pattern-first` en:
+  - `semantic_inventory_resolver`
+  - `query_intent_resolver`
+  - `semantic_orchestrator_service`
+  - `chat_application_service`
+- Existen `fastpaths` y `pre-router` por patrones que hoy aceleran el runtime, pero todavia dependen de tokens, regex y frases de inventario.
+- `response_assembler` conserva heuristicas por texto de respuesta como:
+  - `empleados activos`
+  - `proximos a vencer`
+  - `rotacion`
+  Eso debe migrar gradualmente a metadata estructurada de resultado y no a texto renderizado.
+- `runtime_capability_adapter` aun resuelve capacidades base por dominio/intencion/template hardcodeados para empleados y ausentismo; es tolerable como puente, pero no es el objetivo final `metadata/capability-first`.
+- Los `query_patterns`, examples y `deterministic_patterns` siguen siendo aceleradores utiles de transicion, pero no deben convertirse en autoridad semantica ni saltarse validacion por metadata/capabilities.
+
+Prioridad de refactor confirmada:
+
+1. mover familias, sinonimia y reglas de inventario desde regex Python hacia `dd_sinonimos`, `dd_reglas` e `ia_dev_capacidades_columna`
+2. hacer que `query_pattern_fastpath` y `inventory_pre_router` solo propongan candidatos, nunca decisiones finales no revalidadas
+3. reemplazar heuristicas de `response_assembler` basadas en texto por señales estructuradas en `result_set`, `kpis`, `semantic_trace` o `execution metadata`
+4. reducir mapeos hardcodeados de capability en adapters cuando ya exista metadata suficiente en dictionary/catalog
+
+Regla de continuidad nueva:
+
+- Si aparece un nuevo fastpath, pattern o example:
+  - puede sugerir dominio, intent o capability
+  - no puede ser autoridad final
+  - debe revalidarse contra `ai_dictionary`, `dd_*`, capacidades, planner y policy antes de ejecutar o cerrar respuesta
+
+## Sesion 2026-05-16: P1 metadata/capability-first en inventario
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- No se toca `fallback_policy`, approvals, background, agents runtime ni contratos HTTP del frontend.
+- La regla de nomenclatura empresarial en espanol ya existe y sigue gobernada por `backend/REGLA_NOMENCLATURA_EMPRESA.md`.
+
+Que quedo implementado:
+
+- `inventario_logistica` ahora tiene un matcher semantico gobernado para familias P1 de inventario por portador:
+  - cuadrilla/movil/brigada
+  - tecnico/empleado/cedula
+  - kardex/movimientos/entradas y salidas
+  - material claro / material de claro
+  - ferretero / ferreteria
+  - actas SAP como limitacion declarada
+- El orden operativo queda:
+  1. pregunta
+  2. matcher gobernado
+  3. dominio/intencion/campos/filtros/capability candidata
+  4. `BusinessQuerySemanticPlan`
+  5. planner SQL seguro
+- Los regex y fastpaths heredados quedan solo como fallback sombreado cuando no haya coincidencia gobernada para esa familia.
+- `response_assembler` ya no infiere principalmente desde texto de la pregunta el alcance `material claro` vs `ferretero` ni el enfoque por cuadrilla; ahora prioriza `business_query_semantic_plan` y `semantic_context`.
+
+Reglas semanticas P1 persistidas:
+
+- `material claro` y `material de claro` => `tipo = material`
+- `ferretero` y `ferreteria` => `tipo = ferretero`
+- `cuadrilla`, `movil`, `brigada` => sinonimia gobernada de `movil`
+- `kardex`, `movimientos`, `entradas y salidas` => familia de `movement_history`
+- identificador numerico => `cedula`
+- identificador alfanumerico operativo => `movil`
+- inventario generico por `movil/cuadrilla` => doble bloque cuando aplique
+- serializados => conteo, no cantidad
+- saldo de inventario => incluir positivos, cero y negativos
+- `actas SAP` del empleado/tecnico => limitacion declarada, no dato inventado
+
+Pruebas focalizadas validadas:
+
+- `que tiene asignado la cuadrilla TIRAN224`
+- `muestrame lo que tiene el movil TIRAN224`
+- `movimientos del tecnico 5098747`
+- `entradas y salidas de 5098747`
+- `solo material de claro de TIRAN224`
+- `ferreteria asignada al tecnico 5098747`
+- `que tiene Juan Perez` => aclaracion requerida
+- `actas SAP del empleado 5098747` => limitacion declarada
+
+Contrato frontend revalidado:
+
+- `reply`
+- `task`
+- `data`
+- `evidence`
+- `status`
+
+No se rompio compatibilidad contractual en las pruebas del chat runtime.
+
+## Sesion 2026-05-16: Fase 4 Responses API Native Tools
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural.
+- `BusinessQuerySemanticPlan` no cambia.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `fallback_policy`, `task envelope`, frontend y semantic layer funcional no se reemplazan.
+- esta fase agrega native tools sobre el runtime actual; no introduce `Agents SDK`, handoffs ni background runs operativos.
+
+Que se modifico:
+
+- `backend/apps/ia_dev/application/contracts/tool_contracts.py`
+  - la traza de tool ahora soporta metadata nativa de `Responses API`:
+    - `tool_call_id`
+    - `tool_name`
+    - `arguments`
+    - `execution_status`
+    - `validation_status`
+    - `evidence_metadata`
+    - `model_response_id`
+    - `loop_iteration`
+- `backend/apps/ia_dev/application/runtime/tool_registry_service.py`
+  - el registry ahora convierte tools declarativas a schema nativo OpenAI `tools=[]`.
+  - agrega tools seguras iniciales para reasoning semantico:
+    - `semantic_orchestrator.dictionary_summary.v1`
+    - `semantic_orchestrator.domain_context_summary.v1`
+    - `semantic_orchestrator.memory_context.v1`
+    - `semantic_orchestrator.deterministic_baseline.v1`
+    - `semantic_orchestrator.route_debug_hints.v1`
+  - mantiene `query_execution_planner.sql_assisted` como tool declarativa interna del runtime.
+- `backend/apps/ia_dev/infrastructure/ai/openai_gateway_contracts.py`
+  - el gateway ahora expone `output_items`, `function_calls` y resultado tipado del tool loop.
+- `backend/apps/ia_dev/infrastructure/ai/openai_gateway_service.py`
+  - implementa loop nativo:
+    - `response`
+    - `function_call`
+    - ejecucion runtime
+    - `function_call_output`
+    - continuacion de reasoning
+  - extrae `response.output` y normaliza function calls sin mover logica de negocio al modelo.
+- `backend/apps/ia_dev/application/runtime/runtime_capability_adapter.py`
+  - agrega `execute_registered_tool(...)` para enrutar tools declarativas hacia handlers o planner delegado, manteniendo aprobaciones y autoridad runtime.
+- `backend/apps/ia_dev/application/semantic/semantic_orchestrator_service.py`
+  - usa native tools del gateway en la fase de reasoning semantico.
+  - el modelo solo puede pedir contexto gobernado ya preparado; no ejecuta SQL libre.
+  - persiste en `run_context.metadata`:
+    - `response_native_tool_trace`
+    - `response_native_tool_loop`
+- `backend/apps/ia_dev/application/orchestration/chat_application_service.py`
+  - fusiona traza nativa de Responses API con la traza runtime ya existente.
+  - persiste en `task_state` y publica en:
+    - `task.current_run.tool_execution`
+    - `task_state.tool_execution_trace`
+    - `data_sources.runtime.tool_execution`
+- tests actualizados:
+  - `backend/apps/ia_dev/tests/test_openai_gateway_service.py`
+  - `backend/apps/ia_dev/tests/test_tool_registry_service.py`
+  - `backend/apps/ia_dev/tests/test_semantic_orchestrator_service.py`
+  - `backend/apps/ia_dev/tests/test_chat_runtime_metadata.py`
+
+Tools expuestas en esta fase:
+
+- tools semanticas de contexto gobernado:
+  - `semantic_orchestrator.dictionary_summary.v1`
+  - `semantic_orchestrator.domain_context_summary.v1`
+  - `semantic_orchestrator.memory_context.v1`
+  - `semantic_orchestrator.deterministic_baseline.v1`
+  - `semantic_orchestrator.route_debug_hints.v1`
+- tools declarativas de runtime ya convertibles a schema nativo:
+  - handlers seguros auto-aprobados del registry
+  - `query_execution_planner.sql_assisted` como tool declarativa interna
+
+Runtime loop implementado:
+
+1. el gateway invoca `Responses API` con `tools` y `tool_choice`
+2. si el modelo devuelve `function_call`, el runtime ejecuta la tool declarativa permitida
+3. el runtime devuelve `function_call_output` estructurado
+4. el gateway reanuda reasoning hasta obtener respuesta final o mas tool calls
+5. la traza nativa se fusiona con la traza runtime y se persiste en `task_state`
+
+Metadata nueva persistida:
+
+- `task.current_run.tool_execution.native_tool_calls_count`
+- `task.current_run.tool_execution.response_tool_loop`
+- `task_state.state.tool_execution_trace[*].tool_call_id`
+- `task_state.state.tool_execution_trace[*].tool_name`
+- `task_state.state.tool_execution_trace[*].arguments`
+- `task_state.state.tool_execution_trace[*].execution_status`
+- `task_state.state.tool_execution_trace[*].validation_status`
+- `task_state.state.tool_execution_trace[*].evidence_metadata`
+- `task_state.state.tool_execution_trace[*].model_response_id`
+- `task_state.state.tool_execution_trace[*].loop_iteration`
+
+Observabilidad nueva:
+
+- evento `response_native_tool_executed`
+
+Que quedo validado:
+
+- el gateway soporta `tools=[]`, `tool_choice`, parseo de `function_call` y continuidad con `function_call_output`.
+- la autoridad de SQL sigue fuera del modelo.
+- ninguna tool nativa salta validadores existentes.
+- `reply` top-level y `task.current_run.reply` siguen compatibles.
+- la traza nativa convive con el runtime deterministico actual y no lo reemplaza.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_openai_gateway_service apps.ia_dev.tests.test_tool_registry_service apps.ia_dev.tests.test_semantic_orchestrator_service apps.ia_dev.tests.test_chat_runtime_metadata apps.ia_dev.tests.test_task_state_service`
+- `python manage.py test apps.ia_dev.tests.test_chat_response_contracts`
+
+Resultado:
+
+- `44 tests`: OK
+
+Limitaciones actuales:
+
+- el uso activo de native tools queda habilitado primero en `semantic_orchestrator_service` con tools seguras de contexto.
+- `query_execution_planner.sql_assisted` ya es convertible a schema nativo, pero no se entrego ejecucion autonoma libre al modelo.
+- no hay `Agents SDK`, handoffs, approvals humanas ni background runs en esta fase.
+- el modelo sigue sin poder:
+  - ejecutar SQL arbitrario
+  - modificar `ai_dictionary`
+  - escribir memoria gobernada
+  - relajar validadores
+
+Estado vigente para futuros chats:
+
+- Fase 1 `Task Envelope` vigente.
+- Fase 2 `Tool Registry` vigente.
+- Fase 3 `Unified OpenAI Gateway` vigente.
+- Fase 4 `Responses API Native Tools` ya existe sobre el runtime actual.
+- la traza oficial de tools ahora puede mezclar:
+  - tool calls nativas de Responses API
+  - tool execution runtime final
+- la siguiente fase debe construir `Agents SDK` sobre esta base, no reemplazarla.
+
+## Sesion 2026-05-16: Fase 3 Unified OpenAI Gateway
+
+Que se asumio sin revalidar:
+
+- `ai_dictionary` sigue siendo autoridad estructural y no se modifica.
+- `BusinessQuerySemanticPlan` sigue siendo la salida oficial de la capa semantica.
+- `QueryExecutionPlanner` sigue siendo autoridad unica de SQL seguro.
+- `fallback_policy`, task envelope y tool registry no se tocan funcionalmente.
+- no se introduce `Agents SDK`, native tools ni cambios de frontend en esta fase.
+
+Que se modifico:
+
+- `backend/apps/ia_dev/infrastructure/ai/openai_gateway_contracts.py`
+  - nuevo contrato tipado para request/response/error del gateway.
+- `backend/apps/ia_dev/infrastructure/ai/model_policy.py`
+  - nueva policy central para seleccion de modelo por route o modelo explicito.
+- `backend/apps/ia_dev/infrastructure/ai/openai_gateway_service.py`
+  - nuevo gateway unico para `Responses API`.
+  - centraliza:
+    - seleccion de modelo
+    - api key
+    - timeout
+    - retries
+    - metadata uniforme
+    - trace metadata
+    - logging comun
+    - normalizacion de errores
+    - passthrough preparado para `reasoning`, `text`, `store`, `background`, `previous_response_id`, `tools` y `tool_choice`
+- servicios migrados desde llamadas directas a `client.responses.create(...)`:
+  - `backend/apps/ia_dev/application/semantic/query_intent_resolver.py`
+  - `backend/apps/ia_dev/application/semantic/semantic_orchestrator_service.py`
+  - `backend/apps/ia_dev/application/semantic/semantic_normalization_service.py`
+  - `backend/apps/ia_dev/application/semantic/satisfaction_review_gate.py`
+  - `backend/apps/ia_dev/application/semantic/cause_diagnostics_service.py`
+  - `backend/apps/ia_dev/services/attendance_period_resolver_service.py`
+  - `backend/apps/ia_dev/services/intent_service.py`
+  - `backend/apps/ia_dev/services/intent_arbitration_service.py`
+  - `backend/apps/ia_dev/services/orchestrator_legacy_runtime.py`
+- `backend/apps/ia_dev/tests/test_openai_gateway_service.py`
+  - nueva cobertura focalizada del gateway.
+
+Que quedo validado:
+
+- no quedan llamadas directas a `client.responses.create(...)` fuera del gateway.
+- el comportamiento funcional de fallback/rules/heuristics se conserva en los servicios.
+- la metadata uniforme del gateway ya expone:
+  - `component`
+  - `model`
+  - `model_source`
+  - `response_id`
+  - `timeout_seconds`
+  - `retries`
+  - `trace_metadata`
+  - `request_metadata`
+  - `usage`
+- el gateway ya normaliza errores a codigos estables como:
+  - `missing_api_key`
+  - `timeout`
+  - `rate_limit`
+  - `authentication_error`
+  - `api_error`
+  - `openai_request_error`
+- no se movio logica de negocio al gateway.
+- no se altero SQL ni se introdujo control de tools nativas aun.
+- servicios pendientes de migrar al gateway: ninguno de los que hoy usaban `Responses API` directo.
+
+Que comandos/pruebas se ejecutaron:
+
+- `python manage.py test apps.ia_dev.tests.test_openai_gateway_service apps.ia_dev.tests.test_intent_service apps.ia_dev.tests.test_intent_arbitration_service apps.ia_dev.tests.test_cause_diagnostics_service apps.ia_dev.tests.test_satisfaction_review_gate apps.ia_dev.tests.test_semantic_orchestrator_service apps.ia_dev.tests.test_semantic_normalization_service apps.ia_dev.tests.test_query_intelligence_layer`
+- `python manage.py test apps.ia_dev.tests.test_openai_gateway_service apps.ia_dev.tests.test_intent_arbitration_service apps.ia_dev.tests.test_cause_diagnostics_service apps.ia_dev.tests.test_satisfaction_review_gate apps.ia_dev.tests.test_semantic_orchestrator_service apps.ia_dev.tests.test_semantic_normalization_service apps.ia_dev.tests.test_query_intelligence_layer apps.ia_dev.tests.test_chat_runtime_metadata`
+
+Resultado:
+
+- `129 tests`: OK
+- `test_intent_service` mantiene una expectativa heredada `employee_query` que no coincide con el runtime vigente `empleados_query`; no se forzo ese cambio porque afectaria el contrato semantico actual y no pertenece a esta fase.
+
+Estado vigente para futuros chats:
+
+- Fase 1 `Task Envelope` sigue vigente y estable.
+- Fase 2 `Tool Registry` sigue vigente y estable.
+- Fase 3 `Unified OpenAI Gateway` ya existe y es la unica superficie interna para `Responses API`.
+- los servicios siguen decidiendo negocio localmente; el gateway solo estandariza invocacion OpenAI.
+- el runtime ya queda listo para Fase 4 sin tener que volver a dispersar configuracion de modelo/timeout/retries/metadata.
+
+## Hoja de ruta vigente actualizada
+
+- Fase 1 -> Task Envelope ✅
+- Fase 2 -> Tool Registry ✅
+- Fase 3 -> Unified OpenAI Gateway ✅
+- Fase 4 -> Responses API tools
+- Fase 5 -> Agents SDK
+- Fase 6 -> Handoffs + approvals
+- Fase 7 -> Background runs
+
+
+## Sesion 2026-05-16: familia serializada catalogada + agrupacion operativa
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- `SemanticCapabilityRegistry` sigue siendo la unica autoridad de binding semantico.
+- `ToolRegistryService`, `fallback_policy`, `Agents Runtime`, approvals y background no se reabren en esta correccion.
+
+Hechos nuevos confirmados:
+
+- `DECO` existe en `logistica_cinco.base_codigo_seriales.familia`.
+- En la validacion puntual de catalogo tambien existen `ONT` y `ROUTER` como familias exactas.
+- No se encontro `DECO` con seriales asociados en `logistica_cinco.logistica_base_seriales` para la comprobacion puntual hecha en esta sesion.
+
+Correccion reusable implementada:
+
+- Cuando una consulta de inventario/saldo/existencia agrupada por `movil`, `cuadrilla`, `tecnico` o `bodega` contiene una familia gobernada del catalogo `base_codigo_seriales.familia`, la semantica debe resolver:
+  - `inventory_family = serializados`
+  - filtro gobernado `material_family = <familia_catalogada>`
+  - capability `inventory_serial_stock_by_family_grouped_dimension`
+  - planner seguro sobre `logistica_base_seriales + base_codigo_seriales + cinco_base_de_personal`
+- Para serializados agrupados:
+  - no usar `cantidad`
+  - usar `seriales_total`
+  - `en_movil = estado contiene MOVIL`
+  - `en_base = estado contiene BASE o BODEGA`
+  - `cobros = estado contiene COBRO`
+  - `saldo = en_movil + en_base - cobros`
+- Para serializados agrupados por dimension operativa, la salida evidence-first ya no debe quedarse en KPI global:
+  - usar perfil de respuesta de detalle operativo por dimension y codigo
+  - conservar en la tabla principal:
+    - `dimension|movil|cedula|bodega`
+    - `codigo`
+    - `descripcion`
+    - `familia`
+    - `seriales_total`
+    - `en_movil`
+    - `en_base`
+    - `cobros`
+    - `saldo`
+  - publicar KPIs globales reutilizables:
+    - total general
+    - dimensiones con saldo
+    - codigos coincidentes
+    - seriales totales
+  - publicar tabla suplementaria de subtotales por dimension cuando el dashboard necesite lectura operativa rapida
+- Si la familia existe en catalogo pero no hay seriales asociados al alcance, responder vacio con evidencia de catalogo; no inventar ausencia de familia.
+
+Regla de continuidad nueva:
+
+- No interpretar una familia catalogada de `base_codigo_seriales.familia` como descripcion de `base_codigos` solo porque aparezca en una consulta agrupada tipo:
+  - `saldo en moviles de X`
+  - `inventario de X por cuadrilla`
+  - `equipos X en moviles`
+- Primero validar si `X` corresponde a familia serializada gobernada; solo si no corresponde, mantener la ruta material por descripcion/codigo.
+
+## Sesion 2026-05-17: familia serializada con coincidencia parcial gobernada en catalogo
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- `SemanticCapabilityRegistry` sigue siendo la autoridad de binding semantico.
+- `ToolRegistryService`, `fallback_policy`, `Agents Runtime`, approvals, background y contratos `reply/task/data/evidence/status` no se modifican.
+
+Hechos nuevos confirmados:
+
+- En `logistica_cinco.base_codigo_seriales.familia` existen familias que contienen `DECO`, no solo `DECO` exacto.
+- Validacion puntual confirmada:
+  - familias encontradas: `DECO`, `DECO ALEXA`, `DECO ATV`, `DECO HD`, `DECO HD CAROLESS`, `DECO HD DTH`, `DECO NAGRA`, `DECO PVR`, `DECO SD`, `TARJETA DECO`
+  - codigos de catalogo: `51`
+  - codigos con seriales asociados: `34`
+  - seriales con `estado` que contiene `MOVIL`: `2262`
+  - seriales `MOVIL` con cedula: `2262`
+  - seriales `MOVIL` con cruce en `cinco_base_de_personal`: `2166`
+
+Correccion reusable implementada:
+
+- La familia serializada consultada por texto parcial ya no depende de igualdad exacta ni de `DECO` como excepcion.
+- Nueva regla gobernada reusable:
+  - `inventario.serial_family.busqueda_parcial_catalogo`
+  - aplica sobre `logistica_cinco.base_codigo_seriales.familia`
+  - `match_mode: contains`
+  - normalizacion: `upper/trim`
+- Para consultas tipo `saldo en moviles de <familia serializada>`:
+  - primero se valida la coincidencia parcial en catalogo
+  - luego se filtra `logistica_base_seriales.estado` por `LIKE '%MOVIL%'`
+  - la salida se agrupa por `cedula + codigo` y conserva `movil` y enrichment de personal
+  - la evidencia se responde como saldo por empleado/movil/codigo
+- La respuesta vacia de esta ruta ya no dice ausencia generica:
+  - si la familia fue validada en catalogo pero no devolvio filas en ejecucion, comunica que no hay seriales en `MOVIL`
+
+Pruebas focalizadas validadas:
+
+- `apps.ia_dev.tests.test_inventario_runtime_sql_alignment`
+- `apps.ia_dev.tests.test_inventario_semantic_resolver`
+- `apps.ia_dev.tests.test_semantic_capability_registry`
+- `apps.ia_dev.tests.test_inventory_response_assembler`
+- `apps.ia_dev.tests.test_chat_runtime_metadata`
+- `apps.ia_dev.tests.test_chat_response_contracts`
+
+Regla de continuidad nueva:
+
+- `familia serializada` puede resolverse por coincidencia parcial gobernada sobre `base_codigo_seriales.familia`; no debe degradarse a igualdad exacta cuando el catalogo contiene variantes como `DECO HD`, `CPE DECO`, `ROUTER WIFI`, `ONT GPON`, etc.
+
+## Sesion 2026-05-17: enrichment serializado con fallback por edit
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- El enrichment oficial de personal sigue usando `bd_c3nc4s1s.cinco_base_de_personal`.
+
+Hechos nuevos confirmados:
+
+- `logistica_cinco.logistica_base_seriales` tiene columna fisica `edit`.
+- Para la validacion puntual de `DECO` en estado `MOVIL`, existen `96` registros que no cruzan con personal por `cedula` pero si cruzan por `edit -> cinco_base_de_personal.cedula`.
+
+Correccion reusable implementada:
+
+- En rutas serializadas que enriquecen con personal:
+  - primero se cruza `logistica_base_seriales.cedula -> cinco_base_de_personal.cedula`
+  - si ese cruce no existe, se habilita fallback controlado `logistica_base_seriales.edit -> cinco_base_de_personal.cedula`
+- El fallback no usa `OR` directo en un solo join para evitar duplicar filas o inflar conteos.
+- La estrategia segura es:
+  - `emp` por `cedula`
+  - `emp_edit` por `edit`
+  - `COALESCE(emp.*, emp_edit.*, valor_serial)` para `cedula`, `movil`, `nombre`, `apellido`, `estado_empleado`
+
+Regla de continuidad nueva:
+
+- En serializados/equipos, `edit` puede actuar como llave de enrichment de personal solo como fallback de `cedula`, nunca como reemplazo ciego del portador principal ni como join ambiguo con riesgo de duplicacion.
+
+## Sesion 2026-05-17: frontend Agente IA con dashboard desacoplado por respuesta
+
+Que se asumio sin revalidar:
+
+- el contrato frontend vigente sigue siendo `reply`, `task`, `data`, `evidence`, `status`
+- `semantic_explanation` sigue siendo la superficie saneada oficial para UX enterprise
+- el panel derecho debe permanecer evidence-first y no degradarse a debug visual
+
+Correccion reusable implementada:
+
+- el panel derecho del modulo `Agente IA` ya no depende solo del ultimo snapshot global del chat
+- ahora existe asociacion visual persistente por chat:
+  - `message_id -> dashboard snapshot`
+- la seleccion visual del dashboard vive separada del runtime y se persiste como estado UI local
+- una nueva consulta ya no reemplaza automaticamente el dashboard visible:
+  - el panel puede mantener una respuesta historica seleccionada
+  - mientras tanto muestra continuidad del runtime vivo de la nueva corrida
+- las acciones del chat para `mostrar dashboard` y `copiar respuesta` ahora viven por bloque de respuesta y no solo como accion global del ultimo mensaje
+
+Regla de continuidad nueva:
+
+- en la UX enterprise del sistema multiagente, el chat conversacional y el panel operativo deben permanecer desacoplados
+- el panel derecho debe poder conservar evidencia historica seleccionada aunque llegue una corrida nueva
+- el estado runtime visible de la corrida nueva debe mostrarse como continuidad operativa, no como reemplazo silencioso del dashboard anterior
+
+## Sesion 2026-05-17: compositor del chat con adjuntos locales y limitacion honesta de transporte
+
+Que se asumio sin revalidar:
+
+- el contrato actual del chat frontend sigue enviando solo `message` y `session_id`
+- no existe soporte binario confirmado en el transporte actual hacia `/ia-dev/chat/`
+
+Correccion reusable implementada:
+
+- el compositor principal del `Agente IA` ahora acepta adjuntos locales por:
+  - selector de archivos
+  - arrastrar y soltar
+- la UI muestra chips de adjuntos en el compositor y en el mensaje del usuario ya enviado
+- cuando hay adjuntos, el frontend agrega una nota honesta al prompt saliente indicando que:
+  - los archivos fueron seleccionados en la interfaz
+  - el contenido binario no fue enviado en esta version
+
+Regla de continuidad nueva:
+
+- si el frontend expone adjuntos antes de que exista transporte binario real, debe comunicar esa limitacion de forma explicita
+- no se debe simular lectura real del archivo si el runtime no recibio el binario
+
+## Sesion 2026-05-18: validacion tecnica v1 de DashboardCompositionPlanner
+
+Que se asumio sin revalidar:
+
+- `QueryExecutionPlanner` sigue siendo la unica autoridad de SQL seguro.
+- `SemanticCapabilityRegistry` sigue siendo la autoridad de binding semantico.
+- `fallback_policy`, streaming backend, historial por `message_id`, tabla operativa y contrato `reply/task/data/evidence/status` no se redisenan en esta validacion.
+
+Hechos nuevos confirmados:
+
+- `dashboard_composition` ya viaja desde backend en `data.business_response.dashboard_composition`.
+- el frontend ya lo consume desde `normalizeChatPayload(...)` y lo materializa en el panel derecho historico por `message_id`.
+- la v1 evidence-first de composicion aplica solo para el patron semantico serializado:
+  - `inventory.serial.stock.dimension`
+  - perfiles soportados:
+    - `inventory.serial.stock.dimension.detail`
+    - `inventory.serial.stock.dimension.summary`
+- la composicion no depende de `DECO`; quedo validado tambien con familia distinta `HGU`.
+
+Hardening minimo aplicado:
+
+- `DashboardCompositionPlanner` ahora declara explicitamente en `evidence_contract`:
+  - `supported_pattern = inventory.serial.stock.dimension`
+  - `semantic_pattern = inventory.serial.stock.dimension`
+- el frontend ya ignora cualquier `dashboard_composition` sin `evidence_contract` valido:
+  - requiere `planner_id`
+  - requiere `validated = true`
+  - requiere patron semantico `inventory.serial.stock.dimension`
+
+Cobertura validada:
+
+- familia distinta a `DECO`
+- ausencia de `saldo`
+- ausencia de dimension
+- evidencia vacia
+- top N por agregacion correcta:
+  - por codigo
+  - por dimension
+
+Pruebas ejecutadas:
+
+- `python manage.py test apps.ia_dev.tests.test_inventory_response_assembler apps.ia_dev.tests.test_chat_runtime_metadata`
+- `npm run typecheck`
+- `npm run lint`
+
+Resultado:
+
+- `44 tests`: OK
+- frontend `typecheck`: OK
+- frontend `lint`: OK
+
+Regla de continuidad nueva:
+
+- el frontend no debe renderizar `dashboard_composition` si falta un `evidence_contract` valido.
+- para esta v1 no ampliar a otros dominios ni a otros patrones hasta estabilizar pruebas reales en ambiente con `inventory.serial.stock.dimension`.
+- `dashboard_composition` gobierna el dashboard gerencial cuando existe evidencia valida.
+- el primer pantallazo del dashboard gerencial debe priorizar:
+  - resumen ejecutivo
+  - KPIs principales
+  - rankings
+- las tablas quedan como `drill-down` operativo con exportacion.
+- la metadata tecnica queda colapsada por defecto.
+- el dashboard legacy queda como fallback cuando no exista `dashboard_composition` valido.
+
+Regla arquitectonica persistida:
+
+- el dashboard empresarial no debe generalizarse mediante heuristicas visuales sueltas, prompts por consulta ni renderizado libre decidido por GPT.
+- la expansion debe hacerse ampliando gradualmente `dashboard_composition patterns` gobernados por evidencia.
+- cada nuevo pattern debe definir como minimo:
+  - dominio
+  - intencion semantica soportada
+  - tipo de evidencia
+  - metrica principal
+  - dimensiones validas
+  - KPIs permitidos
+  - rankings utiles
+  - graficos recomendados
+  - tablas `drill-down`
+  - contrato de evidencia
+  - condiciones de validacion
+  - fallback legacy si no aplica
+- GPT/OpenAI puede interpretar intencion, priorizar informacion, narrar resultados y explicar decisiones.
+- GPT/OpenAI no debe gobernar datos, inventar KPIs, inventar columnas, generar SQL libre, decidir renderizado final sin validacion ni reemplazar el `DashboardCompositionPlanner`.
+- el backend semantico y el `DashboardCompositionPlanner` gobiernan la composicion.
+- el frontend renderiza la composicion validada.
+- la expansion debe ser incremental por patron, no por frase de usuario.
+
+## Sesion 2026-05-18: inventory_provider_serial_validation estable
+
+Que quedo estable:
+
+- `inventory_provider_serial_validation` ya separa semantica por filas vs unicos.
+- el lookup gobernado debe ejecutarse por descarte progresivo de seriales unicos:
+  - `base actual`
+  - `asociados actual` solo para remanentes
+  - `backup base` del mas reciente al mas antiguo solo para remanentes
+  - `backup asociados` del mas reciente al mas antiguo solo para remanentes
+- durante `queued/running/resumed` el polling debe exponer solo progreso parcial ligero:
+  - fase actual legible
+  - seriales unicos totales
+  - seriales procesados
+  - seriales pendientes
+  - encontrados acumulados por fuente
+  - MOVIL detectados
+  - responsables enriquecidos
+  - chunk actual / total chunks
+  - ETA solo si el calculo es suficientemente estable
+- la respuesta principal ya no entrega el universo completo al frontend:
+  - KPIs y dashboard primero
+  - preview inicial limitado
+  - export completo por artifact CSV
+- `dashboard_composition.evidence_contract` ya declara:
+  - `run_timestamp`
+  - `tables_consulted`
+  - `historical_years_consulted`
+  - `historical_tables_missing`
+  - advertencia de base operativa viva
+  - precedencia aplicada
+  - estrategia de payload/export
+
+Regla estable de responsable MOVIL:
+
+- solo se intenta enrichment de responsable si el `estado` contiene `MOVIL`
+- orden estable:
+  - `cedula` actual si parece cedula de persona y cruza con `cinco_base_de_personal`
+  - `edit` actual si `cedula` es tecnica/no persona o no cruza
+  - `historial` solo si la fila actual no resolvio y una coincidencia historica aporta match real
+- en `ASOCIADO MOVIL` o `MOVIL ASOCIADO`, `edit` actual tiene prioridad sobre una `cedula` tecnica actual
+- no se marca `responsable_enriched=true` sin match real en `bd_c3nc4s1s.cinco_base_de_personal`
+- si existe identificador pero no existe evidencia de personal, la narrativa estable debe decir:
+  - `Se encontro identificador asociado, pero no se pudo enriquecer responsable/persona con evidencia de personal.`
+
+KPIs estables publicados:
+
+- `total_filas_archivo`
+- `seriales_unicos`
+- `duplicados_archivo`
+- `encontrados_por_fila`
+- `encontrados_unicos`
+- `no_encontrados_por_fila`
+- `no_encontrados_unicos`
+- `coincidencias_base_actual`
+- `coincidencias_asociados_actual`
+- `coincidencias_historico`
+- `fuente_final_base_actual`
+- `fuente_final_asociados_actual`
+- `fuente_final_historico`
+- `moviles_detectados`
+- `moviles_con_responsable_enriquecido`
+- `moviles_sin_responsable_enriquecido`
+
+Payload/export estable:
+
+- preview principal limitado a `200` filas
+- `export_records` conserva el total
+- `export_truncated=true` cuando el preview no representa el universo completo
+- artifact completo generado en `backend/tmp_provider_serial_validation_exports/*.csv`
+- para archivos de proveedor grandes se mantiene recomendacion estable de `background runtime`

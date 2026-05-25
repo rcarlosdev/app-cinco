@@ -5,7 +5,8 @@ import json
 import os
 from typing import Any
 
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
 
 
 class CauseDiagnosticsService:
@@ -15,8 +16,8 @@ class CauseDiagnosticsService:
     - OpenAI con contrato JSON + validacion de evidencia
     """
 
-    def __init__(self):
-        self.model = resolve_model_name("cause_diagnostics")
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None):
+        self.gateway = gateway or OpenAIGatewayService()
 
     @staticmethod
     def _flag_enabled(name: str, default: str = "1") -> bool:
@@ -177,7 +178,7 @@ class CauseDiagnosticsService:
                         "trace_id": trace_id,
                         "generator": "openai",
                         "confidence": confidence,
-                        "model": self.model,
+                        "model": str(payload.get("gateway_meta", {}).get("model") or ""),
                         "prompt_hash": prompt_hash,
                     },
                 )
@@ -189,9 +190,10 @@ class CauseDiagnosticsService:
                     "confidence": confidence,
                     "validated": True,
                     "validation_reason": str(validation.get("reason") or "ok"),
-                    "model": self.model,
+                    "model": str(payload.get("gateway_meta", {}).get("model") or ""),
                     "prompt_hash": prompt_hash,
                     "validation_errors": [],
+                    "gateway_meta": dict(payload.get("gateway_meta") or {}),
                     "policy_decision": self._build_policy_decision(
                         selected_generator="openai",
                         allowed=True,
@@ -222,9 +224,10 @@ class CauseDiagnosticsService:
                 "confidence": 0.55,
                 "fallback_reason": f"openai_payload_invalid:{invalid_reason}",
                 "validated": False,
-                "model": self.model,
+                "model": str(payload.get("gateway_meta", {}).get("model") or ""),
                 "prompt_hash": prompt_hash,
                 "validation_errors": [invalid_reason],
+                "gateway_meta": dict(payload.get("gateway_meta") or {}),
                 "policy_decision": self._build_policy_decision(
                     selected_generator="heuristic",
                     allowed=False,
@@ -266,7 +269,12 @@ class CauseDiagnosticsService:
                 "confidence": 0.55,
                 "fallback_reason": f"openai_exception:{type(exc).__name__}",
                 "validated": False,
-                "model": self.model,
+                "model": str(
+                    self.gateway.model_policy.resolve(
+                        component="cause_diagnostics_service",
+                        route_key="cause_diagnostics",
+                    ).model
+                ),
                 "prompt_hash": prompt_hash,
                 "validation_errors": [f"openai_exception:{type(exc).__name__}"],
                 "policy_decision": self._build_policy_decision(
@@ -336,7 +344,7 @@ class CauseDiagnosticsService:
                 "policy_reason": str(policy_decision.get("reason") or ""),
                 "policy_selected_generator": str(policy_decision.get("selected_generator") or ""),
                 "policy_allowed": bool(policy_decision.get("allowed")),
-                "model": str(payload.get("model") or self.model),
+                "model": str(payload.get("model") or ""),
                 "prompt_hash": str(payload.get("prompt_hash") or ""),
                 "evidence_rows_count": len(list(payload.get("evidence_rows") or [])),
                 "top_group": str(payload.get("top_group") or ""),
@@ -367,7 +375,12 @@ class CauseDiagnosticsService:
             "openai_enabled": self._flag_enabled("IA_DEV_CAUSE_DIAGNOSTICS_OPENAI_ENABLED", "1"),
             "api_key_present": bool(self._get_openai_api_key()),
             "min_confidence": min_confidence,
-            "model": self.model,
+            "model": str(
+                self.gateway.model_policy.resolve(
+                    component="cause_diagnostics_service",
+                    route_key="cause_diagnostics",
+                ).model
+            ),
         }
 
     @staticmethod
@@ -443,12 +456,16 @@ class CauseDiagnosticsService:
         evidence_rows: list[dict[str, Any]],
         api_key: str,
     ) -> dict[str, Any]:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(
-            model=self.model,
-            input=[
+        del api_key
+        response = self.gateway.create(
+            OpenAIGatewayRequest(
+                component="cause_diagnostics_service",
+                model_route="cause_diagnostics",
+                timeout_seconds=45,
+                retries=1,
+                trace_metadata={"flow": "cause_diagnostics"},
+                metadata={"group_label": str(group_label or "")},
+                input=[
                 {
                     "role": "system",
                     "content": (
@@ -473,10 +490,13 @@ class CauseDiagnosticsService:
                     ),
                 },
                 {"role": "user", "content": message},
-            ],
+                ],
+            )
         )
-        raw = str(getattr(response, "output_text", "") or "").strip()
-        return self._safe_json(raw)
+        raw = response.output_text
+        payload = self._safe_json(raw)
+        payload["gateway_meta"] = dict(response.metadata or {})
+        return payload
 
     @staticmethod
     def _safe_json(raw_text: str) -> dict[str, Any]:

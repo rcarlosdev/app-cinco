@@ -13,16 +13,25 @@ from apps.ia_dev.application.context.run_context import RunContext
 from apps.ia_dev.application.contracts.chat_contracts import build_chat_response_snapshot
 from apps.ia_dev.application.orchestration.chat_application_service import ChatApplicationService
 from apps.ia_dev.application.orchestration.response_assembler import LegacyResponseAssembler
+from apps.ia_dev.application.workflow.task_state_service import TaskStateService
 from apps.ia_dev.application.runtime.service_runtime_bootstrap import apply_service_runtime_bootstrap
 from apps.ia_dev.application.policies.policy_guard import PolicyAction, PolicyDecision
+from apps.ia_dev.services.runtime_artifact_service import RuntimeArtifactService
 from apps.ia_dev.services.runtime_fallback_service import RuntimeFallbackService
+from apps.ia_dev.tests.test_task_state_service import _FakeWorkflowRepo
 from apps.ia_dev.views import chat_view as chat_view_module
 from apps.ia_dev.views.chat_view import (
     IADevAttendancePeriodResolveView,
     IADevChatView,
+    IADevChatTaskStatusView,
     IADevKnowledgeApproveView,
     IADevMemoryResetView,
     IADevObservabilitySummaryView,
+    IADevProviderSerialArtifactDownloadView,
+    IADevRuntimeGovernanceHealthView,
+    IADevRuntimeOperationsSummaryView,
+    IADevSemanticGapOperationsView,
+    IADevRuntimeTaskExplorerView,
 )
 
 
@@ -104,6 +113,113 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
         self.assertEqual(meta["runtime_owner"], "ChatApplicationService")
         self.assertTrue(bool(meta["legacy_adapter_removed"]))
         self.assertFalse(bool(meta["legacy_runtime_fallback_used"]))
+
+    def test_chat_task_status_view_returns_background_progress_and_snapshot(self):
+        service = ChatApplicationService()
+        fake_repo = _FakeWorkflowRepo()
+        task_state = TaskStateService(repo=fake_repo)
+        service.task_state_service = task_state
+        service.background_runtime_service.task_state_service = task_state
+        service.provider_serial_background_runtime.task_state_service = task_state
+        chat_view_module.chat_application_service = service
+
+        snapshot = build_chat_response_snapshot()
+        snapshot["reply"] = "Archivo en proceso"
+        run_context = RunContext.create(message="valida seriales", session_id="sess-task-status", reset_memory=False)
+        task_state.save(
+            run_id=run_context.run_id,
+            status="running",
+            original_question=run_context.message,
+            detected_domain="inventario_logistica",
+            plan={},
+            source_used={},
+            extra_state={
+                "background": {
+                    "tool_id": "inventory_provider_serial_validation",
+                    "background_run_id": "bg-task-status",
+                    "job_id": "job-task-status",
+                    "run_status": "running",
+                    "partial_evidence": {
+                        "rows_processed": 75,
+                        "total_estimated": 300,
+                        "percentage": 25,
+                        "phase": "validando_seriales",
+                    },
+                },
+                "response_snapshot": snapshot,
+            },
+        )
+
+        request = self.factory.get("/ia-dev/chat/task-status/", {"background_run_id": "bg-task-status"})
+        force_authenticate(request, user=self.user)
+        response = IADevChatTaskStatusView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("segundo plano", str(response.data["reply"]).lower())
+        progress = response.data["task"]["current_run"]["evidence"]["background_progress"]
+        self.assertEqual(int(progress["rows_processed"]), 75)
+        self.assertEqual(int(progress["total_estimated"]), 300)
+        self.assertEqual(str(progress["phase"]), "validando_seriales")
+        self.assertIn("response_time_ms", progress)
+        self.assertIn("snapshot_age_ms", progress)
+        self.assertEqual(int(progress["snapshot_age_ms"]), 0)
+        self.assertNotIn("final_evidence", response.data["task"]["current_run"]["evidence"])
+        self.assertNotIn("partial_evidence", response.data["task"]["current_run"]["background"])
+        self.assertEqual(list((response.data.get("trace") or [])), [])
+        self.assertEqual(list((dict(response.data.get("data") or {}).get("table") or {}).get("rows") or []), [])
+
+    def test_provider_serial_artifact_download_uses_controlled_endpoint(self):
+        artifact_service = RuntimeArtifactService()
+        export_dir = artifact_service.provider_serial_export_dir()
+        export_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = export_dir / "inventory_provider_serial_validation_test.csv"
+        artifact_path.write_text("serial_proveedor\nSN-1\n", encoding="utf-8")
+        artifact_id = artifact_service.issue_artifact_id(filename=artifact_path.name)
+
+        service = ChatApplicationService()
+        fake_repo = _FakeWorkflowRepo()
+        task_state = TaskStateService(repo=fake_repo)
+        service.task_state_service = task_state
+        service.background_runtime_service.task_state_service = task_state
+        service.provider_serial_background_runtime.task_state_service = task_state
+        chat_view_module.chat_application_service = service
+        chat_view_module.runtime_governance_service.task_state_service = task_state
+
+        snapshot = build_chat_response_snapshot()
+        snapshot["data"]["table"] = {
+            "columns": ["serial_proveedor"],
+            "rows": [{"serial_proveedor": "SN-1"}],
+            "rowcount": 1,
+            "export_artifact": {
+                "available": True,
+                "artifact_id": artifact_id,
+                "filename": artifact_path.name,
+                "record_count": 1,
+            },
+        }
+        task_state.save(
+            run_id="run-artifact-1",
+            status="completed",
+            original_question="descarga artifact",
+            detected_domain="inventario_logistica",
+            plan={},
+            source_used={},
+            extra_state={
+                "background": {"background_run_id": "bg-artifact-1", "run_status": "completed"},
+                "response_snapshot": snapshot,
+            },
+        )
+
+        request = self.factory.get(
+            "/ia-dev/runtime/artifacts/provider-serial-validation/",
+            {"artifact_id": artifact_id, "background_run_id": "bg-artifact-1"},
+        )
+        force_authenticate(request, user=self.user)
+        response = IADevProviderSerialArtifactDownloadView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(str(response["Content-Type"]), "text/csv")
+        self.assertIn("attachment;", str(response["Content-Disposition"]))
 
     def test_chat_endpoint_fallbacks_to_runtime_fallback_service_when_chat_application_service_fails(self):
         chat_service = MagicMock()
@@ -467,6 +583,124 @@ class IADevRegressionEndpointsTests(SimpleTestCase):
         response = IADevObservabilitySummaryView.as_view()(request)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("generator", str(response.data.get("detail") or "").lower())
+
+    def test_runtime_operations_summary_endpoint_returns_payload(self):
+        payload = {"sample_size": 2, "totals": {"tasks": 2}}
+        with patch.object(
+            chat_view_module.runtime_governance_service,
+            "build_runtime_operations_summary",
+            return_value=payload,
+        ) as mock_summary:
+            request = self.factory.get("/ia-dev/runtime/operations/summary/?limit=50&status=awaiting_approval")
+            force_authenticate(request, user=self.user)
+            response = IADevRuntimeOperationsSummaryView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data.get("operations"), payload)
+        mock_summary.assert_called_once_with(limit=50, status="awaiting_approval")
+
+    def test_semantic_gap_operations_endpoint_returns_operational_payload(self):
+        with patch.object(
+            chat_view_module.semantic_gap_review_service,
+            "listar_brechas_pendientes",
+            return_value=[{"id": 1, "estado_revision": "nueva"}],
+        ) as mock_pending:
+            with patch.object(
+                chat_view_module.semantic_gap_review_service,
+                "agrupar_por_categoria",
+                return_value=[{"categoria_brecha": "falta_sinonimo", "count": 1}],
+            ) as mock_grouped:
+                with patch.object(
+                    chat_view_module.semantic_gap_review_service,
+                    "ver_brechas_frecuentes",
+                    return_value=[{"categoria_brecha": "falta_sinonimo", "count": 1}],
+                ) as mock_frequent:
+                    request = self.factory.get("/ia-dev/runtime/semantic-gaps/?limit=20")
+                    force_authenticate(request, user=self.user)
+                    response = IADevSemanticGapOperationsView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = dict(response.data.get("gestion_brechas_semanticas") or {})
+        self.assertEqual(len(list(payload.get("brechas_pendientes") or [])), 1)
+        mock_pending.assert_called_once_with(limit=20)
+        mock_grouped.assert_called_once_with(limit=20)
+        mock_frequent.assert_called_once_with(limit=20)
+
+    def test_semantic_gap_operations_endpoint_aprueba_propuesta(self):
+        with patch.object(
+            chat_view_module.semantic_gap_review_service,
+            "aprobar_propuesta",
+            return_value={"propuesta_mejora": {"estado_aprobacion": "aprobada"}},
+        ) as mock_approve:
+            request = self.factory.post(
+                "/ia-dev/runtime/semantic-gaps/",
+                {"action": "aprobar_propuesta", "brecha_id": 7, "rol_aprobador": "governance"},
+                format="json",
+            )
+            force_authenticate(request, user=self.user)
+            response = IADevSemanticGapOperationsView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_approve.assert_called_once_with(
+            brecha_id=7,
+            aprobado_por="user:77",
+            rol_aprobador="governance",
+            evidencia_post_aprobacion={},
+        )
+
+    def test_runtime_task_explorer_endpoint_requires_lookup_identifier(self):
+        request = self.factory.get("/ia-dev/runtime/tasks/explorer/")
+        force_authenticate(request, user=self.user)
+        response = IADevRuntimeTaskExplorerView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_runtime_task_explorer_endpoint_returns_not_found_when_missing(self):
+        with patch.object(
+            chat_view_module.runtime_governance_service,
+            "build_task_trace_explorer",
+            return_value=None,
+        ) as mock_explorer:
+            request = self.factory.get("/ia-dev/runtime/tasks/explorer/?run_id=run-missing")
+            force_authenticate(request, user=self.user)
+            response = IADevRuntimeTaskExplorerView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        mock_explorer.assert_called_once_with(
+            run_id="run-missing",
+            resume_token=None,
+            background_run_id=None,
+        )
+
+    def test_runtime_governance_health_endpoint_returns_monitor_and_pilot_health(self):
+        monitor_payload = {"domain": "ausentismo", "volumen_consultas": 4}
+        health_payload = {"status": "healthy", "checks": {}}
+        with patch.object(
+            chat_view_module.runtime_governance_service,
+            "build_monitor_summary",
+            return_value=monitor_payload,
+        ) as mock_monitor:
+            with patch.object(
+                chat_view_module.runtime_governance_service,
+                "build_pilot_health",
+                return_value=health_payload,
+            ) as mock_health:
+                request = self.factory.get(
+                    "/ia-dev/runtime/governance/health/?domain=ausentismo&days=7&since_fix=1&created_after=2026-05-01"
+                )
+                force_authenticate(request, user=self.user)
+                response = IADevRuntimeGovernanceHealthView.as_view()(request)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        governance = dict(response.data.get("governance") or {})
+        self.assertEqual(governance.get("monitor_summary"), monitor_payload)
+        self.assertEqual(governance.get("pilot_health"), health_payload)
+        mock_monitor.assert_called_once_with(domain="ausentismo", days=7)
+        mock_health.assert_called_once_with(
+            domain="ausentismo",
+            days=7,
+            since_fix=True,
+            created_after="2026-05-01",
+        )
 
     def test_knowledge_approve_sync_flow_still_works(self):
         result = {"ok": True, "applied": True, "proposal": {"proposal_id": "KPRO-01"}}

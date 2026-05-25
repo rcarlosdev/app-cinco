@@ -34,6 +34,15 @@ agent_contract:
       optional_filters: [movil, codigo]
       tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro]
       validation_rules: ["dictionary_table_mapping_required"]
+    - id: inventory_stock_by_dimension
+      description: Stock balance of materials grouped by business dimension.
+      examples: ["saldo por movil del codigo 1025507", "inventario de conector rj 45 por cuadrilla"]
+      capability: inventory_stock_balance_by_material_dimension
+      strategy: sql_assisted
+      required_filters: []
+      optional_filters: [codigo, descripcion, tipo, bodega]
+      tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, bd_c3nc4s1s.cinco_base_de_personal]
+      validation_rules: ["dictionary_table_mapping_required"]
     - id: inventory_traceability
       description: Traceability by serial.
       examples: ["trazabilidad del serial ABC123"]
@@ -79,6 +88,15 @@ agent_contract:
       optional_filters: [tipo_acta]
       tables: []
       validation_rules: ["pending_integration_message_required"]
+    - id: inventory_provider_serial_validation
+      description: Validate provider serial files against current and historical inventory bases.
+      examples: ["valida este archivo de seriales del proveedor", "cruza seriales externos contra inventario propio"]
+      capability: inventory_provider_serial_validation
+      strategy: capability
+      required_filters: []
+      optional_filters: [archivo, serial]
+      tables: [logistica_base_seriales, logistica_seriales_asociados, bd_c3nc4s1s.cinco_base_de_personal]
+      validation_rules: ["attachment_required", "governed_table_existence_check_required"]
   capabilities:
     - id: inventory_stock_balance
       type: sql_assisted
@@ -106,6 +124,16 @@ agent_contract:
       planner_required: true
       handler_required: false
       allowed_tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_consumo, logistica_movimientos_cobro]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
+      policy_tags: [contains_operational_data]
+    - id: inventory_stock_balance_by_material_dimension
+      type: sql_assisted
+      owner: query_execution_planner.inventory
+      planner_required: true
+      handler_required: false
+      allowed_tables: [base_codigos, logistica_movimientos_entrega, logistica_movimientos_devolucion, logistica_movimientos_consumo, logistica_movimientos_cobro, bd_c3nc4s1s.cinco_base_de_personal]
       blocked_tables: []
       response_shape: table
       rollout_flag: IA_DEV_QUERY_SQL_ASSISTED_ENABLED
@@ -240,6 +268,16 @@ agent_contract:
       response_shape: summary
       rollout_flag: null
       policy_tags: [contains_operational_data]
+    - id: inventory_provider_serial_validation
+      type: handler
+      owner: inventory.provider_serial_validation
+      planner_required: false
+      handler_required: true
+      allowed_tables: [logistica_base_seriales, logistica_seriales_asociados, bd_c3nc4s1s.cinco_base_de_personal, information_schema.tables, information_schema.columns]
+      blocked_tables: []
+      response_shape: table
+      rollout_flag: null
+      policy_tags: [contains_operational_data, supports_background, long_running]
   routing_rules:
     deterministic_patterns: ["stock", "inventario", "bodega", "serial", "kardex", "consumo", "traslado"]
     semantic_assist_enabled: true

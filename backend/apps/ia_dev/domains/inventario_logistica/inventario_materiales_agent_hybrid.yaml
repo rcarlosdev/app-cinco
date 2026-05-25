@@ -1386,6 +1386,16 @@ tables:
         is_filterable: true
         missing_metadata_allowed: true
 
+      edit:
+        data_type: string
+        semantic_role: employee_enrichment_fallback
+        business_concepts: [custody, employee_enrichment]
+        synonyms: [edit, cedula edit, editor, cedula respaldo]
+        allowed_operations: [select, filter, join]
+        is_filterable: true
+        missing_metadata_allowed: true
+        caveat: Se usa como fallback de enrichment hacia cinco_base_de_personal cuando cedula no produce cruce.
+
       validado:
         data_type: boolean
         semantic_role: validation_status

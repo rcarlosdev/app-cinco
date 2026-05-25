@@ -230,6 +230,8 @@ class LegacyResponseAssembler:
         response["data"] = data
 
     def _inject_business_response_summary(self, *, response: dict[str, Any]) -> None:
+        if self._should_skip_generic_business_summary(response=response):
+            return
         data = dict(response.get("data") or {})
         existing_business_response = dict(data.get("business_response") or {})
         table = dict(data.get("table") or {})
@@ -365,6 +367,27 @@ class LegacyResponseAssembler:
             "siguiente_accion": siguiente_accion,
         }
         response["data"] = data
+
+    @staticmethod
+    def _should_skip_generic_business_summary(*, response: dict[str, Any]) -> bool:
+        task = dict(response.get("task") or {})
+        current_run = dict(task.get("current_run") or {})
+        background = dict(current_run.get("background") or {})
+        semantic_explanation = dict(current_run.get("semantic_explanation") or {})
+        capability = str(
+            semantic_explanation.get("selected_capability")
+            or semantic_explanation.get("candidate_capability")
+            or current_run.get("intent")
+            or dict(response.get("orchestrator") or {}).get("intent")
+            or ""
+        ).strip()
+        route_hint = str(semantic_explanation.get("planner_route_hint") or "").strip()
+        background_status = str(background.get("run_status") or current_run.get("status") or "").strip().lower()
+        return (
+            capability == "inventory_provider_serial_validation"
+            and route_hint == "inventory.serial.validation.provider_file"
+            and background_status in {"queued", "running", "resumed"}
+        )
 
     @staticmethod
     def _append_truncation_notice(*, text: str, result_set: dict[str, Any]) -> str:

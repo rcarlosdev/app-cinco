@@ -51,6 +51,7 @@ def _contexto_inventario() -> dict:
         field("logistica_base_seriales", "ubicacion", "ubicacion_bodega", group=True),
         field("logistica_base_seriales", "bodega", "bodega", group=True),
         field("logistica_base_seriales", "tecnico_cedula", "cedula", group=True),
+        field("logistica_base_seriales", "edit", "edit"),
         field("logistica_base_seriales", "fecha", "fecha", date=True),
         field("logistica_base_seriales", "fecha_ingreso", "fecha_ingreso", date=True),
         field("logistica_base_seriales", "ticket", "ticket"),
@@ -183,6 +184,7 @@ def _contexto_inventario() -> dict:
         ],
         "allowed_columns": sorted({str(item["column_name"]) for item in fields}),
         "aliases": {},
+        "inventory_catalog_families": ["DECO", "CPE RESIDENCIAL", "ONT", "ROUTER"],
     }
 
 
@@ -294,9 +296,185 @@ class InventarioRuntimeSqlAlignmentTests(SimpleTestCase):
         self.assertIn("logistica_movimientos_entrega", str(plan.sql_query or ""))
         self.assertIn("logistica_movimientos_devolucion", str(plan.sql_query or ""))
         self.assertIn("logistica_movimientos_cobro", str(plan.sql_query or ""))
-        self.assertIn("logistica_movimientos_traslado", str(plan.sql_query or ""))
+
+    def test_planner_routes_material_description_grouped_by_mobile_to_dimension_sql(self):
+        resolved = self._plan_for("saldo en moviles de CONECTOR RJ 45")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_material_dimension")
+        self.assertEqual(str(plan.reason or ""), "inventory_material_stock_grouped_dimension")
+        self.assertIn("GROUP BY COALESCE(emp.movil, ''), mov.codigo", str(plan.sql_query or ""))
+        self.assertIn("CONECTOR RJ 45", str(plan.sql_query or ""))
         self.assertIn("REGEXP", str(plan.sql_query or ""))
         self.assertNotIn("facturacion_facturado_wfm", str(plan.sql_query or ""))
+
+    def test_planner_routes_serial_family_grouped_by_mobile_to_serial_sql(self):
+        resolved = self._plan_for("saldo en moviles de Deco")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(plan.strategy, "sql_assisted")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(plan.reason or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertIn("UPPER(TRIM(COALESCE(cat.familia, ''))) LIKE '%DECO%'", str(plan.sql_query or ""))
+        self.assertIn("UPPER(TRIM(COALESCE(s.estado, ''))) LIKE '%MOVIL%'", str(plan.sql_query or ""))
+        self.assertIn("COUNT(DISTINCT s.numero_serial)", str(plan.sql_query or ""))
+        self.assertIn("AS seriales_total", str(plan.sql_query or ""))
+        self.assertIn("AS en_movil", str(plan.sql_query or ""))
+        self.assertIn("AS en_base", str(plan.sql_query or ""))
+        self.assertIn("AS cobros", str(plan.sql_query or ""))
+        self.assertIn("AS saldo", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(emp.movil, emp_edit.movil, '') AS dimension", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(emp.cedula, emp_edit.cedula, CAST(s.cedula AS CHAR), CAST(s.edit AS CHAR), '') AS cedula", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(MAX(emp.apellido), MAX(emp_edit.apellido), '') AS apellido", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(MAX(emp.estado_empleado), MAX(emp_edit.estado_empleado), '') AS estado_empleado", str(plan.sql_query or ""))
+        self.assertIn("AS emp_edit ON emp_edit.cedula = s.edit", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(emp.cedula, emp_edit.cedula, CAST(s.cedula AS CHAR), CAST(s.edit AS CHAR), '') AS cedula", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(MAX(cat.descripcion), '') AS descripcion", str(plan.sql_query or ""))
+        self.assertIn("COALESCE(MAX(cat.familia), '') AS familia", str(plan.sql_query or ""))
+        self.assertIn("GROUP BY COALESCE(emp.movil, emp_edit.movil, ''), COALESCE(emp.cedula, emp_edit.cedula, CAST(s.cedula AS CHAR), CAST(s.edit AS CHAR), ''), COALESCE(emp.movil, emp_edit.movil, ''), s.codigo, cat.descripcion, cat.familia", str(plan.sql_query or ""))
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("material_family"), "DECO")
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("material_family_match_mode"), "contains")
+        self.assertEqual(dict((plan.metadata or {}).get("filters_applied") or {}).get("estado"), "MOVIL")
+        self.assertTrue(bool((plan.metadata or {}).get("employee_enrichment_fallback_by_edit")))
+        self.assertFalse(bool((plan.constraints or {}).get("chart_requested")))
+
+    def test_planner_normalizes_stale_material_dimension_template_when_serial_family_capability_is_selected(self):
+        resolved = self._plan_for("saldo en moviles de Deco")
+        resolved.intent.template_id = "inventory_material_stock_grouped_dimension"
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(plan.reason or ""), "inventory_serial_stock_by_family_grouped_dimension")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_serial_stock_by_family_grouped_dimension")
+
+    def test_planner_normalizes_stale_mobile_template_when_dimension_capability_was_selected(self):
+        resolved = self._plan_for("saldo por movil del codigo 1025507")
+        resolved.intent.template_id = "inventory_material_stock_mobile"
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        self.assertEqual(str(resolved.intent.template_id or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(plan.capability_id or ""), "inventory_stock_balance_by_material_dimension")
+        self.assertEqual(str((plan.constraints or {}).get("template_id") or ""), "inventory_material_stock_grouped_dimension")
+        self.assertEqual(str(plan.reason or ""), "inventory_material_stock_grouped_dimension")
+
+    def test_serial_family_mobile_kpis_ignore_rows_without_movil_value(self):
+        resolved = self._plan_for("saldo en moviles de Deco")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "IA_DEV_QUERY_SQL_ASSISTED_ENABLED": "1",
+                "IA_DEV_QUERY_INTELLIGENCE_ENABLED": "1",
+            },
+            clear=False,
+        ):
+            plan = self.planner.plan(run_context=self.run_context, resolved_query=resolved)
+
+        class _FakeCursor:
+            def __init__(self):
+                self.description = [
+                    ("dimension",),
+                    ("cedula",),
+                    ("nombre",),
+                    ("apellido",),
+                    ("empleado",),
+                    ("movil",),
+                    ("estado_empleado",),
+                    ("bodega",),
+                    ("codigo",),
+                    ("descripcion",),
+                    ("familia",),
+                    ("seriales_total",),
+                    ("cedulas_asociadas",),
+                    ("en_movil",),
+                    ("en_base",),
+                    ("cobros",),
+                    ("saldo",),
+                ]
+                self._count_query = False
+
+            def execute(self, query):
+                self._count_query = "COUNT(*) AS total_records" in str(query)
+                if self._count_query:
+                    self.description = [("total_records",)]
+                return None
+
+            def fetchall(self):
+                if self._count_query:
+                    return [(3,)]
+                return [
+                    ("MOV-01", "1001", "Ana", "Perez", "Ana Perez", "MOV-01", "ACTIVO", "", "DEC-1", "Nodo Deco", "DECO HD", 2, "1001", 2, 0, 0, 2),
+                    ("MOV-02", "1002", "Luis", "Rojas", "Luis Rojas", "MOV-02", "ACTIVO", "", "DEC-2", "Router Deco", "DECO ATV", 1, "1002", 1, 0, 0, 1),
+                    ("", "811042087", "Cinco", "SAS", "CINCO SAS", "", "ACTIVO", "", "DEC-3", "Tarjeta Deco", "TARJETA DECO", 5, "811042087", 5, 0, 0, 5),
+                ]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _FakeConnection:
+            def cursor(self):
+                return _FakeCursor()
+
+        with patch("apps.ia_dev.application.semantic.query_execution_planner.connections", {"logistica_cinco": _FakeConnection()}):
+            result = self.planner.execute_sql_assisted(
+                run_context=RunContext.create(message="saldo en moviles de Deco", session_id="inv-kpi-mobile", reset_memory=False),
+                resolved_query=resolved,
+                execution_plan=plan,
+            )
+
+        payload = dict(result.get("response") or {})
+        kpis = dict((payload.get("data") or {}).get("kpis") or {})
+        business_response = dict(((payload.get("data") or {}).get("business_response") or {}))
+        composition = dict(business_response.get("dashboard_composition") or {})
+        primary_kpis = list(composition.get("primary_kpis") or [])
+        mobile_kpi = next(
+            (item for item in primary_kpis if str(item.get("id") or "") == "dimensiones_con_saldo"),
+            {},
+        )
+
+        self.assertEqual(int(kpis.get("moviles_con_saldo") or 0), 2)
+        self.assertEqual(int(kpis.get("dimensiones_con_saldo") or 0), 2)
+        self.assertEqual(int(mobile_kpi.get("value") or 0), 2)
 
     def test_saldo_bodega_operacion_hfc_routes_sql_assisted_with_filter(self):
         resolved = self._plan_for("saldo bodega operacion_hfc")

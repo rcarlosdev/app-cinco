@@ -1,3 +1,7 @@
+from datetime import datetime, timezone
+from time import perf_counter
+
+from django.http import FileResponse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,9 +13,12 @@ from apps.ia_dev.services.async_job_service import AsyncJobService
 from apps.ia_dev.services.dictionary_tool_service import DictionaryToolService
 from apps.ia_dev.services.knowledge_governance_service import KnowledgeGovernanceService
 from apps.ia_dev.services.observability_service import ObservabilityService
+from apps.ia_dev.services.runtime_artifact_service import RuntimeArtifactService
 from apps.ia_dev.services.runtime_fallback_service import RuntimeFallbackService
+from apps.ia_dev.services.runtime_governance_service import RuntimeGovernanceService
 from apps.ia_dev.services.session_memory_runtime_service import SessionMemoryRuntimeService
 from apps.ia_dev.services.ticket_service import TicketService
+from apps.ia_dev.application.runtime.semantic_gap_review_service import SemanticGapReviewService
 from apps.security.permissions.api_permissions import IsAuthenticatedUser
 
 
@@ -23,6 +30,9 @@ dictionary_tool_service = DictionaryToolService()
 knowledge_governance_service = KnowledgeGovernanceService()
 async_job_service = AsyncJobService()
 observability_service = ObservabilityService()
+runtime_governance_service = RuntimeGovernanceService()
+semantic_gap_review_service = SemanticGapReviewService()
+runtime_artifact_service = RuntimeArtifactService()
 
 
 def _get_chat_application_service() -> ChatApplicationService:
@@ -84,6 +94,11 @@ def _attach_http_runtime_metadata(
     legacy_runtime_fallback_reason: str | None = None,
 ) -> dict:
     payload = ensure_chat_response_contract(response)
+    task = dict(payload.get("task") or {})
+    current_run = dict(task.get("current_run") or {})
+    current_run["reply"] = str(payload.get("reply") or "")
+    task["current_run"] = current_run
+    payload["task"] = task
     data_sources = dict(payload.get("data_sources") or {})
     runtime = dict(data_sources.get("runtime") or {})
     runtime["entrypoint"] = "chat_view_direct"
@@ -144,6 +159,12 @@ class IADevChatView(APIView):
         message = str(request.data.get("message", "")).strip()
         session_id = request.data.get("session_id")
         reset_memory = bool(request.data.get("reset_memory", False))
+        attachments = request.data.get("attachments")
+        normalized_attachments = [
+            dict(item)
+            for item in list(attachments or [])
+            if isinstance(item, dict)
+        ]
 
         if not message:
             return Response(
@@ -164,6 +185,7 @@ class IADevChatView(APIView):
                 observability=observability_service,
                 actor_user_key=actor_user_key,
                 response_debug_mode=response_debug_mode,
+                attachments=normalized_attachments,
             )
             runtime_meta = dict(((result.get("data_sources") or {}).get("runtime") or {}))
             legacy_runtime_fallback_used = bool(
@@ -524,3 +546,299 @@ class IADevObservabilitySummaryView(APIView):
             fallback_reason=fallback_reason,
         )
         return Response({"status": "ok", "observability": payload}, status=status.HTTP_200_OK)
+
+
+class IADevRuntimeOperationsSummaryView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 100))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "limit debe ser numerico"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        status_filter = str(request.query_params.get("status", "")).strip().lower() or None
+        payload = runtime_governance_service.build_runtime_operations_summary(
+            limit=limit,
+            status=status_filter,
+        )
+        return Response({"status": "ok", "operations": payload}, status=status.HTTP_200_OK)
+
+
+class IADevRuntimeTaskExplorerView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        run_id = str(request.query_params.get("run_id", "")).strip() or None
+        resume_token = str(request.query_params.get("resume_token", "")).strip() or None
+        background_run_id = str(request.query_params.get("background_run_id", "")).strip() or None
+        if not any((run_id, resume_token, background_run_id)):
+            return Response(
+                {"detail": "run_id, resume_token o background_run_id es requerido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payload = runtime_governance_service.build_task_trace_explorer(
+            run_id=run_id,
+            resume_token=resume_token,
+            background_run_id=background_run_id,
+        )
+        if not payload:
+            return Response(
+                {"detail": "task not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({"status": "ok", "task_explorer": payload}, status=status.HTTP_200_OK)
+
+
+class IADevChatTaskStatusView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        started_at = perf_counter()
+        run_id = str(request.query_params.get("run_id", "")).strip() or None
+        resume_token = str(request.query_params.get("resume_token", "")).strip() or None
+        background_run_id = str(request.query_params.get("background_run_id", "")).strip() or None
+        if not any((run_id, resume_token, background_run_id)):
+            return Response(
+                {"detail": "run_id, resume_token o background_run_id es requerido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            payload = _get_chat_application_service().build_task_status_response(
+                run_id=run_id,
+                resume_token=resume_token,
+                background_run_id=background_run_id,
+            )
+        except ValueError as exc:
+            if str(exc) == "background_workflow_not_found":
+                return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+            raise
+        if not payload:
+            return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+        payload = ensure_chat_response_contract(payload)
+        response_time_ms = round((perf_counter() - started_at) * 1000.0, 2)
+        current_run = dict(((payload.get("task") or {}).get("current_run") or {}))
+        evidence = dict(current_run.get("evidence") or {})
+        progress = dict(evidence.get("background_progress") or {})
+        last_progress_update_at = str(progress.get("last_progress_update_at") or "").strip()
+        snapshot_age_ms = 0
+        if last_progress_update_at:
+            try:
+                last_update_dt = datetime.fromisoformat(last_progress_update_at.replace("Z", "+00:00"))
+                if last_update_dt.tzinfo is None:
+                    last_update_dt = last_update_dt.replace(tzinfo=timezone.utc)
+                snapshot_age_ms = max(
+                    0,
+                    int((datetime.now(timezone.utc) - last_update_dt.astimezone(timezone.utc)).total_seconds() * 1000),
+                )
+            except ValueError:
+                snapshot_age_ms = 0
+        progress["response_time_ms"] = response_time_ms
+        progress["snapshot_age_ms"] = snapshot_age_ms
+        evidence["background_progress"] = progress
+        current_run["evidence"] = evidence
+        payload.setdefault("task", {})["current_run"] = current_run
+        data = dict(payload.get("data") or {})
+        meta = dict(data.get("meta") or {})
+        background_job = dict(meta.get("background_job") or {})
+        if background_job:
+            background_job["response_time_ms"] = response_time_ms
+            background_job["snapshot_age_ms"] = snapshot_age_ms
+            meta["background_job"] = background_job
+        data["meta"] = meta
+        payload["data"] = data
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class IADevProviderSerialArtifactDownloadView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        artifact_id = str(request.query_params.get("artifact_id", "")).strip()
+        background_run_id = str(request.query_params.get("background_run_id", "")).strip()
+        if not artifact_id:
+            return Response({"detail": "artifact_id es requerido"}, status=status.HTTP_400_BAD_REQUEST)
+        if background_run_id:
+            explorer = runtime_governance_service.build_task_trace_explorer(
+                background_run_id=background_run_id,
+                run_id=None,
+                resume_token=None,
+            )
+            if not explorer:
+                return Response({"detail": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+            response_snapshot = dict(
+                ((runtime_governance_service._find_task_workflow(
+                    run_id=None,
+                    resume_token=None,
+                    background_run_id=background_run_id,
+                ) or {}).get("state") or {}).get("response_snapshot")
+                or {}
+            )
+            workflow_state = dict(
+                ((runtime_governance_service._find_task_workflow(
+                    run_id=None,
+                    resume_token=None,
+                    background_run_id=background_run_id,
+                ) or {}).get("state") or {})
+            )
+            table = dict((dict(response_snapshot.get("data") or {}).get("table") or {}))
+            export_artifact = dict(table.get("export_artifact") or {})
+            background = dict(workflow_state.get("background") or {})
+            partial_evidence = dict(background.get("partial_evidence") or {})
+            final_evidence = dict(background.get("final_evidence") or {})
+            allowed_artifact_ids = {
+                str(export_artifact.get("artifact_id") or "").strip(),
+                str(partial_evidence.get("artifact_id") or "").strip(),
+                str(final_evidence.get("artifact_id") or "").strip(),
+            }
+            allowed_artifact_ids.discard("")
+            if artifact_id not in allowed_artifact_ids:
+                return Response({"detail": "artifact not allowed for task"}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            artifact_path = runtime_artifact_service.resolve_artifact_path(artifact_id=artifact_id)
+        except ValueError as exc:
+            detail = str(exc)
+            if detail == "artifact_not_found":
+                return Response({"detail": detail}, status=status.HTTP_404_NOT_FOUND)
+            if detail in {"artifact_invalid", "artifact_expired"}:
+                return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return FileResponse(
+            artifact_path.open("rb"),
+            as_attachment=True,
+            filename=artifact_path.name,
+            content_type="text/csv",
+        )
+
+
+class IADevRuntimeGovernanceHealthView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        domain = str(request.query_params.get("domain", "ausentismo")).strip() or "ausentismo"
+        try:
+            days = int(request.query_params.get("days", 1))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "days debe ser numerico"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        since_fix = str(request.query_params.get("since_fix", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        created_after = str(request.query_params.get("created_after", "")).strip() or None
+        payload = {
+            "monitor_summary": runtime_governance_service.build_monitor_summary(
+                domain=domain,
+                days=days,
+            ),
+            "pilot_health": runtime_governance_service.build_pilot_health(
+                domain=domain,
+                days=days,
+                since_fix=since_fix,
+                created_after=created_after,
+            ),
+        }
+        return Response({"status": "ok", "governance": payload}, status=status.HTTP_200_OK)
+
+
+class IADevSemanticGapOperationsView(APIView):
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 100))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "limit debe ser numerico"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        include_summary = str(request.query_params.get("summary", "")).strip().lower() in {"1", "true", "yes", "on"}
+        payload = {
+            "brechas_pendientes": semantic_gap_review_service.listar_brechas_pendientes(limit=limit),
+            "brechas_por_categoria": semantic_gap_review_service.agrupar_por_categoria(limit=limit),
+            "brechas_frecuentes": semantic_gap_review_service.ver_brechas_frecuentes(limit=limit),
+        }
+        if include_summary:
+            payload["resumen"] = semantic_gap_review_service.build_operations_snapshot(limit=limit)
+        return Response({"status": "ok", "gestion_brechas_semanticas": payload}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        action = str(request.data.get("action", "")).strip().lower()
+        try:
+            brecha_id = int(request.data.get("brecha_id", 0))
+        except (TypeError, ValueError):
+            return Response({"detail": "brecha_id debe ser numerico"}, status=status.HTTP_400_BAD_REQUEST)
+        actor = _resolve_user_key(request) or str(request.data.get("actor", "")).strip() or "user:unknown"
+
+        try:
+            if action == "marcar_en_revision":
+                payload = semantic_gap_review_service.marcar_en_revision(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    asignado_a=str(request.data.get("asignado_a", "")).strip(),
+                    comentario=str(request.data.get("comentario", "")).strip(),
+                )
+            elif action == "marcar_descartada":
+                payload = semantic_gap_review_service.marcar_descartada(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    decision=str(request.data.get("decision", "")).strip() or "descartar_brecha",
+                    comentario=str(request.data.get("comentario", "")).strip(),
+                )
+            elif action == "marcar_resuelta":
+                payload = semantic_gap_review_service.marcar_resuelta(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    decision=str(request.data.get("decision", "")).strip() or "resolver_brecha",
+                    comentario=str(request.data.get("comentario", "")).strip(),
+                    prueba_validacion=str(request.data.get("prueba_validacion", "")).strip(),
+                )
+            elif action == "crear_propuesta":
+                payload = semantic_gap_review_service.crear_propuesta(
+                    brecha_id=brecha_id,
+                    revisado_por=actor,
+                    tipo_propuesta=str(request.data.get("tipo_propuesta", "")).strip(),
+                    descripcion=str(request.data.get("descripcion", "")).strip(),
+                    destino_sugerido=str(request.data.get("destino_sugerido", "")).strip(),
+                    valor_sugerido=request.data.get("valor_sugerido"),
+                    evidencia=dict(request.data.get("evidencia") or {}),
+                    riesgo=str(request.data.get("riesgo", "medio")).strip(),
+                )
+            elif action == "aprobar_propuesta":
+                payload = semantic_gap_review_service.aprobar_propuesta(
+                    brecha_id=brecha_id,
+                    aprobado_por=actor,
+                    rol_aprobador=str(request.data.get("rol_aprobador", "governance")).strip(),
+                    evidencia_post_aprobacion=dict(request.data.get("evidencia_post_aprobacion") or {}),
+                )
+            elif action == "aplicar_propuesta":
+                payload = semantic_gap_review_service.aplicar_propuesta_gobernada(
+                    brecha_id=brecha_id,
+                    aplicado_por=actor,
+                    aplicado_en=str(request.data.get("aplicado_en", "")).strip(),
+                    referencia_metadata_creada=str(request.data.get("referencia_metadata_creada", "")).strip(),
+                    referencia_capacidad_creada=str(request.data.get("referencia_capacidad_creada", "")).strip(),
+                    referencia_agente_creado=str(request.data.get("referencia_agente_creado", "")).strip(),
+                    prueba_validacion=str(request.data.get("prueba_validacion", "")).strip(),
+                    validado_por_eval=bool(request.data.get("validado_por_eval", False)),
+                )
+            elif action == "vincular_eval":
+                payload = semantic_gap_review_service.vincular_eval(
+                    brecha_id=brecha_id,
+                    eval_id=str(request.data.get("eval_id", "")).strip(),
+                    vinculado_por=actor,
+                    caso_real_reproducible=str(request.data.get("caso_real_reproducible", "")).strip(),
+                    eval_actualizado=bool(request.data.get("eval_actualizado", False)),
+                )
+            else:
+                return Response({"detail": "action no soportada"}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"status": "ok", "gestion_brechas_semanticas": payload}, status=status.HTTP_200_OK)

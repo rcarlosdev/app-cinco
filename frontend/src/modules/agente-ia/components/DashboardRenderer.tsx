@@ -12,10 +12,15 @@ import ChartRenderer from "@/modules/agente-ia/components/ChartRenderer";
 import DataTable from "@/modules/agente-ia/components/DataTable";
 import InsightCards from "@/modules/agente-ia/components/InsightCards";
 import KPIGrid from "@/modules/agente-ia/components/KPIGrid";
-import type { DashboardSnapshot, DashboardWidget } from "@/modules/agente-ia/types";
+import type {
+  AgenteIAViewMode,
+  DashboardSnapshot,
+  DashboardWidget,
+} from "@/modules/agente-ia/types";
 
 type RendererProps = {
   widget: DashboardWidget;
+  mode: AgenteIAViewMode;
 };
 
 const KPIWidget = ({ widget }: RendererProps) =>
@@ -24,11 +29,13 @@ const KPIWidget = ({ widget }: RendererProps) =>
 const ChartWidget = ({ widget }: RendererProps) =>
   widget.type === "chart" ? <ChartRenderer charts={widget.data.charts} /> : null;
 
-const TableWidget = ({ widget }: RendererProps) =>
-  widget.type === "table" ? <DataTable tabs={widget.data.tabs} /> : null;
+const TableWidget = ({ widget, mode }: RendererProps) =>
+  widget.type === "table" ? <DataTable mode={mode} tabs={widget.data.tabs} /> : null;
 
 const InsightWidget = ({ widget }: RendererProps) =>
   widget.type === "insights" ? <InsightCards items={widget.data.items} /> : null;
+
+const EmptyWidget = () => null;
 
 const widgetRegistry: Record<
   DashboardWidget["type"],
@@ -38,14 +45,17 @@ const widgetRegistry: Record<
   chart: ChartWidget,
   table: TableWidget,
   insights: InsightWidget,
+  semantic_explanation: EmptyWidget,
 };
 
 type DashboardRendererProps = {
+  mode?: AgenteIAViewMode;
   snapshot: DashboardSnapshot;
   onLoadDemo: () => void;
 };
 
 const DashboardRenderer = ({
+  mode = "user",
   snapshot,
   onLoadDemo,
 }: DashboardRendererProps) => {
@@ -73,7 +83,7 @@ const DashboardRenderer = ({
           <button
             type="button"
             onClick={onLoadDemo}
-            className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#111827] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#1f2937]"
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
           >
             <WandSparkles size={16} />
             Cargar demo analitica
@@ -94,6 +104,8 @@ const DashboardRenderer = ({
               ? AreaChart
               : widget.type === "table"
                 ? Table2
+                : widget.type === "semantic_explanation"
+                  ? WandSparkles
                 : BarChart3;
 
         return (
@@ -102,7 +114,7 @@ const DashboardRenderer = ({
               <Icon size={13} />
               {widget.title}
             </div>
-            <Renderer widget={widget} />
+            <Renderer widget={widget} mode={mode} />
           </section>
         );
       })}

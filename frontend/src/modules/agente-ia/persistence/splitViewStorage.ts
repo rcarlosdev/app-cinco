@@ -4,24 +4,24 @@ import type { SplitLayoutSizes } from "@/modules/agente-ia/components/SplitLayou
 
 export type SplitViewState = {
   sizes: SplitLayoutSizes;
-  activeTabletTab: "history" | "chat" | "dashboard";
   historyCollapsed: boolean;
   chatCollapsed: boolean;
   dashboardCollapsed: boolean;
+  selectedDashboardMessageByChat: Record<string, string>;
 };
 
-const STORAGE_KEY = "agente-ia.split-view.v2";
+const STORAGE_KEY = "agente-ia.split-view.v5";
 
 const DEFAULT_STATE: SplitViewState = {
   sizes: {
-    history: 15,
-    chat: 30,
-    dashboard: 55,
+    history: 12,
+    chat: 40,
+    dashboard: 48,
   },
-  activeTabletTab: "chat",
   historyCollapsed: false,
   chatCollapsed: false,
   dashboardCollapsed: false,
+  selectedDashboardMessageByChat: {},
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -49,6 +49,27 @@ const sanitizeSizes = (value: unknown): SplitLayoutSizes => {
   };
 };
 
+const sanitizeSelectedDashboardMessageByChat = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_STATE.selectedDashboardMessageByChat;
+  }
+
+  return Object.entries(value as Record<string, unknown>).reduce<
+    Record<string, string>
+  >((accumulator, [chatId, messageId]) => {
+    const normalizedChatId = chatId.trim();
+    const normalizedMessageId =
+      typeof messageId === "string" ? messageId.trim() : "";
+
+    if (!normalizedChatId || !normalizedMessageId) {
+      return accumulator;
+    }
+
+    accumulator[normalizedChatId] = normalizedMessageId;
+    return accumulator;
+  }, {});
+};
+
 export const loadSplitViewState = (): SplitViewState => {
   if (typeof window === "undefined") return DEFAULT_STATE;
 
@@ -59,14 +80,12 @@ export const loadSplitViewState = (): SplitViewState => {
 
     return {
       sizes: sanitizeSizes(parsed?.sizes),
-      activeTabletTab:
-        parsed?.activeTabletTab === "history" ||
-        parsed?.activeTabletTab === "dashboard"
-          ? parsed.activeTabletTab
-          : "chat",
       historyCollapsed: Boolean(parsed?.historyCollapsed),
       chatCollapsed: Boolean(parsed?.chatCollapsed),
       dashboardCollapsed: Boolean(parsed?.dashboardCollapsed),
+      selectedDashboardMessageByChat: sanitizeSelectedDashboardMessageByChat(
+        parsed?.selectedDashboardMessageByChat,
+      ),
     };
   } catch {
     return DEFAULT_STATE;
@@ -80,10 +99,10 @@ export const saveSplitViewState = (state: SplitViewState) => {
     STORAGE_KEY,
     JSON.stringify({
       sizes: sanitizeSizes(state.sizes),
-      activeTabletTab: state.activeTabletTab,
       historyCollapsed: state.historyCollapsed,
       chatCollapsed: state.chatCollapsed,
       dashboardCollapsed: state.dashboardCollapsed,
+      selectedDashboardMessageByChat: state.selectedDashboardMessageByChat,
     }),
   );
 };

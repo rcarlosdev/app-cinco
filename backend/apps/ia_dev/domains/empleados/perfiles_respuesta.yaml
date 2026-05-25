@@ -1,0 +1,50 @@
+perfiles_respuesta:
+  - id: empleados.count.active.summary
+    expected_output: total_personal
+    grain: kpi_total_personal
+    columnas:
+      - estado
+      - total_empleados
+  - id: empleados.count.grouped.summary
+    expected_output: total_personal_agrupado
+    grain: total_por_dimension
+    columnas:
+      - area
+      - cargo
+      - sede
+      - carpeta
+      - supervisor
+      - movil
+      - cantidad
+  - id: empleados.detail.safe_table
+    expected_output: detalle_empleado_seguro
+    grain: empleado
+    columnas:
+      - cedula
+      - nombre
+      - apellido
+      - cargo
+      - area
+      - supervisor
+      - carpeta
+      - tipo_labor
+      - movil
+      - sede
+      - estado
+  - id: empleados.birthday.summary
+    expected_output: cumpleanos_personal
+    grain: empleado
+    columnas:
+      - cedula
+      - nombre
+      - apellido
+      - cargo
+      - fecha_nacimiento
+      - area
+      - estado
+  - id: empleados.certificados_alturas.summary
+    expected_output: certificados_alturas_vigencia
+    grain: kpi_certificados
+    columnas:
+      - certificados_vencidos
+      - certificados_proximos_vencer

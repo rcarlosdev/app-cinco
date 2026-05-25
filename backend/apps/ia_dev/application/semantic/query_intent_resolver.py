@@ -12,7 +12,15 @@ from apps.ia_dev.application.taxonomia_dominios import (
     normalizar_codigo_dominio,
     normalizar_dominio_operativo,
 )
-from apps.ia_dev.infrastructure.ai.model_routing import resolve_model_name
+from apps.ia_dev.domains.inventario_logistica.matcher_semantico_gobernado_inventario import (
+    MatcherSemanticoGobernadoInventario,
+)
+from apps.ia_dev.infrastructure.ai.openai_gateway_contracts import OpenAIGatewayRequest
+from apps.ia_dev.infrastructure.ai.openai_gateway_service import OpenAIGatewayService
+from apps.ia_dev.application.semantic.semantic_capability_registry import (
+    SemanticBindingRequest,
+    SemanticCapabilityRegistry,
+)
 from apps.ia_dev.services.employee_identifier_service import EmployeeIdentifierService
 from apps.ia_dev.services.period_service import resolve_period_from_text
 
@@ -57,8 +65,10 @@ class QueryIntentResolver:
         r"\bsaldo(?:\s+de)?(?:\s+materiales?)?\s+(?:del?\s+)?(?:emplead\w*|tecnico)\s+([0-9]{5,15})\b"
     )
 
-    def __init__(self):
-        self.model = resolve_model_name("query_intent")
+    def __init__(self, *, gateway: OpenAIGatewayService | None = None):
+        self.gateway = gateway or OpenAIGatewayService()
+        self.matcher_gobernado_inventario = MatcherSemanticoGobernadoInventario()
+        self.semantic_capability_registry = SemanticCapabilityRegistry()
 
     @staticmethod
     def _get_openai_api_key() -> str:
@@ -91,8 +101,6 @@ class QueryIntentResolver:
             fallback=rules,
             memory_hints=memory_hints or {},
         )
-        if self._query_pattern_fastpath_enabled() and str(pattern_guided.source or "").strip().lower() == "memory_pattern":
-            return pattern_guided
         if not self._openai_enabled():
             return pattern_guided
 
@@ -142,11 +150,17 @@ class QueryIntentResolver:
         semantic_context: dict[str, Any] | None = None,
     ) -> StructuredQueryIntent:
         normalized = self._normalize_text(message)
+        match_gobernado = self.matcher_gobernado_inventario.resolver(
+            mensaje=message,
+            contexto_semantico=semantic_context or {},
+        )
         domain = self._resolve_domain(
             normalized=normalized,
             base_domain=str(base_classification.get("domain") or "").strip().lower(),
             semantic_context=semantic_context or {},
         )
+        if match_gobernado.get("coincidencia_gobernada") and str(match_gobernado.get("dominio_candidato") or "") == "inventario_logistica":
+            domain = "inventario_logistica"
 
         dimension_tokens = self._collect_dimension_signal_tokens(
             semantic_context=semantic_context or {},
@@ -174,6 +188,12 @@ class QueryIntentResolver:
         elif asks_summary_count:
             operation = "count"
         elif (
+            domain in {"empleados", "rrhh"}
+            and self._has_employee_listing_signal(normalized)
+            and not self._has_employee_status_metric_signal(normalized)
+        ):
+            operation = "detail"
+        elif (
             self._has_employee_population_status_signal(normalized=normalized, domain=domain)
             or self._has_employee_status_metric_signal(normalized)
         ) and not has_grouping_signal:
@@ -200,6 +220,17 @@ class QueryIntentResolver:
             normalized=normalized,
             semantic_context=semantic_context or {},
         )
+        if match_gobernado.get("coincidencia_gobernada"):
+            filtros_gobernados = dict(match_gobernado.get("filtros") or {})
+            if filtros_gobernados:
+                filters.update({key: value for key, value in filtros_gobernados.items() if value not in (None, "")})
+            entidades_gobernadas = dict(match_gobernado.get("entidades") or {})
+            if entidades_gobernadas.get("cedula"):
+                entity_type, entity_value = "cedula", str(entidades_gobernadas.get("cedula") or "")
+            elif entidades_gobernadas.get("movil"):
+                entity_type, entity_value = "movil", str(entidades_gobernadas.get("movil") or "")
+            elif entidades_gobernadas.get("codigo"):
+                entity_type, entity_value = "codigo", str(entidades_gobernadas.get("codigo") or "")
         if entity_type == "cedula" and entity_value:
             filters.setdefault("cedula", entity_value)
         elif entity_type == "movil" and entity_value:
@@ -224,6 +255,14 @@ class QueryIntentResolver:
                 operation = "detail"
         if (
             domain in {"empleados", "rrhh"}
+            and operation == "detail"
+            and self._has_employee_listing_signal(normalized)
+            and not self._has_missingness_filter(filters=filters)
+        ):
+            group_by = []
+        if (
+            domain in {"empleados", "rrhh"}
+            and not (operation == "detail" and self._has_employee_listing_signal(normalized))
             and not self._has_missingness_filter(filters=filters)
             and self._is_general_employee_population_query(
                 normalized=normalized,
@@ -246,6 +285,41 @@ class QueryIntentResolver:
             operation=operation,
             dimension_tokens=dimension_tokens,
         )
+        if domain == "inventario_logistica":
+            registry_binding = self.semantic_capability_registry.resolve(
+                SemanticBindingRequest(
+                    domain=domain,
+                    message=message,
+                    intent=operation,
+                    entity={
+                        "type": entity_type,
+                        "identifier": entity_value,
+                        "field": entity_type,
+                    }
+                    if entity_type and entity_value
+                    else None,
+                    normalized_filters=filters,
+                    group_by=group_by,
+                    semantic_context=semantic_context or {},
+                    source_hints={
+                        "governed_match": dict(match_gobernado or {}),
+                    },
+                )
+            )
+            if str(registry_binding.template_id or "").strip():
+                template_id = str(registry_binding.template_id or "").strip()
+        if match_gobernado.get("coincidencia_gobernada") and str(match_gobernado.get("template_id") or "").strip():
+            template_id = str(match_gobernado.get("template_id") or "").strip()
+            operation = str(match_gobernado.get("operation") or operation or "detail").strip().lower()
+            if template_id == "inventory_material_stock_grouped_dimension" and operation == "aggregate":
+                operation = "stock_balance"
+        if bool(match_gobernado.get("requiere_aclaracion")):
+            warning = str(match_gobernado.get("pregunta_aclaracion") or "").strip()
+            warnings = [warning] if warning else []
+            confidence = 0.58
+        else:
+            warnings = []
+            confidence = 0.72
         if (
             domain in {"empleados", "rrhh"}
             and self._has_missingness_filter(filters=filters)
@@ -290,9 +364,9 @@ class QueryIntentResolver:
             period=period,
             group_by=group_by,
             metrics=metrics,
-            confidence=0.72,
+            confidence=confidence,
             source="rules",
-            warnings=[],
+            warnings=warnings,
         )
 
     def _resolve_openai(
@@ -304,14 +378,18 @@ class QueryIntentResolver:
         semantic_context: dict[str, Any],
         memory_hints: dict[str, Any],
     ) -> StructuredQueryIntent:
-        from openai import OpenAI
-
         context_payload = self._compact_semantic_context(semantic_context=semantic_context)
         memory_patterns = self._compact_query_patterns(memory_hints=memory_hints)
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(
-            model=self.model,
-            input=[
+        del api_key
+        response = self.gateway.create(
+            OpenAIGatewayRequest(
+                component="query_intent_resolver",
+                model_route="query_intent",
+                timeout_seconds=30,
+                retries=1,
+                trace_metadata={"flow": "query_intelligence", "operation": "structured_intent_resolution"},
+                metadata={"fallback_source": str(fallback.source or "rules")},
+                input=[
                 {
                     "role": "system",
                     "content": (
@@ -365,9 +443,10 @@ class QueryIntentResolver:
                     ),
                 },
                 {"role": "user", "content": message},
-            ],
+                ],
+            )
         )
-        raw_text = str(getattr(response, "output_text", "") or "").strip()
+        raw_text = response.output_text
         payload = self._safe_json(raw_text)
         return StructuredQueryIntent(
             raw_query=message,
@@ -605,6 +684,11 @@ class QueryIntentResolver:
                 normalized,
             ):
                 return "inventory_material_critical_by_employee"
+            if QueryIntentResolver._is_inventory_material_grouped_dimension_query(
+                normalized=normalized,
+                dimension_tokens=dimension_tokens,
+            ):
+                return "inventory_material_stock_grouped_dimension"
             if (
                 QueryIntentResolver._is_inventory_operational_cross_query(normalized)
                 and re.search(
@@ -618,6 +702,11 @@ class QueryIntentResolver:
             if re.search(r"\b(?:cuadrilla|brigada|movil|empleado|tecnico)\b", normalized):
                 return "inventory_material_stock_mobile"
             return "inventory_material_stock_balance"
+        if (
+            normalizar_codigo_dominio(domain_code) in {"empleados", "rrhh"}
+            and operation == "detail"
+        ):
+            return "detail_by_entity_and_period"
         if (
             domain_code in {"empleados", "rrhh"}
             and QueryIntentResolver._has_group_dimension_signal(normalized, dimension_tokens=dimension_tokens)
@@ -657,6 +746,9 @@ class QueryIntentResolver:
         guarded_cedula = QueryIntentResolver._match_inventory_employee_stock_query(normalized)
         if guarded_cedula:
             return "cedula", guarded_cedula
+        explicit_codigo = QueryIntentResolver._extract_inventory_code(normalized=normalized, raw_message=message)
+        if explicit_codigo:
+            return "codigo", explicit_codigo
         match = re.search(r"\b\d{6,13}\b", normalized)
         if match:
             return "cedula", "".join(ch for ch in match.group(0) if ch.isdigit())
@@ -672,6 +764,12 @@ class QueryIntentResolver:
         if guarded_cedula:
             filters["cedula"] = guarded_cedula
             filters["stock_scope"] = "movil"
+        explicit_codigo = QueryIntentResolver._extract_inventory_code(
+            normalized=normalized,
+            raw_message=normalized,
+        )
+        if explicit_codigo:
+            filters["codigo"] = explicit_codigo
         estado_match = re.search(
             r"\bestado(?:\s+del?\s+\w+)?\s+(?:es\s+)?([a-z_]+)\b",
             str(normalized or ""),
@@ -718,6 +816,55 @@ class QueryIntentResolver:
             text,
         )
         return str(match.group(1) or "").strip() if match else ""
+
+    @staticmethod
+    def _extract_inventory_code(*, normalized: str, raw_message: str) -> str:
+        text = str(raw_message or normalized or "")
+        match = re.search(r"\bc(?:o|ó)d(?:igo)?\s+([a-z0-9_-]{2,})\b", text, re.IGNORECASE)
+        if not match:
+            return ""
+        return str(match.group(1) or "").strip().upper()
+
+    @classmethod
+    def _is_inventory_material_grouped_dimension_query(
+        cls,
+        *,
+        normalized: str,
+        dimension_tokens: list[str] | None = None,
+    ) -> bool:
+        text = str(normalized or "")
+        normalized_dimensions = {
+            str(item or "").strip().lower()
+            for item in list(dimension_tokens or [])
+            if str(item or "").strip()
+        }
+        asks_group_dimension = bool(
+            normalized_dimensions & {"movil", "cedula", "bodega"}
+            or re.search(
+                r"\b(?:por|en)\s+(?:movil(?:es)?|m[oó]vil(?:es)?|cuadrilla(?:s)?|brigada(?:s)?|tecnico(?:s)?|t[eé]cnico(?:s)?|empleado(?:s)?|cedula|c[eé]dula|bodega(?:s)?|almacen(?:es)?)\b",
+                text,
+            )
+        )
+        if not asks_group_dimension:
+            return False
+        if cls._match_inventory_employee_stock_query(text):
+            return False
+        if EmployeeIdentifierService.has_movil_identifier(text):
+            return False
+        has_material_locator = bool(cls._extract_inventory_code(normalized=text, raw_message=text)) or bool(
+            re.search(
+                r"\b(?:saldo|stock|inventario|existencia(?:s)?)\s+en\s+(?:movil(?:es)?|m[oó]vil(?:es)?|cuadrilla(?:s)?|brigada(?:s)?|tecnico(?:s)?|t[eé]cnico(?:s)?|empleado(?:s)?|bodega(?:s)?|almacen(?:es)?)\s+de\s+.+$",
+                text,
+            )
+            or re.search(
+                r"\b(?:saldo|stock|inventario|existencia(?:s)?)\s+de\s+.+\s+por\s+(?:movil|m[oó]vil|cuadrilla|brigada|tecnico|t[eé]cnico|empleado|bodega|almacen)\b",
+                text,
+            )
+        )
+        has_material_family_scope = bool(
+            re.search(r"\b(?:ferretero|ferreteria|material(?:es)?(?:\s+de\s+claro|\s+claro)?)\b", text)
+        )
+        return has_material_locator or has_material_family_scope
 
     @staticmethod
     def _extract_employee_name_filter(*, normalized: str) -> str:
@@ -1511,6 +1658,18 @@ class QueryIntentResolver:
         if cls._has_employee_active_signal(text) and cls._has_temporal_reference(text):
             return True
         return False
+
+    @classmethod
+    def _has_employee_listing_signal(cls, normalized: str) -> bool:
+        text = str(normalized or "")
+        if not re.search(r"\b(emplead\w*|colaborador(?:es)?|personal|persona(?:s)?|tecnico(?:s)?)\b", text):
+            return False
+        if any(token in text for token in ("distribucion", "agrup", "ranking", "top", "compar", "versus", "concentran")):
+            return False
+        return any(
+            token in text
+            for token in ("detalle", "mostrar", "muestra", "listar", "lista", "informacion", "info", "ficha", "datos")
+        )
 
     @classmethod
     def _is_general_employee_population_query(

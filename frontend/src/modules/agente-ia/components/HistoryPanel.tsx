@@ -1,7 +1,9 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import type { ChatMessageModel } from "@/modules/programacion/ia-dev/chat/types";
+import ChatHistoryPanel from "@/modules/agente-ia/components/ChatHistoryPanel";
 import type { AgenteIAChatThread } from "@/modules/agente-ia/persistence/chatSessionStorage";
 
 type HistoryPanelProps = {
@@ -10,6 +12,8 @@ type HistoryPanelProps = {
   isSubmitting: boolean;
   onOpenChat: (chatId: string) => void;
   onStartNewChat: () => void;
+  onRenameChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => void;
   formatChatTimestamp: (chat: AgenteIAChatThread) => string;
   buildChatPreview: (messages: ChatMessageModel[]) => string;
 };
@@ -20,19 +24,34 @@ const HistoryPanel = ({
   isSubmitting,
   onOpenChat,
   onStartNewChat,
+  onRenameChat,
+  onDeleteChat,
   formatChatTimestamp,
   buildChatPreview,
 }: HistoryPanelProps) => {
+  const [search, setSearch] = useState("");
+
+  const filteredThreads = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return threads;
+
+    return threads.filter((chat) => {
+      const title = chat.title.toLowerCase();
+      const preview = buildChatPreview(chat.messages).toLowerCase();
+      return title.includes(query) || preview.includes(query);
+    });
+  }, [buildChatPreview, search, threads]);
+
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
       <header className="border-b border-gray-200 px-4 py-4 dark:border-gray-800">
         <div className="flex items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-gray-950 dark:text-white">
-              Chats
+              Conversaciones
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {threads.length} conversaciones
+              Retoma conversaciones recientes o empieza una nueva.
             </p>
           </div>
 
@@ -48,33 +67,19 @@ const HistoryPanel = ({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 py-3">
-        {threads.map((chat) => {
-          const isActive = chat.id === activeChatId;
-
-          return (
-            <button
-              key={chat.id}
-              type="button"
-              onClick={() => onOpenChat(chat.id)}
-              className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                isActive
-                  ? "border-[#111827] bg-gray-100 dark:border-white dark:bg-gray-900"
-                  : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900"
-              }`}
-            >
-              <p className="line-clamp-2 text-sm font-semibold text-gray-900 dark:text-white">
-                {chat.title}
-              </p>
-              <p className="mt-1 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
-                {buildChatPreview(chat.messages)}
-              </p>
-              <p className="mt-2 text-[11px] text-gray-400">
-                {formatChatTimestamp(chat)}
-              </p>
-            </button>
-          );
-        })}
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
+        <ChatHistoryPanel
+          search={search}
+          threads={filteredThreads}
+          activeChatId={activeChatId}
+          isSubmitting={isSubmitting}
+          onSearchChange={setSearch}
+          onOpenChat={onOpenChat}
+          onRenameChat={onRenameChat}
+          onDeleteChat={onDeleteChat}
+          formatChatTimestamp={formatChatTimestamp}
+          buildChatPreview={buildChatPreview}
+        />
       </div>
     </aside>
   );

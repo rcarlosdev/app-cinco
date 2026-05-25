@@ -428,8 +428,9 @@ class ResultSatisfactionValidator:
             return None
         template_id = str(((resolved_query.intent.template_id if resolved_query else "") or "")).strip().lower()
         capability_id = str((execution_plan.capability_id or "")).strip().lower()
-        if capability_id not in {"inventory_stock_balance_by_mobile", "inventory_serial_by_operational_holder"} and template_id not in {
+        if capability_id not in {"inventory_stock_balance_by_mobile", "inventory_stock_balance_by_material_dimension", "inventory_serial_by_operational_holder"} and template_id not in {
             "inventory_material_stock_mobile",
+            "inventory_material_stock_grouped_dimension",
             "inventory_serial_by_operational_holder",
         }:
             return None

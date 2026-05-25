@@ -1,0 +1,7 @@
+politicas_aprobacion:
+  - id: empleados.readonly.default
+    modo: readonly
+    requiere_aprobacion: false
+    justificacion: >
+      La primera capability gobernada del dominio empleados es solo de lectura y no cambia
+      la policy runtime global.

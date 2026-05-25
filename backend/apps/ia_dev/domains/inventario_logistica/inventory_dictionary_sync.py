@@ -11,6 +11,9 @@ from .yaml_agent_loader import (
     get_business_rules,
     get_examples_as_query_patterns,
     get_fields_for_dictionary,
+    get_governed_column_capabilities,
+    get_governed_rules_for_dictionary,
+    get_governed_synonyms_for_dictionary,
     get_groupable_dimensions,
     get_relationships_for_dictionary,
     get_runtime_domain_code,
@@ -42,7 +45,26 @@ class InventoryDictionarySyncService:
             "dd_tablas": get_tables_for_dictionary(config),
             "dd_campos": get_fields_for_dictionary(config),
             "dd_relaciones": get_relationships_for_dictionary(config),
-            "dd_sinonimos": get_synonyms_for_dictionary(config),
+            "dd_sinonimos": self._merge_preview_rows(
+                [*get_synonyms_for_dictionary(config), *get_governed_synonyms_for_dictionary(config)],
+                key_builder=lambda row: (
+                    str((row or {}).get("synonym") or "").strip().lower(),
+                    str((row or {}).get("canonical_value") or "").strip().lower(),
+                    str((row or {}).get("target_type") or "").strip().lower(),
+                ),
+            ),
+            "dd_reglas": self._merge_preview_rows(
+                get_governed_rules_for_dictionary(config),
+                key_builder=lambda row: str((row or {}).get("codigo") or (row or {}).get("rule_name") or "").strip().lower(),
+            ),
+            "ia_dev_capacidades_columna": self._merge_preview_rows(
+                get_governed_column_capabilities(config),
+                key_builder=lambda row: (
+                    str((row or {}).get("campo_logico") or "").strip().lower(),
+                    str((row or {}).get("table_name") or "").strip().lower(),
+                    str((row or {}).get("column_name") or "").strip().lower(),
+                ),
+            ),
             "query_patterns": query_patterns,
             "semantic_metadata": {
                 "business_concepts": business_concepts,
@@ -76,6 +98,8 @@ class InventoryDictionarySyncService:
                 "dd_campos_preview_count": len(list(preview.get("dd_campos") or [])),
                 "dd_relaciones_preview_count": len(list(preview.get("dd_relaciones") or [])),
                 "dd_sinonimos_preview_count": len(list(preview.get("dd_sinonimos") or [])),
+                "dd_reglas_preview_count": len(list(preview.get("dd_reglas") or [])),
+                "ia_dev_capacidades_columna_preview_count": len(list(preview.get("ia_dev_capacidades_columna") or [])),
                 "query_patterns_preview_count": len(list(preview.get("query_patterns") or [])),
                 "warnings": warnings,
                 "status": str(audit.get("status") or "warning"),
@@ -89,6 +113,8 @@ class InventoryDictionarySyncService:
             "dd_campos_preview_count": len(list(preview.get("dd_campos") or [])),
             "dd_relaciones_preview_count": len(list(preview.get("dd_relaciones") or [])),
             "dd_sinonimos_preview_count": len(list(preview.get("dd_sinonimos") or [])),
+            "dd_reglas_preview_count": len(list(preview.get("dd_reglas") or [])),
+            "ia_dev_capacidades_columna_preview_count": len(list(preview.get("ia_dev_capacidades_columna") or [])),
             "query_patterns_preview_count": len(list(preview.get("query_patterns") or [])),
             "warnings": warnings,
             "status": "passed" if str(audit.get("status") or "") != "failed" else "failed",
@@ -114,6 +140,7 @@ class InventoryDictionarySyncService:
             "dd_relaciones": 0,
             "dd_sinonimos": 0,
             "dd_reglas": 0,
+            "ia_dev_capacidades_columna": 0,
         }
         updated = {
             "dd_dominios": 0,
@@ -122,6 +149,7 @@ class InventoryDictionarySyncService:
             "dd_relaciones": 0,
             "dd_sinonimos": 0,
             "dd_reglas": 0,
+            "ia_dev_capacidades_columna": 0,
         }
         warnings: list[str] = []
         connection = connections[database_alias]
@@ -308,7 +336,7 @@ class InventoryDictionarySyncService:
                         schema=schema,
                         table_name="dd_reglas",
                     )
-                    for rule in list((preview.get("semantic_metadata") or {}).get("business_rules") or []):
+                    for rule in list(preview.get("dd_reglas") or []):
                         rule_payload = self._build_rule_payload(
                             rule=rule,
                             domain_id=domain_id,
@@ -324,9 +352,45 @@ class InventoryDictionarySyncService:
                         )
                         inserted["dd_reglas"] += rule_result["inserted"]
                         updated["dd_reglas"] += rule_result["updated"]
+
+                    capability_columns = self._get_table_columns(
+                        database_alias=database_alias,
+                        schema=schema,
+                        table_name="ia_dev_capacidades_columna",
+                    )
+                    for capability in list(preview.get("ia_dev_capacidades_columna") or []):
+                        capability_payload = self._build_column_capability_payload(
+                            capability=capability,
+                            fields=list(preview.get("dd_campos") or []),
+                            tabla_ids=tabla_ids,
+                            database_alias=database_alias,
+                            schema=schema,
+                            available_columns=capability_columns,
+                        )
+                        capability_result = self._upsert_row(
+                            cursor=cursor,
+                            schema=schema,
+                            table_name="ia_dev_capacidades_columna",
+                            payload=capability_payload,
+                            key_columns=["campo_id"],
+                        )
+                        inserted["ia_dev_capacidades_columna"] += capability_result["inserted"]
+                        updated["ia_dev_capacidades_columna"] += capability_result["updated"]
         except Exception as exc:
             return {"ok": False, "warnings": [str(exc)], "inserted": inserted, "updated": updated}
         return {"ok": True, "warnings": warnings, "inserted": inserted, "updated": updated}
+
+    @staticmethod
+    def _merge_preview_rows(rows: list[dict[str, Any]], *, key_builder) -> list[dict[str, Any]]:
+        merged: dict[Any, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = key_builder(row)
+            if not key:
+                continue
+            merged[key] = {**dict(merged.get(key) or {}), **dict(row)}
+        return list(merged.values())
 
     def _get_table_columns(self, *, database_alias: str, schema: str, table_name: str) -> set[str]:
         cache_key = (database_alias, schema, table_name)
@@ -442,6 +506,78 @@ class InventoryDictionarySyncService:
             "activo": 1,
         }
         return {key: value for key, value in payload.items() if key in available_columns}
+
+    def _build_column_capability_payload(
+        self,
+        *,
+        capability: dict[str, Any],
+        fields: list[dict[str, Any]],
+        tabla_ids: dict[str, int],
+        database_alias: str,
+        schema: str,
+        available_columns: set[str],
+    ) -> dict[str, Any]:
+        campo_id = self._resolve_dictionary_field_id(
+            fields=fields,
+            tabla_ids=tabla_ids,
+            table_name=str(capability.get("table_name") or ""),
+            column_name=str(capability.get("column_name") or ""),
+            database_alias=database_alias,
+            schema=schema,
+        )
+        if not campo_id:
+            return {}
+        payload = {
+            "campo_id": campo_id,
+            "supports_filter": 1 if capability.get("supports_filter") else 0,
+            "supports_group_by": 1 if capability.get("supports_group_by") else 0,
+            "supports_metric": 1 if capability.get("supports_metric") else 0,
+            "supports_dimension": 1 if capability.get("supports_dimension") else 0,
+            "is_date": 1 if capability.get("is_date") else 0,
+            "is_identifier": 1 if capability.get("is_identifier") else 0,
+            "is_chart_dimension": 1 if capability.get("is_chart_dimension") else 0,
+            "is_chart_measure": 1 if capability.get("is_chart_measure") else 0,
+            "allowed_operators_json": self._json_text(capability.get("capabilities_compatibles") or []),
+            "allowed_aggregations_json": self._json_text(capability.get("capabilities_compatibles") or []),
+            "normalization_strategy": capability.get("normalization_strategy"),
+            "priority": int(capability.get("priority") or 90),
+            "active": 1 if capability.get("active", True) else 0,
+        }
+        return {key: value for key, value in payload.items() if key in available_columns}
+
+    def _resolve_dictionary_field_id(
+        self,
+        *,
+        fields: list[dict[str, Any]],
+        tabla_ids: dict[str, int],
+        table_name: str,
+        column_name: str,
+        database_alias: str,
+        schema: str,
+    ) -> int:
+        tabla_id = tabla_ids.get(str(table_name or ""))
+        if not tabla_id:
+            return 0
+        field_exists = any(
+            str(item.get("table_name") or "") == str(table_name or "")
+            and str(item.get("column_name") or "") == str(column_name or "")
+            for item in list(fields or [])
+            if isinstance(item, dict)
+        )
+        if not field_exists:
+            return 0
+        with connections[database_alias].cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT id
+                FROM {schema}.dd_campos
+                WHERE tabla_id = %s AND LOWER(COALESCE(column_name, '')) = LOWER(%s)
+                LIMIT 1
+                """,
+                [tabla_id, column_name],
+            )
+            row = cursor.fetchone()
+        return int((row or [0])[0] or 0)
 
     def _upsert_row(
         self,

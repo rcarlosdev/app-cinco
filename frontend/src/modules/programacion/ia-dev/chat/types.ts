@@ -3,12 +3,23 @@ import type {
   IADevAction,
   IADevChartPayload,
   IADevChatResponse,
+  IADevDashboardComposition,
   IADevMemoryCandidate,
   IADevMemoryProposal,
+  IADevSemanticExplanation,
 } from "@/services/ia-dev.service";
 
 export type ChatRole = "user" | "assistant";
 export type ChatMessageStatus = "streaming" | "final" | "error";
+export type ChatAttachmentKind = "image" | "document";
+
+export type ChatAttachmentSummary = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: ChatAttachmentKind;
+};
 
 export type NormalizedKPI = {
   key: string;
@@ -29,6 +40,15 @@ export type NormalizedTable = {
   exportLimit: number;
   truncated: boolean;
   limit: number;
+  exportArtifact: {
+    available: boolean;
+    format: string;
+    artifactId: string;
+    filename: string;
+    recordCount: number;
+    endpointHint: string;
+    expiresInSeconds: number;
+  } | null;
 };
 
 export type NormalizedHighlight = {
@@ -58,6 +78,8 @@ export type NormalizedAssistantPayload = {
   needsClarification: boolean;
   blockReason: string;
   progressSource: string;
+  semanticExplanation: IADevSemanticExplanation | null;
+  dashboardComposition: IADevDashboardComposition | null;
 };
 
 export type ChatMessageModel = {
@@ -66,6 +88,7 @@ export type ChatMessageModel = {
   content: string;
   createdAt: number;
   status: ChatMessageStatus;
+  attachments?: ChatAttachmentSummary[];
   response?: Partial<IADevChatResponse>;
   normalized?: NormalizedAssistantPayload | null;
   actions?: IADevAction[];

@@ -2,7 +2,6 @@ from .inventory_dictionary_audit import InventoryDictionaryAuditService
 from .inventory_dictionary_sync import InventoryDictionarySyncService
 from .inventory_query_examples import get_inventory_query_examples
 from .response_assembler import build_inventory_business_response
-from .semantic_inventory_resolver import InventorySemanticResolver
 from .yaml_agent_loader import (
     get_business_concepts,
     get_business_rules,
@@ -33,3 +32,11 @@ __all__ = [
     "get_examples_as_query_patterns",
     "validate_yaml_integrity",
 ]
+
+
+def __getattr__(name):
+    if name == "InventorySemanticResolver":
+        from .semantic_inventory_resolver import InventorySemanticResolver
+
+        return InventorySemanticResolver
+    raise AttributeError(name)

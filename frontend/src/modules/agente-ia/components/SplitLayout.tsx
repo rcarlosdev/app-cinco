@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { LayoutPanelLeft, PanelRightOpen } from "lucide-react";
+import PanelToggleButton from "@/modules/agente-ia/components/PanelToggleButton";
+import ResponsiveDrawer from "@/modules/agente-ia/components/ResponsiveDrawer";
 
 export type SplitLayoutSizes = {
   history: number;
@@ -11,22 +14,33 @@ export type SplitLayoutSizes = {
 type SplitLayoutProps = {
   hasDashboard: boolean;
   sizes: SplitLayoutSizes;
-  activeTabletTab: "history" | "chat" | "dashboard";
   historyCollapsed: boolean;
   chatCollapsed: boolean;
   dashboardCollapsed: boolean;
+  historyDrawerOpen: boolean;
+  dashboardDrawerOpen: boolean;
   onSizesChange: (sizes: SplitLayoutSizes) => void;
-  onTabletTabChange: (tab: "history" | "chat" | "dashboard") => void;
   onToggleHistory: () => void;
   onToggleChat: () => void;
   onToggleDashboard: () => void;
+  onOpenHistoryDrawer: () => void;
+  onCloseHistoryDrawer: () => void;
+  onOpenDashboardDrawer: () => void;
+  onCloseDashboardDrawer: () => void;
+  historyToggleLabel?: string;
+  dashboardToggleLabel?: string;
+  historyDrawerTitle?: string;
+  historyDrawerDescription?: string;
+  dashboardDrawerTitle?: string;
+  dashboardDrawerDescription?: string;
   history: ReactNode;
   chat: ReactNode;
   dashboard: ReactNode;
 };
 
 const MIN_PANEL = 12;
-const COLLAPSED_WIDTH = 4;
+const COLLAPSED_PANEL_WIDTH = 52;
+const RESIZE_HANDLE_WIDTH = 12;
 
 const clamp = (value: number, min = MIN_PANEL, max = 80) =>
   Math.min(max, Math.max(min, value));
@@ -44,19 +58,30 @@ const normalizeSizes = (sizes: SplitLayoutSizes): SplitLayoutSizes => {
 const SplitLayout = ({
   hasDashboard,
   sizes,
-  activeTabletTab,
   historyCollapsed,
   chatCollapsed,
   dashboardCollapsed,
+  historyDrawerOpen,
+  dashboardDrawerOpen,
   onSizesChange,
-  onTabletTabChange,
   onToggleHistory,
   onToggleChat,
   onToggleDashboard,
+  onOpenHistoryDrawer,
+  onCloseHistoryDrawer,
+  onOpenDashboardDrawer,
+  onCloseDashboardDrawer,
+  historyToggleLabel = "Historial",
+  dashboardToggleLabel = "Analisis",
+  historyDrawerTitle = "Historial",
+  historyDrawerDescription = "Tus conversaciones recientes",
+  dashboardDrawerTitle = "Panel de analisis",
+  dashboardDrawerDescription = "Detalle operativo y evidencia",
   history,
   chat,
   dashboard,
 }: SplitLayoutProps) => {
+  const desktopLayoutRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<"history-chat" | "chat-dashboard" | null>(
     null,
   );
@@ -67,13 +92,15 @@ const SplitLayout = ({
     if (!dragMode) return;
 
     const handlePointerMove = (event: PointerEvent) => {
-      const viewportWidth = window.innerWidth;
-      if (!viewportWidth) return;
+      const containerRect = desktopLayoutRef.current?.getBoundingClientRect();
+      const containerWidth = containerRect?.width ?? 0;
+      if (!containerRect || !containerWidth) return;
 
-      const x = (event.clientX / viewportWidth) * 100;
+      const x = ((event.clientX - containerRect.left) / containerWidth) * 100;
+      const relativeX = Math.min(100, Math.max(0, x));
 
       if (dragMode === "history-chat") {
-        const nextHistory = clamp(x, 8, 35);
+        const nextHistory = clamp(relativeX, 8, 35);
         const delta = nextHistory - normalizedSizes.history;
         const nextChat = clamp(normalizedSizes.chat - delta, 18, 60);
 
@@ -88,7 +115,7 @@ const SplitLayout = ({
 
       if (dragMode === "chat-dashboard") {
         const left = normalizedSizes.history;
-        const nextChat = clamp(x - left, 18, 65);
+        const nextChat = clamp(relativeX - left, 18, 65);
         const nextDashboard = clamp(100 - left - nextChat, 20, 70);
 
         onSizesChange(
@@ -120,21 +147,30 @@ const SplitLayout = ({
     );
   }
 
-  const historyBasis = historyCollapsed ? COLLAPSED_WIDTH : normalizedSizes.history;
-  const chatBasis = chatCollapsed ? COLLAPSED_WIDTH : normalizedSizes.chat;
-  const dashboardBasis = dashboardCollapsed
-    ? COLLAPSED_WIDTH
-    : normalizedSizes.dashboard;
+  const historyBasis = normalizedSizes.history;
+  const chatBasis = normalizedSizes.chat;
+  const dashboardBasis = normalizedSizes.dashboard;
+
+  const getPanelStyle = (basis: number, collapsed: boolean) =>
+    collapsed
+      ? ({
+          flex: `0 0 ${COLLAPSED_PANEL_WIDTH}px`,
+        } as const)
+      : ({
+          flexBasis: 0,
+          flexGrow: basis,
+          flexShrink: 1,
+        } as const);
 
   return (
     <>
-      <div className="hidden h-full min-h-0 lg:flex">
+      <div ref={desktopLayoutRef} className="hidden h-full min-h-0 xl:flex">
         <div
           className="min-h-0 min-w-0 overflow-hidden"
-          style={{ flexBasis: `${historyBasis}%` }}
+          style={getPanelStyle(historyBasis, historyCollapsed)}
         >
           {historyCollapsed ? (
-            <CollapsedRail label="Historial" onClick={onToggleHistory} />
+            <CollapsedRail label={historyToggleLabel} onClick={onToggleHistory} />
           ) : (
             history
           )}
@@ -144,7 +180,7 @@ const SplitLayout = ({
 
         <div
           className="min-h-0 min-w-0 overflow-hidden"
-          style={{ flexBasis: `${chatBasis}%` }}
+          style={getPanelStyle(chatBasis, chatCollapsed)}
         >
           {chatCollapsed ? (
             <CollapsedRail label="Chat" onClick={onToggleChat} />
@@ -157,60 +193,73 @@ const SplitLayout = ({
 
         <div
           className="min-h-0 min-w-0 overflow-hidden"
-          style={{ flexBasis: `${dashboardBasis}%` }}
+          style={getPanelStyle(dashboardBasis, dashboardCollapsed)}
         >
           {dashboardCollapsed ? (
-            <CollapsedRail label="Dashboard" onClick={onToggleDashboard} />
+            <CollapsedRail label={dashboardToggleLabel} onClick={onToggleDashboard} />
           ) : (
             dashboard
           )}
         </div>
       </div>
 
-      <div className="hidden h-full min-h-0 md:flex lg:hidden">
-        <div className="flex min-h-0 w-full flex-col">
-          <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
-            <div className="inline-flex rounded-full border border-gray-300 p-1 dark:border-gray-700">
-              {(["history", "chat", "dashboard"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => onTabletTabChange(tab)}
-                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                    activeTabletTab === tab
-                      ? "bg-[#111827] text-white"
-                      : "text-gray-600 dark:text-gray-300"
-                  }`}
-                >
-                  {tab === "history" ? "Historial" : tab === "chat" ? "Chat" : "Dashboard"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="min-h-0 flex-1">
-            {activeTabletTab === "history"
-              ? history
-              : activeTabletTab === "chat"
-                ? chat
-                : dashboard}
+      <div className="flex h-full min-h-0 flex-col xl:hidden">
+        <div className="border-b border-gray-200 bg-white/92 px-4 py-3 backdrop-blur dark:border-gray-800 dark:bg-gray-950/92">
+          <div className="flex flex-wrap items-center gap-2">
+            <PanelToggleButton
+              label={historyToggleLabel}
+              ariaLabel="Abrir historial"
+              onClick={onOpenHistoryDrawer}
+              active={historyDrawerOpen}
+            >
+              <LayoutPanelLeft size={14} />
+            </PanelToggleButton>
+            {hasDashboard ? (
+              <PanelToggleButton
+                label={dashboardToggleLabel}
+                ariaLabel={`Abrir ${dashboardDrawerTitle.toLowerCase()}`}
+                onClick={onOpenDashboardDrawer}
+                active={dashboardDrawerOpen}
+              >
+                <PanelRightOpen size={14} />
+              </PanelToggleButton>
+            ) : null}
           </div>
         </div>
-      </div>
 
-      <div className="flex h-full min-h-0 flex-col md:hidden">
-        {activeTabletTab === "history"
-          ? history
-          : activeTabletTab === "dashboard"
-            ? dashboard
-            : chat}
+        <div className="relative min-h-0 flex-1">
+          <div className="h-full min-h-0">{chat}</div>
+          <ResponsiveDrawer
+            open={historyDrawerOpen}
+            side="left"
+            title={historyDrawerTitle}
+            description={historyDrawerDescription}
+            onClose={onCloseHistoryDrawer}
+          >
+            {history}
+          </ResponsiveDrawer>
+          {hasDashboard ? (
+            <ResponsiveDrawer
+              open={dashboardDrawerOpen}
+              side="right"
+              title={dashboardDrawerTitle}
+              description={dashboardDrawerDescription}
+              onClose={onCloseDashboardDrawer}
+            >
+              {dashboard}
+            </ResponsiveDrawer>
+          ) : null}
+        </div>
       </div>
     </>
   );
 };
 
 const ResizeHandle = ({ onPointerDown }: { onPointerDown: () => void }) => (
-  <div className="flex w-3 shrink-0 items-center justify-center bg-transparent">
+  <div
+    className="flex shrink-0 items-center justify-center bg-transparent"
+    style={{ width: `${RESIZE_HANDLE_WIDTH}px` }}
+  >
     <button
       type="button"
       aria-label="Redimensionar paneles"
