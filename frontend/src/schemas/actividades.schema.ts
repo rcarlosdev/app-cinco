@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+type ZodSchema = z.ZodTypeAny;
+
 // {
 //     "id": 3,
 //     "detalle": {
@@ -57,16 +59,21 @@ export const ActividadSchema = z.object({
 
   detalle: z.object({
     tipo_trabajo: z.string().min(1, "El tipo de trabajo es requerido"),
-    descripcion: z.string().min(1, "La descripción es requerida"),
+    // descripcion: z.string().min(1, "La descripción es requerida"),
+    descripcion: z.string().optional(),
     // extra: z.string().optional(),
   }),
 
   ubicacion: z.object({
     direccion: z.string().min(1, "La dirección es requerida"),
-    coordenada_x: z.string().min(1, "La coordenada X es requerida"),
-    coordenada_y: z.string().min(1, "La coordenada Y es requerida"),
-    zona: z.string().min(1, "La zona es requerida"),
-    nodo: z.string().min(1, "El nodo es requerido"),
+    // coordenada_x: z.string().min(1, "La coordenada X es requerida"),
+    coordenada_x: z.string().optional(),
+    // coordenada_y: z.string().min(1, "La coordenada Y es requerida"),
+    coordenada_y: z.string().optional(),
+    // zona: z.string().min(1, "La zona es requerida"),
+    zona: z.string().optional(),
+    // nodo: z.string().min(1, "El nodo es requerido"),
+    nodo: z.string().optional(),
   }),
 
   responsable_snapshot: z
@@ -114,5 +121,46 @@ export const ActividadSchema = z.object({
       message: "Fecha de fin real inválida",
     }),
 });
+
+const unwrapSchema = (schema: ZodSchema): ZodSchema => {
+  let current = schema;
+
+  while (
+    typeof (current as ZodSchema & { unwrap?: () => ZodSchema }).unwrap ===
+      "function" &&
+    (current.type === "optional" ||
+      current.type === "nullable" ||
+      current.type === "default")
+  ) {
+    current = (current as ZodSchema & { unwrap: () => ZodSchema }).unwrap();
+  }
+
+  return current;
+};
+
+export const isActividadFieldRequired = (fieldPath: string): boolean => {
+  const segments = fieldPath.split(".").filter(Boolean);
+  let current: ZodSchema = ActividadSchema;
+
+  for (const segment of segments) {
+    const schema = unwrapSchema(current);
+
+    if (schema.type !== "object") {
+      return false;
+    }
+
+    const shape = (schema.def as unknown as { shape: Record<string, ZodSchema> })
+      .shape;
+    const fieldSchema = shape[segment];
+
+    if (!fieldSchema || fieldSchema.isOptional()) {
+      return false;
+    }
+
+    current = fieldSchema;
+  }
+
+  return !current.isOptional();
+};
 
 export type ActividadFormData = z.infer<typeof ActividadSchema>;
