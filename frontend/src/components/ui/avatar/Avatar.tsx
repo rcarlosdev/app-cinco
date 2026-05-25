@@ -17,6 +17,15 @@ const sizeClasses = {
   xxlarge: "h-16 w-16 max-w-16",
 };
 
+const imageSizes = {
+  xsmall: "24px",
+  small: "32px",
+  medium: "40px",
+  large: "48px",
+  xlarge: "56px",
+  xxlarge: "64px",
+};
+
 const statusSizeClasses = {
   xsmall: "h-1.5 w-1.5 max-w-1.5",
   small: "h-2 w-2 max-w-2",
@@ -57,7 +66,7 @@ const Avatar: React.FC<AvatarProps> = ({
       {/* Avatar Image */}
       <Image
         fill
-        sizes="100vw"
+        sizes={imageSizes[size]}
         src={imgSrc}
         alt={alt}
         className="h-full w-full rounded-full object-cover"
