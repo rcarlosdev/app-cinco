@@ -59,7 +59,8 @@ export const ActividadSchema = z.object({
 
   detalle: z.object({
     tipo_trabajo: z.string().min(1, "El tipo de trabajo es requerido"),
-    descripcion: z.string().min(1, "La descripción es requerida"),
+    // descripcion: z.string().min(1, "La descripción es requerida"),
+    descripcion: z.string().optional(),
     // extra: z.string().optional(),
   }),
 
