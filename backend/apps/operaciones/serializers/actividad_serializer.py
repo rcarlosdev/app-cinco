@@ -17,6 +17,10 @@ class ActividadDetalleSerializer(serializers.ModelSerializer):
 
 
 class ActividadUbicacionSerializer(serializers.ModelSerializer):
+    coordenada_x = serializers.CharField(required=False, allow_blank=True)
+    coordenada_y = serializers.CharField(required=False, allow_blank=True)
+    zona = serializers.CharField(required=False, allow_blank=True)
+
     class Meta:
         model = ActividadUbicacion
         exclude = ('actividad',)
@@ -105,6 +109,8 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         ot = attrs.pop('ot', None)
         ots = attrs.get('ots')
+        fecha_inicio = attrs.get('fecha_inicio')
+        fecha_fin_estimado = attrs.get('fecha_fin_estimado')
 
         ot_codes = [item['ot'].strip() for item in ots if item.get('ot')] if ots else []
         
@@ -125,6 +131,23 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
         # Limpiar espacios de los códigos en attrs
         for item in ots:
             item['ot'] = item['ot'].strip()
+            if item['fecha_fin'] < item['fecha_inicio']:
+                raise serializers.ValidationError({
+                    "ots": (
+                        f"La OT {item['ot']} tiene una fecha fin menor que la fecha inicio."
+                    )
+                })
+
+        if (
+            fecha_inicio is not None and
+            fecha_fin_estimado is not None and
+            fecha_fin_estimado < fecha_inicio
+        ):
+            raise serializers.ValidationError({
+                "fecha_fin_estimado": (
+                    "La fecha fin estimada no puede ser menor que la fecha inicio."
+                )
+            })
 
         attrs['ots'] = ots
         return attrs

@@ -8,6 +8,7 @@ from apps.operaciones.models import (
 	ActividadOT,
 	normalize_ot_values,
 )
+from apps.operaciones.serializers.actividad_serializer import ActividadWriteSerializer
 from apps.operaciones.services.actividad_service import ActividadService
 
 
@@ -133,3 +134,106 @@ class ActividadServiceOTSyncTests(DjangoTestCase):
 		from datetime import date
 		self.assertEqual(actividad.fecha_inicio, date(2026, 5, 3))
 		self.assertEqual(actividad.fecha_fin_estimado, date(2026, 5, 20))
+
+
+class ActividadWriteSerializerValidationTests(TestCase):
+	def test_acepta_ubicacion_con_campos_opcionales_vacios(self):
+		payload = {
+			"ots": [
+				{
+					"ot": "00010",
+					"fecha_inicio": "2026-06-10",
+					"fecha_fin": "2026-06-12",
+				}
+			],
+			"estado": "pendiente",
+			"responsable_id": 1,
+			"fecha_inicio": "2026-06-10",
+			"fecha_fin_estimado": "2026-06-12",
+			"detalle": {
+				"tipo_trabajo": "MANTENIMIENTO",
+				"descripcion": "Prueba",
+			},
+			"ubicacion": {
+				"direccion": "Calle 1",
+				"coordenada_x": "",
+				"coordenada_y": "",
+				"zona": "",
+				"nodo": "N600",
+			},
+		}
+
+		with patch('apps.operaciones.serializers.actividad_serializer.EmpleadoService.existe', return_value=True), \
+			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
+			serializer = ActividadWriteSerializer(data=payload)
+			self.assertTrue(serializer.is_valid(), serializer.errors)
+
+	def test_rechaza_fecha_fin_estimado_menor_a_fecha_inicio(self):
+		payload = {
+			"ots": [
+				{
+					"ot": "00010",
+					"fecha_inicio": "2026-06-10",
+					"fecha_fin": "2026-06-12",
+				}
+			],
+			"estado": "pendiente",
+			"responsable_id": 1,
+			"fecha_inicio": "2026-06-10",
+			"fecha_fin_estimado": "2026-06-01",
+			"detalle": {
+				"tipo_trabajo": "MANTENIMIENTO",
+				"descripcion": "Prueba",
+			},
+			"ubicacion": {
+				"direccion": "Calle 1",
+				"coordenada_x": "",
+				"coordenada_y": "",
+				"zona": "",
+				"nodo": "N600",
+			},
+		}
+
+		with patch('apps.operaciones.serializers.actividad_serializer.EmpleadoService.existe', return_value=True), \
+			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
+			serializer = ActividadWriteSerializer(data=payload)
+			self.assertFalse(serializer.is_valid())
+			self.assertEqual(
+				serializer.errors["fecha_fin_estimado"][0],
+				"La fecha fin estimada no puede ser menor que la fecha inicio.",
+			)
+
+	def test_rechaza_ot_con_fecha_fin_menor_a_fecha_inicio(self):
+		payload = {
+			"ots": [
+				{
+					"ot": "00010",
+					"fecha_inicio": "2026-06-10",
+					"fecha_fin": "2026-06-01",
+				}
+			],
+			"estado": "pendiente",
+			"responsable_id": 1,
+			"fecha_inicio": "2026-06-10",
+			"fecha_fin_estimado": "2026-06-12",
+			"detalle": {
+				"tipo_trabajo": "MANTENIMIENTO",
+				"descripcion": "Prueba",
+			},
+			"ubicacion": {
+				"direccion": "Calle 1",
+				"coordenada_x": "",
+				"coordenada_y": "",
+				"zona": "",
+				"nodo": "N600",
+			},
+		}
+
+		with patch('apps.operaciones.serializers.actividad_serializer.EmpleadoService.existe', return_value=True), \
+			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
+			serializer = ActividadWriteSerializer(data=payload)
+			self.assertFalse(serializer.is_valid())
+			self.assertEqual(
+				serializer.errors["ots"][0],
+				"La OT 00010 tiene una fecha fin menor que la fecha inicio.",
+			)

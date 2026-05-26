@@ -26,6 +26,82 @@ interface CsvRowData {
   errorMessage?: string;
 }
 
+const splitCsvLine = (text: string, delimiter: string): string[] => {
+  const entries: string[] = [];
+  let insideQuote = false;
+  let current = "";
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"') {
+      if (insideQuote && text[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        insideQuote = !insideQuote;
+      }
+      continue;
+    }
+
+    if (char === delimiter && !insideQuote) {
+      entries.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  entries.push(current.trim());
+  return entries.map((value) => value.trim());
+};
+
+const parseCsvLine = (text: string, delimiter: string): string[] =>
+  splitCsvLine(text, delimiter).map((value) => {
+    let cleaned = value;
+    if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+      cleaned = cleaned.slice(1, -1);
+    }
+    return cleaned.trim();
+  });
+
+const hasMeaningfulCsvValue = (columns: string[]): boolean =>
+  columns.some((value) => value.trim().length > 0);
+
+const detectCsvDelimiter = (headerLine: string): string => {
+  const commaColumns = splitCsvLine(headerLine, ",").length;
+  const semicolonColumns = splitCsvLine(headerLine, ";").length;
+  return semicolonColumns > commaColumns ? ";" : ",";
+};
+
+const formatApiError = (error: any): string => {
+  const data = error?.response?.data;
+  if (!data) {
+    return error?.message || "Error al subir la actividad.";
+  }
+
+  if (typeof data === "string") {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data.join(" ");
+  }
+
+  if (typeof data === "object") {
+    const messages = Object.entries(data).flatMap(([field, value]) => {
+      const normalizedValue = Array.isArray(value) ? value.join(" ") : String(value);
+      return normalizedValue ? [`${field}: ${normalizedValue}`] : [];
+    });
+
+    if (messages.length > 0) {
+      return messages.join(" | ");
+    }
+  }
+
+  return error?.message || "Error al subir la actividad.";
+};
+
 export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvProps) {
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<CsvRowData[]>([]);
@@ -93,39 +169,6 @@ export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvPr
     toast.success("Plantilla descargada con éxito");
   };
 
-  // Parsea una línea de CSV de forma robusta soportando comillas
-  const parseCsvLine = (text: string): string[] => {
-    const result: string[] = [];
-    let insideQuote = false;
-    let entries: string[] = [];
-    let current = "";
-
-    // Unificamos el delimitador detectando si usa coma o punto y coma
-    const delimiter = text.includes(";") ? ";" : ",";
-
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      if (char === '"') {
-        insideQuote = !insideQuote;
-      } else if (char === delimiter && !insideQuote) {
-        entries.push(current.trim());
-        current = "";
-      } else {
-        current += char;
-      }
-    }
-    entries.push(current.trim());
-
-    // Limpia comillas envolventes sutilmente
-    return entries.map(val => {
-      let cleaned = val;
-      if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
-        cleaned = cleaned.slice(1, -1);
-      }
-      return cleaned.replace(/""/g, '"').trim();
-    });
-  };
-
   // Procesa y valida el archivo CSV
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -152,18 +195,10 @@ export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvPr
       }
 
       // Validar y normalizar cabeceras
-      const headers = parseCsvLine(lines[0].toLowerCase());
-      const expectedHeaders = [
-        "ot",
-        "fecha_inicio",
-        "fecha_fin_estimado",
-        "responsable_cedula",
-        "tipo_trabajo",
-        "descripcion",
-        "direccion",
-        "nodo",
-        "ots_hijas"
-      ];
+      const delimiter = detectCsvDelimiter(lines[0]);
+      const headers = parseCsvLine(lines[0].toLowerCase(), delimiter).map((value) =>
+        value.replace(/^\uFEFF/, "").trim(),
+      );
 
       const otIdx = headers.indexOf("ot");
       const fInicioIdx = headers.indexOf("fecha_inicio");
@@ -184,8 +219,8 @@ export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvPr
       const parsedRows: CsvRowData[] = [];
 
       for (let i = 1; i < lines.length; i++) {
-        const columns = parseCsvLine(lines[i]);
-        if (columns.length === 0 || (columns.length === 1 && columns[0] === "")) continue;
+        const columns = parseCsvLine(lines[i], delimiter);
+        if (!hasMeaningfulCsvValue(columns)) continue;
 
         const rowOt = columns[otIdx] || "";
         const rowFInicio = columns[fInicioIdx] || "";
@@ -233,6 +268,16 @@ export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvPr
         if (!row.fecha_fin_estimado || isNaN(Date.parse(row.fecha_fin_estimado))) {
           hasError = true;
           errMsg += "Fecha fin estimada inválida (AAAA-MM-DD). ";
+        }
+        if (
+          row.fecha_inicio &&
+          row.fecha_fin_estimado &&
+          !isNaN(Date.parse(row.fecha_inicio)) &&
+          !isNaN(Date.parse(row.fecha_fin_estimado)) &&
+          new Date(row.fecha_fin_estimado) < new Date(row.fecha_inicio)
+        ) {
+          hasError = true;
+          errMsg += "La fecha fin estimada no puede ser menor que la fecha inicio. ";
         }
         if (!row.responsable_cedula) {
           hasError = true;
@@ -366,7 +411,7 @@ export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvPr
         fallosCount++;
         if (rowIndex !== -1) {
           updatedRows[rowIndex].status = "error";
-          updatedRows[rowIndex].errorMessage = err.response?.data?.ots || err.message || "Error al subir la actividad.";
+          updatedRows[rowIndex].errorMessage = formatApiError(err);
         }
       }
 
