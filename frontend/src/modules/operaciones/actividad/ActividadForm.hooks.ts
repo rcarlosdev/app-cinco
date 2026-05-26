@@ -14,6 +14,10 @@ import {
 } from "./ActividadForm.utils";
 import { getUser } from "@/utils/storage";
 import { useBackendErrors } from "@/hooks/useBackendErrors";
+import {
+  logDevelopmentError,
+  logDevelopmentWarning,
+} from "@/lib/environment";
 
 interface UseActividadFormLogicParams {
   defaultValues: ActividadFormData;
@@ -54,12 +58,12 @@ export const useActividadFormLogic = ({
           const user = getUser();
           
           if (!user) {
-            console.warn("No user found in session");
+            logDevelopmentWarning("No user found in session");
             return;
           }
           
           if (!user.username) {
-            console.warn("User has no username/cedula:", user);
+            logDevelopmentWarning("User has no username/cedula:", user);
             return;
           }
 
@@ -81,7 +85,10 @@ export const useActividadFormLogic = ({
           }
         } catch (error) {
           // No es un error crítico, simplemente no se pudo cargar el empleado del usuario
-          console.warn("Could not load employee for current user:", error instanceof Error ? error.message : String(error));
+          logDevelopmentWarning(
+            "Could not load employee for current user:",
+            error instanceof Error ? error.message : String(error),
+          );
         }
         return;
       }
@@ -107,7 +114,7 @@ export const useActividadFormLogic = ({
 
           preloadAvatar(empleadoFull.link_foto);
         } catch (error) {
-          console.error("Error preloading employee:", error);
+          logDevelopmentError("Error preloading employee:", error);
         }
       } else if (isActive) {
         setSelectedEmployee(null);

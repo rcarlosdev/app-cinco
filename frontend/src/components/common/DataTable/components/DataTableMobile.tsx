@@ -27,7 +27,7 @@ export function DataTableMobile<TData>({
   const visibleColumns = table.getVisibleLeafColumns();
 
   return (
-    <div className="space-y-3 p-4 md:hidden">
+    <div className="min-w-0 space-y-3 overflow-y-auto p-4 md:hidden">
       {isLoading ? (
         <div className="rounded-xl border border-gray-200 p-4 text-center text-sm text-gray-500 dark:border-white/5 dark:text-gray-400">
           Loading...
@@ -40,7 +40,7 @@ export function DataTableMobile<TData>({
         rows.map((row) => (
           <div
             key={row.id}
-            className="rounded-xl border border-gray-200 p-4 dark:border-white/5"
+            className="min-w-0 overflow-hidden rounded-xl border border-gray-200 p-4 shadow-theme-xs dark:border-white/5"
             onClick={onRowClick ? () => onRowClick(row.original) : undefined}
           >
             <div className="space-y-2">
@@ -52,11 +52,14 @@ export function DataTableMobile<TData>({
                 const value = renderMobileCellValue(row, column.id);
 
                 return (
-                  <div key={`${row.id}-${column.id}`} className="text-sm">
-                    <span className="mr-2 font-medium text-gray-700 dark:text-white/90">
+                  <div
+                    key={`${row.id}-${column.id}`}
+                    className="min-w-0 flex flex-col gap-1 text-sm sm:flex-row sm:gap-2"
+                  >
+                    <span className="min-w-0 font-medium text-gray-700 dark:text-white/90">
                       {String(headerLabel)}:
                     </span>
-                    <span className="text-gray-600 dark:text-gray-300">
+                    <span className="min-w-0 overflow-hidden break-words text-gray-600 dark:text-gray-300">
                       {value}
                     </span>
                   </div>

@@ -5,12 +5,27 @@ export const getDateFromPicker = (dates: Date[] | Date): Date | undefined => {
   return Array.isArray(dates) ? dates[0] : dates;
 };
 
+const padDatePart = (value: number): string => String(value).padStart(2, "0");
+
+export const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = padDatePart(date.getMonth() + 1);
+  const day = padDatePart(date.getDate());
+  return `${year}-${month}-${day}`;
+};
+
 export const toIsoDate = (date?: Date): string => {
-  return date ? date.toISOString().split("T")[0] : "";
+  return date ? formatLocalDate(date) : "";
 };
 
 export const toDateOrUndefined = (value?: string | null): Date | undefined => {
-  return value ? new Date(value) : undefined;
+  if (!value) return undefined;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return undefined;
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day), 12);
 };
 
 export const buildResponsableSnapshot = (empleado: Empleado) => ({

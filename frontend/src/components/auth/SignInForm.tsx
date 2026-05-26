@@ -1,5 +1,5 @@
 ﻿"use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Form from "@/components/form/Form";
 import Label from "@/components/form/Label";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,12 @@ import { useFormSubmit } from "@/hooks/useFormSubmit";
 import Input from "@/components/form/input/InputField";
 import { getErrorMessage, ApiErrorType } from "@/lib/errorHandler";
 import { loginSchema, LoginFormValues } from "@/schemas/auth.schema";
+import { logDevelopmentError } from "@/lib/environment";
+import {
+  consumeSessionProtectionEvent,
+  getSessionProtectionMessage,
+} from "@/lib/sessionProtection";
+import { toast } from "sonner";
 
 export default function SignInForm() {
   const router = useRouter();
@@ -30,6 +36,13 @@ export default function SignInForm() {
     },
   });
 
+  useEffect(() => {
+    const protectionEvent = consumeSessionProtectionEvent();
+    if (!protectionEvent) return;
+
+    toast.error(getSessionProtectionMessage(protectionEvent.reason));
+  }, []);
+
   const onSubmit = async (data: LoginFormValues) => {
     try {
       await submit(data, {
@@ -47,8 +60,11 @@ export default function SignInForm() {
             errors: error?.errors,
           };
 
-          console.error("Error al iniciar sesión (raw):", error);
-          console.error("Error al iniciar sesión (normalizado):", normalizedError);
+          logDevelopmentError("Error al iniciar sesión (raw):", error);
+          logDevelopmentError(
+            "Error al iniciar sesión (normalizado):",
+            normalizedError,
+          );
         },
       });
     } catch (error) {

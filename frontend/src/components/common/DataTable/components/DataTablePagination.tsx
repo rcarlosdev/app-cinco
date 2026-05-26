@@ -49,13 +49,13 @@ export function DataTablePagination<TData>({
   };
 
   return (
-    <div className="flex items-center justify-between border-t px-5 py-4">
-      <div className="flex w-full items-center justify-between gap-3">
+    <div className="border-t px-4 py-4 sm:px-5">
+      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {enablePageSizeSelector && pageSizeOptions && (
           <select
             value={currentPageSize}
             onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-            className="rounded border px-2 py-1 text-sm focus:ring-1 focus:ring-brand-500/10 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            className="w-full rounded border px-2 py-2 text-sm focus:ring-1 focus:ring-brand-500/10 focus:outline-none sm:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
           >
             {pageSizeOptions.map((size) => (
               <option key={size} value={size}>
@@ -65,24 +65,26 @@ export function DataTablePagination<TData>({
           </select>
         )}
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handlePreviousPage}
-            disabled={!table.getCanPreviousPage()}
-            className="rounded border px-3 py-1 disabled:opacity-50"
-          >
-            Anterior
-          </button>
-          <span className="text-sm text-gray-500">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <span className="text-center text-sm text-gray-500 sm:order-2">
             Página {currentPageIndex + 1} de {pageCount}
           </span>
-          <button
-            onClick={handleNextPage}
-            disabled={!table.getCanNextPage()}
-            className="rounded border px-3 py-1 disabled:opacity-50"
-          >
-            Siguiente
-          </button>
+          <div className="flex items-center justify-between gap-2 sm:order-1">
+            <button
+              onClick={handlePreviousPage}
+              disabled={!table.getCanPreviousPage()}
+              className="flex-1 rounded border px-3 py-2 text-sm disabled:opacity-50 sm:flex-none"
+            >
+              Anterior
+            </button>
+            <button
+              onClick={handleNextPage}
+              disabled={!table.getCanNextPage()}
+              className="flex-1 rounded border px-3 py-2 text-sm disabled:opacity-50 sm:flex-none"
+            >
+              Siguiente
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,7 +1,11 @@
 import axios from "axios";
-import { clearUser } from "@/utils/storage";
 import { classifyError, ApiErrorType } from "@/lib/errorHandler";
 import { API_BASE_URL } from "@/lib/apiConfig";
+import {
+  clearProtectedSessionState,
+  isUnauthorizedDeviceMessage,
+  persistSessionProtectionEvent,
+} from "@/lib/sessionProtection";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -31,6 +35,7 @@ const csrfApi = axios.create({
 });
 
 let isRefreshing = false;
+let isProtectingSession = false;
 let failedQueue: Array<{
   resolve: (value: unknown) => void;
   reject: (reason?: any) => void;
@@ -84,6 +89,35 @@ const normalizeUrl = (url: string): string => {
   return url.endsWith("/") ? url : `${url}/`;
 };
 
+const revokeBrowserSession = async (): Promise<void> => {
+  await ensureCsrfToken();
+
+  const csrfToken = getCookieValue("csrftoken");
+  const headers = csrfToken ? { "X-CSRFToken": csrfToken } : undefined;
+
+  await csrfApi.post("/auth/logout/", {}, { headers });
+};
+
+const redirectToLogin = () => {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname.includes("/login")) return;
+  window.location.replace("/login");
+};
+
+const enforceProtectedSession = async (classified: any) => {
+  processQueue(classified);
+  clearProtectedSessionState();
+  persistSessionProtectionEvent("unauthorized_device");
+
+  try {
+    await revokeBrowserSession();
+  } catch {
+    // Si el logout remoto falla, igual protegemos la sesión local.
+  } finally {
+    redirectToLogin();
+  }
+};
+
 api.interceptors.request.use(
   async (config) => {
     if (config.url) {
@@ -113,6 +147,24 @@ api.interceptors.response.use(
     const original = error.config;
     const classified = classifyError(error);
     const isLoginRequest = original?.url?.includes("/auth/login");
+    const isUnauthorizedDevice = isUnauthorizedDeviceMessage(
+      classified?.message,
+      classified?.detail,
+      error?.response?.data?.detail,
+    );
+
+    if (isUnauthorizedDevice) {
+      if (!isProtectingSession) {
+        isProtectingSession = true;
+        try {
+          await enforceProtectedSession(classified);
+        } finally {
+          isProtectingSession = false;
+        }
+      }
+
+      return Promise.reject(classified);
+    }
 
     if (
       classified.type === ApiErrorType.AUTHENTICATION &&
@@ -136,14 +188,28 @@ api.interceptors.response.use(
         return api(original);
       } catch (refreshError: any) {
         const classifiedRefreshError = classifyError(refreshError);
-        processQueue(classifiedRefreshError);
-        clearUser();
         if (
-          typeof window !== "undefined" &&
-          !window.location.pathname.includes("/login")
+          isUnauthorizedDeviceMessage(
+            classifiedRefreshError?.message,
+            classifiedRefreshError?.detail,
+            refreshError?.response?.data?.detail,
+          )
         ) {
-          window.location.href = "/login";
+          if (!isProtectingSession) {
+            isProtectingSession = true;
+            try {
+              await enforceProtectedSession(classifiedRefreshError);
+            } finally {
+              isProtectingSession = false;
+            }
+          }
+
+          return Promise.reject(classifiedRefreshError);
         }
+
+        processQueue(classifiedRefreshError);
+        clearProtectedSessionState();
+        redirectToLogin();
         return Promise.reject(classifiedRefreshError);
       } finally {
         isRefreshing = false;

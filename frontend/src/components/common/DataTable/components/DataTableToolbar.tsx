@@ -33,22 +33,24 @@ export function DataTableToolbar<TData>({
   const allColumns = table.getAllLeafColumns() as Column<TData, unknown>[];
 
   return (
-    <div className="flex flex-col gap-3 border-b border-gray-100 p-4 md:flex-row md:items-center md:justify-between dark:border-white/5">
-      <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
+    <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-white/5 md:flex-row md:items-center md:justify-between">
+      <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center md:w-auto">
         {enableGlobalFilter && (
           <Input
             type="search"
             placeholder={globalFilterPlaceholder}
             value={table.getState().globalFilter ?? ""}
             onChange={(e) => table.setGlobalFilter(e.target.value)}
-            className="w-full md:w-72"
+            className="w-full sm:w-auto md:w-72"
           />
         )}
         {toolbarActions}
       </div>
 
       {enableColumnVisibility && (
-        <DataTableColumnVisibility columns={allColumns} />
+        <div className="w-full md:w-auto">
+          <DataTableColumnVisibility columns={allColumns} />
+        </div>
       )}
     </div>
   );

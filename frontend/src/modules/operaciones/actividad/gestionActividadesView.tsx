@@ -109,7 +109,7 @@ const GestionActividadesView = () => {
           </div>
         )}
 
-        <div className="mt-8 h-112 min-w-0 overflow-x-hidden">
+        <div className="mt-8 min-h-0 min-w-0 overflow-x-hidden md:h-112">
           <GestionActividadesTable
             actividades={actividades}
             columns={columns}

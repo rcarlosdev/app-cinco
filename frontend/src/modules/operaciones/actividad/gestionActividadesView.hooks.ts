@@ -5,6 +5,7 @@ import { ColumnDef } from "@tanstack/react-table";
 import { ActividadFormData } from "@/schemas/actividades.schema";
 import { ACTIVIDAD_TABLE_CONFIG } from "./actividadTable.utils";
 import { getActividadesColumns } from "./gestionActividadesView.utils";
+import { logDevelopmentError } from "@/lib/environment";
 
 export const useGestionActividadesData = () => {
   const { loadActividades, actividades, loadError } = useActividadStore();
@@ -30,7 +31,7 @@ export const useGestionActividadesData = () => {
       try {
         await loadActividades();
       } catch (error) {
-        console.error("Error cargando actividades:", error);
+        logDevelopmentError("Error cargando actividades:", error);
       }
     };
 

@@ -95,7 +95,7 @@ const ModalComponent = React.forwardRef<HTMLDivElement, ModalProps>(
 
     return (
       <div
-        className="modal fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto"
+        className="modal fixed inset-0 z-99999 flex items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby={title}
