@@ -43,11 +43,14 @@ type ZodSchema = z.ZodTypeAny;
 
 export const ActividadSchema = z.object({
   id: z.number().optional(),
+  ot: z.string().optional().nullable(),
   ot_items: z
     .array(
       z.object({
         id: z.number().optional(),
         ot: z.string(),
+        fecha_inicio: z.string().nullable().optional(),
+        fecha_fin: z.string().nullable().optional(),
         is_active: z.boolean().optional(),
         created_at: z.string().optional(),
         created_by: z.number().nullable().optional(),
@@ -86,9 +89,40 @@ export const ActividadSchema = z.object({
     })
     .optional(),
 
-  ots: z
-    .array(z.string().min(1, "La OT no puede estar vacía"))
-    .min(1, "Debe registrar al menos una OT"),
+  ots: z.preprocess(
+    (val) => {
+      if (Array.isArray(val)) {
+        return val.map((item) => {
+          if (typeof item === "string") {
+            return { ot: item, fecha_inicio: "", fecha_fin: "" };
+          }
+          return item;
+        });
+      }
+      return val;
+    },
+    z
+      .array(
+        z.object({
+          ot: z.string().min(1, "La OT es requerida"),
+          fecha_inicio: z
+            .string()
+            .optional()
+            .or(z.literal(""))
+            .refine((v) => !v || !isNaN(Date.parse(v)), {
+              message: "Fecha de inicio inválida",
+            }),
+          fecha_fin: z
+            .string()
+            .optional()
+            .or(z.literal(""))
+            .refine((v) => !v || !isNaN(Date.parse(v)), {
+              message: "Fecha de fin inválida",
+            }),
+        })
+      )
+      .min(1, "Debe registrar al menos una OT")
+  ),
 
   estado: z.string().optional(), // opcional, se asignará automáticamente al crear la actividad
 

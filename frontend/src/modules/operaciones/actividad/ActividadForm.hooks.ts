@@ -40,11 +40,76 @@ export const useActividadFormLogic = ({
     reset,
     setError,
     setValue,
+    watch,
     formState: { errors },
   } = useForm<ActividadFormData>({
-    resolver: zodResolver(ActividadSchema),
+    resolver: zodResolver(ActividadSchema) as any,
     defaultValues,
   });
+
+  const watchOts = watch("ots");
+  const watchFechaInicioPadre = watch("fecha_inicio");
+  const watchFechaFinPadre = watch("fecha_fin_estimado");
+
+  // Efecto reactivo para el recálculo e integración de fechas entre OTs Hijas y Actividad Padre
+  useEffect(() => {
+    if (mode === "create") {
+      // En modo creación: las fechas del Padre se ingresan manualmente
+      // Al ingresar OTs Hijas, si el rango de alguna Hija excede el del Padre, este se extiende reactivamente (reextensión)
+      if (watchOts && Array.isArray(watchOts) && watchOts.length > 0) {
+        const hijasInicioDates = watchOts
+          .map((item) => item?.fecha_inicio)
+          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+
+        const hijasFinDates = watchOts
+          .map((item) => item?.fecha_fin)
+          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+
+        if (hijasInicioDates.length > 0 && watchFechaInicioPadre) {
+          const minHijas = hijasInicioDates.reduce((min, curr) => {
+            return new Date(curr) < new Date(min) ? curr : min;
+          });
+          if (new Date(minHijas) < new Date(watchFechaInicioPadre)) {
+            setValue("fecha_inicio", minHijas, { shouldValidate: true });
+          }
+        }
+
+        if (hijasFinDates.length > 0 && watchFechaFinPadre) {
+          const maxHijas = hijasFinDates.reduce((max, curr) => {
+            return new Date(curr) > new Date(max) ? curr : max;
+          });
+          if (new Date(maxHijas) > new Date(watchFechaFinPadre)) {
+            setValue("fecha_fin_estimado", maxHijas, { shouldValidate: true });
+          }
+        }
+      }
+    } else {
+      // En modo edición: las fechas del Padre se autocalculan estrictamente a partir del min/max de sus OTs hijas
+      if (watchOts && Array.isArray(watchOts) && watchOts.length > 0) {
+        const validInicioDates = watchOts
+          .map((item) => item?.fecha_inicio)
+          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+
+        const validFinDates = watchOts
+          .map((item) => item?.fecha_fin)
+          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+
+        if (validInicioDates.length > 0) {
+          const minInicio = validInicioDates.reduce((min, curr) => {
+            return new Date(curr) < new Date(min) ? curr : min;
+          });
+          setValue("fecha_inicio", minInicio, { shouldValidate: true });
+        }
+
+        if (validFinDates.length > 0) {
+          const maxFin = validFinDates.reduce((max, curr) => {
+            return new Date(curr) > new Date(max) ? curr : max;
+          });
+          setValue("fecha_fin_estimado", maxFin, { shouldValidate: true });
+        }
+      }
+    }
+  }, [watchOts, watchFechaInicioPadre, watchFechaFinPadre, setValue, mode]);
 
   useEffect(() => {
     let isActive = true;
@@ -84,7 +149,6 @@ export const useActividadFormLogic = ({
             }
           }
         } catch (error) {
-          // No es un error crítico, simplemente no se pudo cargar el empleado del usuario
           logDevelopmentWarning(
             "Could not load employee for current user:",
             error instanceof Error ? error.message : String(error),
