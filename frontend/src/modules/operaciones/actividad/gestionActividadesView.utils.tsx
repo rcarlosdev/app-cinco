@@ -2,6 +2,7 @@ import { ColumnDef } from "@tanstack/react-table";
 import { ActividadFormData } from "@/schemas/actividades.schema";
 import Badge from "@/components/ui/badge/Badge";
 import ModalActividad from "./ModalActividad";
+import { toDateOrUndefined } from "./ActividadForm.utils";
 import {
   actividadCsvColumns,
   ACTIVIDAD_TABLE_CONFIG,
@@ -11,7 +12,8 @@ import { exportToCsv } from "@/utils/csv";
 const formatDate = (value?: string | null) => {
   if (!value) return "-";
 
-  const date = new Date(value);
+  const date = toDateOrUndefined(value);
+  if (!date) return "-";
   if (Number.isNaN(date.getTime())) return "-";
 
   return date.toLocaleDateString("es-CO");
