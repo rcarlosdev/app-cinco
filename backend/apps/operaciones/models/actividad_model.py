@@ -77,6 +77,8 @@ class ActividadOT(models.Model):
         related_name='ot_relaciones'
     )
     ot = models.CharField(max_length=100, db_index=True)
+    fecha_inicio = models.DateField(blank=True, null=True)
+    fecha_fin = models.DateField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.IntegerField(null=True, blank=True)

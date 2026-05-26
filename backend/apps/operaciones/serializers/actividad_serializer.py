@@ -28,6 +28,8 @@ class ActividadOTSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'ot',
+            'fecha_inicio',
+            'fecha_fin',
             'is_active',
             'created_at',
             'created_by',
@@ -36,13 +38,22 @@ class ActividadOTSerializer(serializers.ModelSerializer):
         )
 
 
+class ActividadOTWriteSerializer(serializers.Serializer):
+    ot = serializers.CharField(max_length=100)
+    fecha_inicio = serializers.DateField(
+        input_formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"],
+        required=True
+    )
+    fecha_fin = serializers.DateField(
+        input_formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"],
+        required=True
+    )
+
+
 class ActividadWriteSerializer(serializers.ModelSerializer):
     detalle = ActividadDetalleSerializer()
     ubicacion = ActividadUbicacionSerializer()
-    ots = serializers.ListField(
-        child=serializers.CharField(max_length=100),
-        allow_empty=False,
-    )
+    ots = ActividadOTWriteSerializer(many=True, required=True)
     ot = serializers.CharField(required=False, allow_blank=False, write_only=True)
     
     # fecha_inicio = serializers.DateTimeField(
@@ -95,12 +106,9 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
         ot = attrs.pop('ot', None)
         ots = attrs.get('ots')
 
-        if ot and not ots:
-            ots = [ot]
-        elif ots is None and self.instance is not None:
-            ots = self.instance.ots_list
-
-        normalized_ots = normalize_ot_values(ots)
+        ot_codes = [item['ot'].strip() for item in ots if item.get('ot')] if ots else []
+        
+        normalized_ots = normalize_ot_values(ot_codes)
         if not normalized_ots:
             raise serializers.ValidationError(
                 {"ots": "Debe registrar al menos una OT relacionada."}
@@ -114,7 +122,11 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
         except ValueError as exc:
             raise serializers.ValidationError({"ots": str(exc)}) from exc
 
-        attrs['ots'] = normalized_ots
+        # Limpiar espacios de los códigos en attrs
+        for item in ots:
+            item['ot'] = item['ot'].strip()
+
+        attrs['ots'] = ots
         return attrs
 
     def update(self, instance, validated_data):

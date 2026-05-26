@@ -110,3 +110,26 @@ class ActividadOTRulesTests(DjangoTestCase):
 		)
 
 		ActividadService.validar_ots_unicas(['OT-100'], actividad_id=actividad.id)
+
+
+class ActividadServiceOTSyncTests(DjangoTestCase):
+	def test_sync_ots_recalcula_fechas_padre_correctamente(self):
+		actividad = Actividad.objects.create(
+			responsable_id=1,
+			fecha_inicio="2026-05-01",
+			fecha_fin_estimado="2026-05-02"
+		)
+
+		ots_data = [
+			{'ot': 'OT-A', 'fecha_inicio': '2026-05-05', 'fecha_fin': '2026-05-15'},
+			{'ot': 'OT-B', 'fecha_inicio': '2026-05-03', 'fecha_fin': '2026-05-10'},
+			{'ot': 'OT-C', 'fecha_inicio': '2026-05-07', 'fecha_fin': '2026-05-20'},
+		]
+
+		ActividadService._sync_ots(actividad, ots_data, actor_user_id=1)
+		actividad.refresh_from_db()
+
+		self.assertEqual(actividad.ot, 'OT-A')
+		from datetime import date
+		self.assertEqual(actividad.fecha_inicio, date(2026, 5, 3))
+		self.assertEqual(actividad.fecha_fin_estimado, date(2026, 5, 20))

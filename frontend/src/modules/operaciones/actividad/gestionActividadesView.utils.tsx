@@ -25,9 +25,17 @@ const truncateText = (value?: string, maxLength = 60) => {
   return `${value.slice(0, maxLength)}...`;
 };
 
-const formatOts = (ots?: string[]) => {
+const formatOts = (ots?: any[]) => {
   if (!ots?.length) return "-";
-  return ots.join(", ");
+  return ots
+    .map((item) => {
+      if (typeof item === "string") {
+        return item;
+      }
+      return item?.ot || "";
+    })
+    .filter(Boolean)
+    .join(", ");
 };
 
 export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
@@ -45,16 +53,8 @@ export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
       }
 
       const actividad = {
+        ...row.original,
         id: id as number,
-        ots: row.original.ots,
-        estado: row.original.estado,
-        responsable_snapshot: row.original.responsable_snapshot,
-        responsable_id: row.original.responsable_id,
-        fecha_inicio: row.original.fecha_inicio,
-        fecha_fin_estimado: row.original.fecha_fin_estimado,
-        fecha_fin_real: row.original.fecha_fin_real,
-        detalle: row.original.detalle,
-        ubicacion: row.original.ubicacion,
       };
 
       return (
