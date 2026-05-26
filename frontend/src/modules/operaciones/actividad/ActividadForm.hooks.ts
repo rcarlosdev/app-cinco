@@ -43,7 +43,7 @@ export const useActividadFormLogic = ({
     watch,
     formState: { errors },
   } = useForm<ActividadFormData>({
-    resolver: zodResolver(ActividadSchema),
+    resolver: zodResolver(ActividadSchema) as any,
     defaultValues,
   });
 
