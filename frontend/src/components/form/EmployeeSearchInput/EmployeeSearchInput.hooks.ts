@@ -3,6 +3,7 @@ import { Empleado } from "@/types/empleado";
 import { searchEmpleados } from "@/services/empleado.service";
 import { getAvatarUrl, preloadAvatars } from "@/utils/avatar";
 import { EMPLOYEE_SEARCH_CONFIG } from "./EmployeeSearchInput.utils";
+import { logDevelopmentError } from "@/lib/environment";
 
 interface UseEmployeeSearchParams {
   value?: Empleado | null;
@@ -63,7 +64,7 @@ export const useEmployeeSearch = ({ value }: UseEmployeeSearchParams) => {
             preloadAvatars(imageUrls);
           }
         } catch (error) {
-          console.error("Error searching employees:", error);
+          logDevelopmentError("Error searching employees:", error);
           setResults([]);
         } finally {
           setIsLoading(false);

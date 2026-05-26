@@ -7,6 +7,7 @@ import {
   validateSession,
 } from "@/services/auth.service";
 import { ApiErrorDetail, classifyError } from "@/lib/errorHandler";
+import { logDevelopmentError } from "@/lib/environment";
 
 interface AuthState {
   user: AuthUser | null;
@@ -41,7 +42,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await logoutUser();
     } catch (error) {
-      console.error("Error al cerrar sesion:", error);
+      logDevelopmentError("Error al cerrar sesion:", error);
     } finally {
       clearUser();
       set({

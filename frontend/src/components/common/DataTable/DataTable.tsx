@@ -199,7 +199,7 @@ export function DataTable<TData>({
   );
 
   return (
-    <div className="flex h-full w-full min-w-0 flex-col rounded-xl border border-gray-200 bg-white dark:border-white/5 dark:bg-white/3">
+    <div className="flex w-full min-w-0 flex-col rounded-xl border border-gray-200 bg-white dark:border-white/5 dark:bg-white/3 md:h-full">
       {/* Toolbar con búsqueda, columnas y acciones */}
       <DataTableToolbar
         table={table}

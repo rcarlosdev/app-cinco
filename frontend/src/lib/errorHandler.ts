@@ -3,6 +3,7 @@
  */
 
 import { API_BASE_URL } from "@/lib/apiConfig";
+import { shouldExposeTechnicalDetails } from "@/lib/environment";
 
 export enum ApiErrorType {
   VALIDATION = "VALIDATION",
@@ -34,7 +35,11 @@ export interface ApiError extends Error {
 }
 
 const getNetworkErrorMessage = (): string => {
-  return `No se pudo conectar con el backend (${API_BASE_URL}). Verifica que Django este corriendo y que la BD/VPN este disponible.`;
+  if (shouldExposeTechnicalDetails()) {
+    return `No se pudo conectar con el backend (${API_BASE_URL}). Verifica que Django este corriendo y que la BD/VPN este disponible.`;
+  }
+
+  return "No fue posible conectar con el servicio. Intenta nuevamente en unos minutos.";
 };
 
 const getRawErrorMessage = (error: any): string => {
