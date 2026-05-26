@@ -1,6 +1,5 @@
 "use client";
 
-import Form from "@/components/form/Form";
 import Button from "@/components/ui/button/Button";
 import { useActividadFormLogic } from "./ActividadForm.hooks";
 import { ActividadFormProps } from "./ActividadForm.types";
@@ -26,7 +25,7 @@ const ActividadForm = ({
   });
 
   return (
-    <Form handleSubmit={handleSubmit} onSubmit={onSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
       <ActividadFormFields
         control={control}
         errors={errors}
@@ -40,8 +39,9 @@ const ActividadForm = ({
           Guardar
         </Button>
       </div>
-    </Form>
+    </form>
   );
 };
 
 export default ActividadForm;
+

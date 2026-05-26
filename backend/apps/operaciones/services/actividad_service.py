@@ -15,9 +15,11 @@ from apps.operaciones.models import (
 
 class ActividadService:
     @staticmethod
-    def _sync_ots(actividad: Actividad, ots, actor_user_id=None):
-        normalized_ots = normalize_ot_values(ots)
-        actividad.ot = normalized_ots[0] if normalized_ots else ""
+    def _sync_ots(actividad: Actividad, ots_data, actor_user_id=None):
+        # ots_data es una lista de diccionarios: [{'ot': '...', 'fecha_inicio': '...', 'fecha_fin': '...'}]
+        # Extraemos los códigos de OT limpios
+        ot_codes = [item['ot'].strip() for item in ots_data if item.get('ot')]
+        actividad.ot = ot_codes[0] if ot_codes else ""
         actividad.save(update_fields=['ot', 'updated_at'])
 
         existing_relations = {
@@ -26,13 +28,26 @@ class ActividadService:
         }
 
         current_active = set()
-        for ot in normalized_ots:
+        for item in ots_data:
+            ot = item.get('ot', '').strip()
+            if not ot:
+                continue
+
+            fecha_inicio = item.get('fecha_inicio') or None
+            fecha_fin = item.get('fecha_fin') or None
+
             relation = existing_relations.get(ot)
             if relation:
                 updates = []
                 if not relation.is_active:
                     relation.is_active = True
                     updates.append('is_active')
+                if relation.fecha_inicio != fecha_inicio:
+                    relation.fecha_inicio = fecha_inicio
+                    updates.append('fecha_inicio')
+                if relation.fecha_fin != fecha_fin:
+                    relation.fecha_fin = fecha_fin
+                    updates.append('fecha_fin')
                 if actor_user_id is not None:
                     relation.updated_by = actor_user_id
                     updates.append('updated_by')
@@ -42,6 +57,8 @@ class ActividadService:
                 ActividadOT.objects.create(
                     actividad=actividad,
                     ot=ot,
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
                     created_by=actor_user_id,
                     updated_by=actor_user_id,
                 )
@@ -52,6 +69,22 @@ class ActividadService:
                 relation.is_active = False
                 relation.updated_by = actor_user_id
                 relation.save(update_fields=['is_active', 'updated_by', 'updated_at'])
+
+        # Recalcular fechas generales de la Actividad principal a partir de sus OTs activas
+        relaciones_activas = ActividadOT.objects.filter(actividad=actividad, is_active=True)
+        if relaciones_activas.exists():
+            from django.db.models import Min, Max
+            fechas = relaciones_activas.aggregate(
+                min_inicio=Min('fecha_inicio'),
+                max_fin=Max('fecha_fin')
+            )
+            actividad.fecha_inicio = fechas['min_inicio']
+            actividad.fecha_fin_estimado = fechas['max_fin']
+        else:
+            actividad.fecha_inicio = None
+            actividad.fecha_fin_estimado = None
+
+        actividad.save(update_fields=['fecha_inicio', 'fecha_fin_estimado', 'updated_at'])
 
     @staticmethod
     def validar_ots_unicas(ots, actividad_id=None):
@@ -80,11 +113,13 @@ class ActividadService:
 
         with transaction.atomic():
             empleado = EmpleadoService().obtener_basico(payload['responsable_id'])
-            ActividadService.validar_ots_unicas(ots)
+            
+            ot_codes = [item['ot'] for item in ots if item.get('ot')] if ots else []
+            ActividadService.validar_ots_unicas(ot_codes)
 
             payload['created_by'] = actor_user_id
             payload['updated_by'] = actor_user_id
-            payload['ot'] = ots[0]
+            payload['ot'] = ot_codes[0] if ot_codes else ""
 
             actividad = Actividad.objects.create(**payload)
 
@@ -124,7 +159,8 @@ class ActividadService:
 
         with transaction.atomic():
             if ots is not None:
-                ActividadService.validar_ots_unicas(ots, actividad_id=instance.id)
+                ot_codes = [item['ot'] for item in ots if item.get('ot')]
+                ActividadService.validar_ots_unicas(ot_codes, actividad_id=instance.id)
 
             for field, value in validated_data.items():
                 setattr(instance, field, value)

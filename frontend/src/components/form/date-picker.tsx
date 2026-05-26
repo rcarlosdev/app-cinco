@@ -26,6 +26,7 @@ type PropsType = {
     from: number;
     to: number;
   };
+  disabled?: boolean;
 };
 
 const normalizeYearRange = (
@@ -200,6 +201,7 @@ export default function DatePicker({
   success,
   options = {},
   yearRange,
+  disabled,
 }: PropsType) {
   const [isMobile, setIsMobile] = useState(false);
 
@@ -265,9 +267,13 @@ export default function DatePicker({
           : []),
     ];
 
-    const flatPickrInstance = flatpickr(`#${id}`, {
+    const inputElement = document.getElementById(id);
+    if (!inputElement) return;
+
+    const flatPickrInstance = flatpickr(inputElement, {
       ...options,
       mode: mode || "single",
+      clickOpens: !disabled,
       // monthSelectorType: "static",
       // dateFormat: "Y-m-d",
       defaultDate,
@@ -345,6 +351,7 @@ export default function DatePicker({
             id={id}
             type="date"
             value={mobileValue}
+            disabled={disabled}
             onChange={(event) => {
               const value = event.target.value;
               const selectedDate = value
@@ -362,7 +369,7 @@ export default function DatePicker({
                 value,
               );
             }}
-            className={`shadow-theme-xs focus:border-brand-300 focus:ring-brand-500/20 dark:focus:border-brand-800 h-10 w-full appearance-none rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 focus:ring-3 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 ${error ? "border-red-400 focus:border-red-400 focus:ring-red-400/20" : ""}`}
+            className={`shadow-theme-xs focus:border-brand-300 focus:ring-brand-500/20 dark:focus:border-brand-800 h-10 w-full appearance-none rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 focus:ring-3 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 ${error ? "border-red-400 focus:border-red-400 focus:ring-red-400/20" : ""} ${disabled ? "opacity-60 bg-gray-100 dark:bg-gray-800 cursor-not-allowed" : ""}`}
             aria-invalid={error ? "true" : "false"}
           />
           {hint && (
@@ -393,7 +400,8 @@ export default function DatePicker({
           id={id}
           placeholder={placeholder}
           defaultValue={mobileValue}
-          className={`shadow-theme-xs focus:border-brand-300 focus:ring-brand-500/20 dark:focus:border-brand-800 h-8 w-full appearance-none rounded-lg border border-gray-300 bg-transparent px-2 py-0.5 text-sm text-gray-800 placeholder:text-gray-400 focus:ring-3 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 ${error ? "border-red-400 focus:border-red-400 focus:ring-red-400/20" : ""}`}
+          disabled={disabled}
+          className={`shadow-theme-xs focus:border-brand-300 focus:ring-brand-500/20 dark:focus:border-brand-800 h-8 w-full appearance-none rounded-lg border border-gray-300 bg-transparent px-2 py-0.5 text-sm text-gray-800 placeholder:text-gray-400 focus:ring-3 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 ${error ? "border-red-400 focus:border-red-400 focus:ring-red-400/20" : ""} ${disabled ? "opacity-60 bg-gray-100 dark:bg-gray-800 cursor-not-allowed" : ""}`}
           aria-invalid={error ? "true" : "false"}
         />
         {hint && (
