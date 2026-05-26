@@ -15,7 +15,7 @@ export const ModalContent = ({
 }: ModalContentProps) => {
   return (
     <div
-      className={` ${scrollable ? "max-h-[70vh] overflow-y-auto" : ""} ${className || ""} `}
+      className={` ${scrollable ? "max-h-[calc(100vh-8rem)] overflow-y-auto overscroll-contain sm:max-h-[70vh]" : ""} ${className || ""} `}
     >
       {children}
     </div>

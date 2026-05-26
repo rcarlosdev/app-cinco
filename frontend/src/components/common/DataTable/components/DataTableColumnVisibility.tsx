@@ -33,7 +33,7 @@ export function DataTableColumnVisibility<TData>({
       <Button
         variant="outline"
         size="sm"
-        className="dropdown-toggle"
+        className="dropdown-toggle w-full md:w-auto"
         endIcon={<ChevronDownIcon className="h-4 w-4" />}
         onClick={() => setIsOpen((prev) => !prev)}
       >
