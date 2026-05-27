@@ -45,6 +45,27 @@ const FieldLabel = ({ htmlFor, field, children }: FieldLabelProps) => (
   </Label>
 );
 
+const getArrayFieldErrorMessage = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const maybeError = value as {
+    message?: unknown;
+    root?: { message?: unknown };
+  };
+
+  if (typeof maybeError.message === "string") {
+    return maybeError.message;
+  }
+
+  if (typeof maybeError.root?.message === "string") {
+    return maybeError.root.message;
+  }
+
+  return undefined;
+};
+
 export const ActividadFormFields = ({
   control,
   errors,
@@ -58,6 +79,7 @@ export const ActividadFormFields = ({
   });
 
   const isEditMode = mode === "edit";
+  const otsErrorMessage = getArrayFieldErrorMessage(errors.ots);
 
   return (
     <div className="grid max-h-96 grid-cols-1 gap-5 overflow-auto pr-2 sm:grid-cols-2">
@@ -282,9 +304,9 @@ export const ActividadFormFields = ({
           </button>
         </div>
 
-        {errors.ots && typeof errors.ots.message === "string" && (
+        {otsErrorMessage && (
           <p className="text-xs text-red-500 font-medium mt-1">
-            {errors.ots.message}
+            {otsErrorMessage}
           </p>
         )}
       </div>
