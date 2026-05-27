@@ -1,12 +1,12 @@
 import { useState } from "react";
 import Button from "@/components/ui/button/Button";
 import { DownloadIcon } from "@/icons";
-import { ActividadFormData } from "@/schemas/actividades.schema";
+import { ActividadRecord } from "@/schemas/actividades.schema";
 import { handleExportToCsvHelper } from "../gestionActividadesView.utils";
 import ModalImportarCsv from "./ModalImportarCsv";
 
 interface GestionActividadesToolbarProps {
-  visibleRows: ActividadFormData[];
+  visibleRows: ActividadRecord[];
 }
 
 export const GestionActividadesToolbar = ({

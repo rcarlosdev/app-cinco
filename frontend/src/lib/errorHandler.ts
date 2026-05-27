@@ -4,6 +4,7 @@
 
 import { API_BASE_URL } from "@/lib/apiConfig";
 import { shouldExposeTechnicalDetails } from "@/lib/environment";
+import { ZodError } from "zod";
 
 export enum ApiErrorType {
   VALIDATION = "VALIDATION",
@@ -68,7 +69,9 @@ export function classifyError(error: any): ApiErrorDetail {
 
   let type: ApiErrorType = ApiErrorType.UNKNOWN;
 
-  if (error?.code === "ECONNABORTED") {
+  if (error instanceof ZodError) {
+    type = ApiErrorType.VALIDATION;
+  } else if (error?.code === "ECONNABORTED") {
     type = ApiErrorType.TIMEOUT;
   } else if (!error?.response) {
     type = ApiErrorType.NETWORK_ERROR;
@@ -102,7 +105,9 @@ export function classifyError(error: any): ApiErrorDetail {
   }
 
   const message =
-    type === ApiErrorType.NETWORK_ERROR ||
+    error instanceof ZodError
+      ? "Se recibieron actividades con un formato inesperado del backend."
+      : type === ApiErrorType.NETWORK_ERROR ||
     rawMessage === "Network Error" ||
     rawMessage === "Failed to fetch"
       ? getNetworkErrorMessage()

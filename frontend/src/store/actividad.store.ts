@@ -1,22 +1,71 @@
 // src/store/menu.store.ts
 import { create } from "zustand";
 import { getActividades } from "@/services/actividades.service";
-import { ActividadSchema } from "@/schemas/actividades.schema";
-import { ApiErrorDetail, classifyError } from "@/lib/errorHandler";
+import {
+  ActividadRecordSchema,
+  normalizeActividadFromApi,
+} from "@/schemas/actividades.schema";
+import {
+  ApiErrorDetail,
+  classifyError,
+  createApiError,
+} from "@/lib/errorHandler";
+import { logDevelopmentWarning } from "@/lib/environment";
 
 export const useActividadStore = create<any>((set) => ({
-  actividades: ActividadSchema.array().parse([]),
+  actividades: ActividadRecordSchema.array().parse([]),
   loadError: null as ApiErrorDetail | null,
+  loadWarning: null as string | null,
 
   loadActividades: async () => {
     try {
-      const actividades = ActividadSchema.array().parse(await getActividades());
-      set({ actividades, loadError: null });
+      const response = await getActividades();
+      const normalized = Array.isArray(response)
+        ? response.map(normalizeActividadFromApi)
+        : [];
+
+      const parsedRows = normalized.map((item, index) => ({
+        index,
+        result: ActividadRecordSchema.safeParse(item),
+      }));
+
+      const actividades = parsedRows
+        .filter((row) => row.result.success)
+        .map((row) => row.result.data);
+
+      const invalidRows = parsedRows.filter(
+        (
+          row,
+        ): row is {
+          index: number;
+          result: Extract<
+            (typeof parsedRows)[number]["result"],
+            { success: false }
+          >;
+        } => !row.result.success,
+      );
+      const loadWarning =
+        invalidRows.length > 0
+          ? `Se omitieron ${invalidRows.length} actividad(es) con datos incompletos o inválidos.`
+          : null;
+
+      if (invalidRows.length > 0) {
+        logDevelopmentWarning(
+          "Actividades omitidas por formato inesperado:",
+          invalidRows.map((row) => ({
+            index: row.index,
+            issues: row.result.error.issues,
+            row: normalized[row.index],
+          })),
+        );
+      }
+
+      set({ actividades, loadError: null, loadWarning });
       return actividades;
     } catch (error) {
       const loadError = classifyError(error);
-      set({ loadError });
-      throw loadError;
+      set({ loadError, loadWarning: null });
+      throw createApiError(error);
     }
   },
 

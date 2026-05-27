@@ -1,5 +1,5 @@
 import { ColumnDef } from "@tanstack/react-table";
-import { ActividadFormData } from "@/schemas/actividades.schema";
+import { ActividadRecord } from "@/schemas/actividades.schema";
 import Badge from "@/components/ui/badge/Badge";
 import ModalActividad from "./ModalActividad";
 import { toDateOrUndefined } from "./ActividadForm.utils";
@@ -38,7 +38,7 @@ const formatOts = (ots?: any[]) => {
     .join(", ");
 };
 
-export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
+export const getActividadesColumns = (): ColumnDef<ActividadRecord>[] => [
   {
     id: "acciones",
     header: "ACCIONES",
@@ -158,7 +158,7 @@ export const getActividadesColumns = (): ColumnDef<ActividadFormData>[] => [
   },
 ];
 
-export const handleExportToCsvHelper = (visibleRows: ActividadFormData[]) => {
+export const handleExportToCsvHelper = (visibleRows: ActividadRecord[]) => {
   if (!visibleRows.length) {
     return;
   }
