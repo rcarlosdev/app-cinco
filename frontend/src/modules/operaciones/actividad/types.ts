@@ -1,7 +1,7 @@
 // /modules/operaciones/actividad/types.ts
 
-import { ActividadFormData } from "@/schemas/actividades.schema";
+import { ActividadRecord } from "@/schemas/actividades.schema";
 
-export interface Actividad extends ActividadFormData {
+export interface Actividad extends ActividadRecord {
   id: number;
 }

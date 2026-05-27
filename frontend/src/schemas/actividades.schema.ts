@@ -156,6 +156,147 @@ export const ActividadSchema = z.object({
     }),
 });
 
+export const ActividadRecordSchema = z.object({
+  id: z.number().optional(),
+  ot: z.string().optional().nullable(),
+  ot_items: z
+    .array(
+      z.object({
+        id: z.number().optional(),
+        ot: z.string().optional().default(""),
+        fecha_inicio: z.string().nullable().optional(),
+        fecha_fin: z.string().nullable().optional(),
+        is_active: z.boolean().optional(),
+        created_at: z.string().optional(),
+        created_by: z.number().nullable().optional(),
+        updated_at: z.string().optional(),
+        updated_by: z.number().nullable().optional(),
+      }),
+    )
+    .optional(),
+  detalle: z.object({
+    tipo_trabajo: z.string().optional().default(""),
+    descripcion: z.string().optional().default(""),
+  }),
+  ubicacion: z.object({
+    direccion: z.string().optional().default(""),
+    coordenada_x: z.string().optional().default(""),
+    coordenada_y: z.string().optional().default(""),
+    zona: z.string().optional().default(""),
+    nodo: z.string().optional().default(""),
+  }),
+  responsable_snapshot: z
+    .object({
+      nombre: z.string().optional().default(""),
+      area: z.string().optional().default(""),
+      carpeta: z.string().optional().default(""),
+      cargo: z.string().optional().default(""),
+      movil: z.string().optional().default(""),
+    })
+    .optional(),
+  ots: z
+    .array(
+      z.union([
+        z.string(),
+        z.object({
+          ot: z.string().optional().default(""),
+          fecha_inicio: z.string().nullable().optional(),
+          fecha_fin: z.string().nullable().optional(),
+        }),
+      ]),
+    )
+    .default([]),
+  estado: z.string().optional(),
+  responsable_id: z.number().optional(),
+  fecha_inicio: z.string().optional().nullable(),
+  fecha_fin_estimado: z.string().optional().nullable(),
+  fecha_fin_real: z.string().optional().nullable(),
+});
+
+const toOptionalString = (value: unknown): string | undefined => {
+  return typeof value === "string" ? value : undefined;
+};
+
+const toNullableString = (value: unknown): string | null | undefined => {
+  if (value === null) return null;
+  if (typeof value === "string") return value;
+  return undefined;
+};
+
+const toNumberOrUndefined = (value: unknown): number | undefined => {
+  return typeof value === "number" ? value : undefined;
+};
+
+const toNullableNumber = (value: unknown): number | null | undefined => {
+  if (value === null) return null;
+  if (typeof value === "number") return value;
+  return undefined;
+};
+
+const toBooleanOrUndefined = (value: unknown): boolean | undefined => {
+  return typeof value === "boolean" ? value : undefined;
+};
+
+export const normalizeActividadFromApi = (value: unknown) => {
+  const actividad = (value ?? {}) as Record<string, unknown>;
+  const detalle = (actividad.detalle ?? {}) as Record<string, unknown>;
+  const ubicacion = (actividad.ubicacion ?? {}) as Record<string, unknown>;
+  const responsable =
+    actividad.responsable_snapshot &&
+    typeof actividad.responsable_snapshot === "object"
+      ? (actividad.responsable_snapshot as Record<string, unknown>)
+      : undefined;
+
+  const rawOts = Array.isArray(actividad.ots) ? actividad.ots : [];
+  const rawOtItems = Array.isArray(actividad.ot_items) ? actividad.ot_items : [];
+
+  return {
+    id: toNumberOrUndefined(actividad.id),
+    ot: toNullableString(actividad.ot),
+    ot_items: rawOtItems.map((item) => {
+      const otItem = (item ?? {}) as Record<string, unknown>;
+
+      return {
+        id: toNumberOrUndefined(otItem.id),
+        ot: toOptionalString(otItem.ot) ?? "",
+        fecha_inicio: toNullableString(otItem.fecha_inicio),
+        fecha_fin: toNullableString(otItem.fecha_fin),
+        is_active: toBooleanOrUndefined(otItem.is_active),
+        created_at: toOptionalString(otItem.created_at),
+        created_by: toNullableNumber(otItem.created_by),
+        updated_at: toOptionalString(otItem.updated_at),
+        updated_by: toNullableNumber(otItem.updated_by),
+      };
+    }),
+    detalle: {
+      tipo_trabajo: toOptionalString(detalle.tipo_trabajo) ?? "",
+      descripcion: toOptionalString(detalle.descripcion) ?? "",
+    },
+    ubicacion: {
+      direccion: toOptionalString(ubicacion.direccion) ?? "",
+      coordenada_x: toOptionalString(ubicacion.coordenada_x) ?? "",
+      coordenada_y: toOptionalString(ubicacion.coordenada_y) ?? "",
+      zona: toOptionalString(ubicacion.zona) ?? "",
+      nodo: toOptionalString(ubicacion.nodo) ?? "",
+    },
+    responsable_snapshot: responsable
+      ? {
+          nombre: toOptionalString(responsable.nombre) ?? "",
+          area: toOptionalString(responsable.area) ?? "",
+          carpeta: toOptionalString(responsable.carpeta) ?? "",
+          cargo: toOptionalString(responsable.cargo) ?? "",
+          movil: toOptionalString(responsable.movil) ?? "",
+        }
+      : undefined,
+    ots: rawOts,
+    estado: toOptionalString(actividad.estado),
+    responsable_id: toNumberOrUndefined(actividad.responsable_id) ?? 0,
+    fecha_inicio: toOptionalString(actividad.fecha_inicio) ?? "",
+    fecha_fin_estimado: toOptionalString(actividad.fecha_fin_estimado) ?? "",
+    fecha_fin_real: toNullableString(actividad.fecha_fin_real) ?? null,
+  };
+};
+
 const unwrapSchema = (schema: ZodSchema): ZodSchema => {
   let current = schema;
 
@@ -198,3 +339,4 @@ export const isActividadFieldRequired = (fieldPath: string): boolean => {
 };
 
 export type ActividadFormData = z.infer<typeof ActividadSchema>;
+export type ActividadRecord = z.infer<typeof ActividadRecordSchema>;
