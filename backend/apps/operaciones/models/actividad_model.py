@@ -118,10 +118,10 @@ class ActividadUbicacion(models.Model):
     )
 
     direccion = models.CharField(max_length=255)
-    coordenada_x = models.CharField(max_length=100)
-    coordenada_y = models.CharField(max_length=100)
-    zona = models.CharField(max_length=100)
-    nodo = models.CharField(max_length=100)
+    coordenada_x = models.CharField(max_length=100, blank=True, default="")
+    coordenada_y = models.CharField(max_length=100, blank=True, default="")
+    zona = models.CharField(max_length=100, blank=True, default="")
+    nodo = models.CharField(max_length=100, blank=True, default="")
 
 
 class ActividadDetalle(models.Model):
@@ -132,5 +132,5 @@ class ActividadDetalle(models.Model):
     )
 
     tipo_trabajo = models.CharField(max_length=100)
-    descripcion = models.TextField()
+    descripcion = models.TextField(blank=True, default="")
     extra = models.JSONField(blank=True, null=True)

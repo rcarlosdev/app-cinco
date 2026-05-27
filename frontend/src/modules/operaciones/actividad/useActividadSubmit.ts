@@ -5,6 +5,24 @@ import { useFormSubmit } from "@/hooks/useFormSubmit";
 import { useActividadStore } from "@/store/actividad.store";
 import { toast } from "sonner";
 
+const toNullableDate = (value?: string | null) => {
+  if (!value || !value.trim()) {
+    return null;
+  }
+
+  return value;
+};
+
+const buildActividadPayload = (data: ActividadFormData): ActividadFormData => ({
+  ...data,
+  fecha_fin_real: toNullableDate(data.fecha_fin_real),
+  ots: data.ots.map((item) => ({
+    ...item,
+    fecha_inicio: toNullableDate(item.fecha_inicio) ?? undefined,
+    fecha_fin: toNullableDate(item.fecha_fin) ?? undefined,
+  })),
+});
+
 export const useActividadSubmit = () => {
   const { submit, isLoading, error } = useFormSubmit<ActividadFormData>();
   const { upsertActividad } = useActividadStore();
@@ -21,8 +39,9 @@ export const useActividadSubmit = () => {
         : `/operaciones/actividades/${id}/`;
 
     const method = mode === "create" ? "POST" : "PATCH";
+    const payload = buildActividadPayload(data);
 
-    await submit(data, {
+    await submit(payload, {
       endpoint,
       method,
       onSuccess: (response) => {
