@@ -49,6 +49,29 @@ const getRawErrorMessage = (error: any): string => {
   return String(error);
 };
 
+const getFirstNestedMessage = (value: unknown): string | undefined => {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const message = getFirstNestedMessage(item);
+      if (message) return message;
+    }
+    return undefined;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value)) {
+      const message = getFirstNestedMessage(nestedValue);
+      if (message) return message;
+    }
+  }
+
+  return undefined;
+};
+
 /**
  * Clasifica el tipo de error basado en el estado HTTP y contenido
  */
@@ -64,8 +87,13 @@ export function classifyError(error: any): ApiErrorDetail {
 
   const status = error?.response?.status || 0;
   const data = error?.response?.data;
+  const nestedMessage = getFirstNestedMessage(data);
   const rawMessage =
-    data?.message || data?.detail || getRawErrorMessage(error) || "Error desconocido";
+    data?.message ||
+    data?.detail ||
+    nestedMessage ||
+    getRawErrorMessage(error) ||
+    "Error desconocido";
 
   let type: ApiErrorType = ApiErrorType.UNKNOWN;
 

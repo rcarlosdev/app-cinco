@@ -37,25 +37,39 @@ export function useBackendErrors<TFieldValues extends FieldValues>(
         const fullPath = prefix ? `${prefix}.${field}` : field;
         const value = errors[field];
 
-        // Si es un array de strings (formato típico de Django REST Framework)
         if (Array.isArray(value)) {
-          const message = value[0];
-          if (message && typeof message === "string") {
+          const stringMessages = value.filter(
+            (item): item is string => typeof item === "string",
+          );
+
+          if (stringMessages.length > 0) {
             setError(fullPath as Path<TFieldValues>, {
               type: "server",
-              message,
+              message: stringMessages[0],
             });
+            return;
           }
-        }
-        // Si es un string directo
-        else if (typeof value === "string") {
+
+          value.forEach((item, index) => {
+            if (item && typeof item === "object") {
+              applyErrors(item, `${fullPath}.${index}`);
+            }
+          });
+        } else if (typeof value === "string") {
           setError(fullPath as Path<TFieldValues>, {
             type: "server",
             message: value,
           });
-        }
-        // Si es un objeto anidado, procesarlo recursivamente
-        else if (typeof value === "object" && value !== null) {
+        } else if (
+          typeof value === "object" &&
+          value !== null &&
+          typeof value.message === "string"
+        ) {
+          setError(fullPath as Path<TFieldValues>, {
+            type: "server",
+            message: value.message,
+          });
+        } else if (typeof value === "object" && value !== null) {
           applyErrors(value, fullPath);
         }
       });
