@@ -10,7 +10,18 @@ from apps.empleados.services import EmpleadoService
 from apps.operaciones.services.actividad_service import ActividadService
 
 
+class OptionalDateField(serializers.DateField):
+    def to_internal_value(self, value):
+        if isinstance(value, str):
+            value = value.strip()
+        if value in ("", None, "null", "undefined"):
+            value = None
+        return super().to_internal_value(value)
+
+
 class ActividadDetalleSerializer(serializers.ModelSerializer):
+    descripcion = serializers.CharField(required=False, allow_blank=True)
+
     class Meta:
         model = ActividadDetalle
         exclude = ('actividad',)
@@ -20,6 +31,7 @@ class ActividadUbicacionSerializer(serializers.ModelSerializer):
     coordenada_x = serializers.CharField(required=False, allow_blank=True)
     coordenada_y = serializers.CharField(required=False, allow_blank=True)
     zona = serializers.CharField(required=False, allow_blank=True)
+    nodo = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = ActividadUbicacion
@@ -44,13 +56,15 @@ class ActividadOTSerializer(serializers.ModelSerializer):
 
 class ActividadOTWriteSerializer(serializers.Serializer):
     ot = serializers.CharField(max_length=100)
-    fecha_inicio = serializers.DateField(
+    fecha_inicio = OptionalDateField(
         input_formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"],
-        required=True
+        required=False,
+        allow_null=True
     )
-    fecha_fin = serializers.DateField(
+    fecha_fin = OptionalDateField(
         input_formats=["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"],
-        required=True
+        required=False,
+        allow_null=True
     )
 
 
@@ -76,9 +90,8 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
     #     ]
     # )
 
-    fecha_fin_real = serializers.DateField(
+    fecha_fin_real = OptionalDateField(
         input_formats=[
-            "",
             "%Y-%m-%d",
             "%Y-%m-%dT%H:%M:%S",
             "%Y-%m-%dT%H:%M",
@@ -131,7 +144,13 @@ class ActividadWriteSerializer(serializers.ModelSerializer):
         # Limpiar espacios de los códigos en attrs
         for item in ots:
             item['ot'] = item['ot'].strip()
-            if item['fecha_fin'] < item['fecha_inicio']:
+            fecha_inicio_ot = item.get('fecha_inicio')
+            fecha_fin_ot = item.get('fecha_fin')
+            if (
+                fecha_inicio_ot is not None and
+                fecha_fin_ot is not None and
+                fecha_fin_ot < fecha_inicio_ot
+            ):
                 raise serializers.ValidationError({
                     "ots": (
                         f"La OT {item['ot']} tiene una fecha fin menor que la fecha inicio."

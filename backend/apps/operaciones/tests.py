@@ -137,6 +137,37 @@ class ActividadServiceOTSyncTests(DjangoTestCase):
 
 
 class ActividadWriteSerializerValidationTests(TestCase):
+	def test_acepta_campos_opcionales_del_front_en_blanco(self):
+		payload = {
+			"ots": [
+				{
+					"ot": "00010",
+					"fecha_inicio": "",
+					"fecha_fin": "",
+				}
+			],
+			"estado": "pendiente",
+			"responsable_id": 1,
+			"fecha_inicio": "2026-06-10",
+			"fecha_fin_estimado": "2026-06-12",
+			"detalle": {
+				"tipo_trabajo": "MANTENIMIENTO",
+				"descripcion": "",
+			},
+			"ubicacion": {
+				"direccion": "Calle 1",
+				"coordenada_x": "",
+				"coordenada_y": "",
+				"zona": "",
+				"nodo": "",
+			},
+		}
+
+		with patch('apps.operaciones.serializers.actividad_serializer.EmpleadoService.existe', return_value=True), \
+			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
+			serializer = ActividadWriteSerializer(data=payload)
+			self.assertTrue(serializer.is_valid(), serializer.errors)
+
 	def test_acepta_ubicacion_con_campos_opcionales_vacios(self):
 		payload = {
 			"ots": [
@@ -160,6 +191,42 @@ class ActividadWriteSerializerValidationTests(TestCase):
 				"coordenada_y": "",
 				"zona": "",
 				"nodo": "N600",
+			},
+		}
+
+		with patch('apps.operaciones.serializers.actividad_serializer.EmpleadoService.existe', return_value=True), \
+			 patch('apps.operaciones.serializers.actividad_serializer.ActividadService.validar_ots_unicas'):
+			serializer = ActividadWriteSerializer(data=payload)
+			self.assertTrue(serializer.is_valid(), serializer.errors)
+
+	def test_acepta_ot_sin_fechas_cuando_front_las_envia_vacias(self):
+		payload = {
+			"ots": [
+				{
+					"ot": "00010",
+					"fecha_inicio": "",
+					"fecha_fin": "",
+				},
+				{
+					"ot": "00011",
+					"fecha_inicio": "",
+					"fecha_fin": "",
+				}
+			],
+			"estado": "pendiente",
+			"responsable_id": 1,
+			"fecha_inicio": "2026-06-10",
+			"fecha_fin_estimado": "2026-06-12",
+			"detalle": {
+				"tipo_trabajo": "MANTENIMIENTO",
+				"descripcion": "Prueba",
+			},
+			"ubicacion": {
+				"direccion": "Calle 1",
+				"coordenada_x": "",
+				"coordenada_y": "",
+				"zona": "",
+				"nodo": "",
 			},
 		}
 
