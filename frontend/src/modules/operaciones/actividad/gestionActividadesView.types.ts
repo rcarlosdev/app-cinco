@@ -1,13 +1,14 @@
 import { SortingState, ColumnDef } from "@tanstack/react-table";
-import { ActividadFormData } from "@/schemas/actividades.schema";
+import { ActividadRecord } from "@/schemas/actividades.schema";
 
 export interface GestionActividadesTableState {
   globalFilter: string;
   sorting: SortingState;
   pageIndex: number;
   pageSize: number;
-  visibleRows: ActividadFormData[];
-  columns: ColumnDef<ActividadFormData>[];
+  visibleRows: ActividadRecord[];
+  columns: ColumnDef<ActividadRecord>[];
+  loadWarning?: string | null;
 }
 
 export interface GestionActividadesTableActions {
@@ -15,10 +16,10 @@ export interface GestionActividadesTableActions {
   setSorting: (sorting: SortingState) => void;
   setPageIndex: (index: number) => void;
   setPageSize: (size: number) => void;
-  setVisibleRows: (rows: ActividadFormData[]) => void;
+  setVisibleRows: (rows: ActividadRecord[]) => void;
 }
 
 export interface GestionActividadesTableProps
   extends GestionActividadesTableState, GestionActividadesTableActions {
-  actividades: ActividadFormData[];
+  actividades: ActividadRecord[];
 }

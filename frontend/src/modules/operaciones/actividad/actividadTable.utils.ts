@@ -1,14 +1,18 @@
-import { ActividadFormData } from "@/schemas/actividades.schema";
+import { ActividadRecord } from "@/schemas/actividades.schema";
 import { CsvColumn } from "@/utils/csv";
 
-export const actividadCsvColumns: CsvColumn<ActividadFormData>[] = [
+export const actividadCsvColumns: CsvColumn<ActividadRecord>[] = [
   {
     header: "ID",
     accessor: (row) => row.id,
   },
   {
     header: "OTs",
-    accessor: (row) => row.ots?.join(", "),
+    accessor: (row) =>
+      row.ots
+        ?.map((item) => (typeof item === "string" ? item : item.ot))
+        .filter(Boolean)
+        .join(", "),
   },
   {
     header: "Estado",

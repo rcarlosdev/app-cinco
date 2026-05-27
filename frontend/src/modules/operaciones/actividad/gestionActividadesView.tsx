@@ -25,6 +25,7 @@ const GestionActividadesView = () => {
     setVisibleRows,
     showAlert,
     loadError,
+    loadWarning,
   } = useGestionActividadesData();
 
   // {
@@ -105,6 +106,16 @@ const GestionActividadesView = () => {
               variant="error"
               title="No fue posible cargar las actividades"
               message={loadError.message}
+            />
+          </div>
+        )}
+
+        {loadWarning && !loadError && (
+          <div className="mt-4">
+            <Alert
+              variant="warning"
+              title="Se cargaron actividades con observaciones"
+              message={loadWarning}
             />
           </div>
         )}
