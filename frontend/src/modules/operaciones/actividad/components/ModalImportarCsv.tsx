@@ -577,7 +577,7 @@ export default function ModalImportarCsv({ isOpen, onClose }: ModalImportarCsvPr
                           <div className="text-[10px] text-gray-400 font-mono">{row.responsable_cedula || "-"}</div>
                         </td>
                         <td className="px-4 py-3">
-                          <div className="truncate max-w-[150px]" title={row.direccion}>{row.direccion || "-"}</div>
+                          <div className="truncate max-w-37.5" title={row.direccion}>{row.direccion || "-"}</div>
                           <div className="text-[10px] text-indigo-500 font-semibold">{row.nodo || "-"}</div>
                         </td>
                         <td className="px-4 py-3">
