@@ -16,6 +16,7 @@ const ActividadForm = ({
     control,
     errors,
     handleSubmit,
+    handleInvalidSubmit,
     selectedEmployee,
     handleEmployeeChange,
   } = useActividadFormLogic({
@@ -25,7 +26,11 @@ const ActividadForm = ({
   });
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+    <form
+      onSubmit={handleSubmit(onSubmit, handleInvalidSubmit)}
+      className="space-y-6"
+      noValidate
+    >
       <ActividadFormFields
         control={control}
         errors={errors}

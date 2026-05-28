@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { FieldErrors, useForm, useWatch } from "react-hook-form";
 import {
   ActividadSchema,
   ActividadFormData,
@@ -18,12 +18,45 @@ import {
   logDevelopmentError,
   logDevelopmentWarning,
 } from "@/lib/environment";
+import { toast } from "sonner";
 
 interface UseActividadFormLogicParams {
   defaultValues: ActividadFormData;
   backendErrors?: Record<string, any> | null;
   mode?: "create" | "edit";
 }
+
+const getFirstFieldErrorMessage = (
+  errors: FieldErrors<ActividadFormData>,
+): string | undefined => {
+  const visit = (value: unknown): string | undefined => {
+    if (!value) return undefined;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const message = visit(item);
+        if (message) return message;
+      }
+      return undefined;
+    }
+
+    if (typeof value === "object") {
+      const maybeError = value as { message?: unknown };
+      if (typeof maybeError.message === "string" && maybeError.message.trim()) {
+        return maybeError.message;
+      }
+
+      for (const nestedValue of Object.values(value)) {
+        const message = visit(nestedValue);
+        if (message) return message;
+      }
+    }
+
+    return undefined;
+  };
+
+  return visit(errors);
+};
 
 export const useActividadFormLogic = ({
   defaultValues,
@@ -37,79 +70,104 @@ export const useActividadFormLogic = ({
   const {
     control,
     handleSubmit,
+    getValues,
     reset,
     setError,
     setValue,
-    watch,
     formState: { errors },
   } = useForm<ActividadFormData>({
     resolver: zodResolver(ActividadSchema) as any,
     defaultValues,
   });
 
-  const watchOts = watch("ots");
-  const watchFechaInicioPadre = watch("fecha_inicio");
-  const watchFechaFinPadre = watch("fecha_fin_estimado");
+  const watchOts = useWatch({
+    control,
+    name: "ots",
+  });
+  const watchFechaInicioPadre = useWatch({
+    control,
+    name: "fecha_inicio",
+  });
+  const watchFechaFinPadre = useWatch({
+    control,
+    name: "fecha_fin_estimado",
+  });
+  const watchFechaInicioOtPadre = useWatch({
+    control,
+    name: "ots.0.fecha_inicio",
+  });
+  const watchFechaFinOtPadre = useWatch({
+    control,
+    name: "ots.0.fecha_fin",
+  });
 
   // Efecto reactivo para el recálculo e integración de fechas entre OTs Hijas y Actividad Padre
   useEffect(() => {
-    if (mode === "create") {
-      // En modo creación: las fechas del Padre se ingresan manualmente
-      // Al ingresar OTs Hijas, si el rango de alguna Hija excede el del Padre, este se extiende reactivamente (reextensión)
-      if (watchOts && Array.isArray(watchOts) && watchOts.length > 0) {
-        const hijasInicioDates = watchOts
-          .map((item) => item?.fecha_inicio)
-          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+    if (watchOts && Array.isArray(watchOts) && watchOts.length > 0) {
+      // Omitimos la OT padre (índice 0); solo usamos las hijas para extender el rango cuando sea necesario.
+      const otsHijas = watchOts.slice(1);
 
-        const hijasFinDates = watchOts
-          .map((item) => item?.fecha_fin)
-          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+      const hijasInicioDates = otsHijas
+        .map((item) => item?.fecha_inicio)
+        .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
 
-        if (hijasInicioDates.length > 0 && watchFechaInicioPadre) {
-          const minHijas = hijasInicioDates.reduce((min, curr) => {
-            return new Date(curr) < new Date(min) ? curr : min;
-          });
-          if (new Date(minHijas) < new Date(watchFechaInicioPadre)) {
-            setValue("fecha_inicio", minHijas, { shouldValidate: true });
-          }
-        }
+      const hijasFinDates = otsHijas
+        .map((item) => item?.fecha_fin)
+        .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
 
-        if (hijasFinDates.length > 0 && watchFechaFinPadre) {
-          const maxHijas = hijasFinDates.reduce((max, curr) => {
-            return new Date(curr) > new Date(max) ? curr : max;
-          });
-          if (new Date(maxHijas) > new Date(watchFechaFinPadre)) {
-            setValue("fecha_fin_estimado", maxHijas, { shouldValidate: true });
-          }
+      if (hijasInicioDates.length > 0) {
+        const minHijas = hijasInicioDates.reduce((min, curr) => {
+          return new Date(curr) < new Date(min) ? curr : min;
+        });
+
+        if (
+          !watchFechaInicioPadre ||
+          new Date(minHijas) < new Date(watchFechaInicioPadre)
+        ) {
+          setValue("fecha_inicio", minHijas, { shouldValidate: true });
         }
       }
-    } else {
-      // En modo edición: las fechas del Padre se autocalculan estrictamente a partir del min/max de sus OTs hijas
-      if (watchOts && Array.isArray(watchOts) && watchOts.length > 0) {
-        const validInicioDates = watchOts
-          .map((item) => item?.fecha_inicio)
-          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
 
-        const validFinDates = watchOts
-          .map((item) => item?.fecha_fin)
-          .filter((d): d is string => !!d && !isNaN(Date.parse(d)));
+      if (hijasFinDates.length > 0) {
+        const maxHijas = hijasFinDates.reduce((max, curr) => {
+          return new Date(curr) > new Date(max) ? curr : max;
+        });
 
-        if (validInicioDates.length > 0) {
-          const minInicio = validInicioDates.reduce((min, curr) => {
-            return new Date(curr) < new Date(min) ? curr : min;
-          });
-          setValue("fecha_inicio", minInicio, { shouldValidate: true });
-        }
-
-        if (validFinDates.length > 0) {
-          const maxFin = validFinDates.reduce((max, curr) => {
-            return new Date(curr) > new Date(max) ? curr : max;
-          });
-          setValue("fecha_fin_estimado", maxFin, { shouldValidate: true });
+        if (
+          !watchFechaFinPadre ||
+          new Date(maxHijas) > new Date(watchFechaFinPadre)
+        ) {
+          setValue("fecha_fin_estimado", maxHijas, { shouldValidate: true });
         }
       }
     }
-  }, [watchOts, watchFechaInicioPadre, watchFechaFinPadre, setValue, mode]);
+  }, [watchOts, watchFechaInicioPadre, watchFechaFinPadre, setValue]);
+
+  // Mantiene sincronizada la OT padre (ots.0) con las fechas generales para que el backend las persista.
+  useEffect(() => {
+    if (!getValues("ots.0.ot")) {
+      return;
+    }
+
+    if (watchFechaInicioPadre !== watchFechaInicioOtPadre) {
+      setValue("ots.0.fecha_inicio", watchFechaInicioPadre || "", {
+        shouldValidate: true,
+      });
+    }
+
+    if (watchFechaFinPadre !== watchFechaFinOtPadre) {
+      setValue("ots.0.fecha_fin", watchFechaFinPadre || "", {
+        shouldValidate: true,
+      });
+    }
+  }, [
+    getValues,
+    setValue,
+    watchFechaFinOtPadre,
+    watchFechaFinPadre,
+    watchFechaInicioOtPadre,
+    watchFechaInicioPadre,
+  ]);
 
   useEffect(() => {
     let isActive = true;
@@ -204,10 +262,19 @@ export const useActividadFormLogic = ({
     }
   };
 
+  const handleInvalidSubmit = (formErrors: FieldErrors<ActividadFormData>) => {
+    const firstMessage = getFirstFieldErrorMessage(formErrors);
+
+    toast.error(
+      firstMessage || "Completa los campos obligatorios antes de guardar.",
+    );
+  };
+
   return {
     control,
     errors,
     handleSubmit,
+    handleInvalidSubmit,
     selectedEmployee,
     handleEmployeeChange,
   };

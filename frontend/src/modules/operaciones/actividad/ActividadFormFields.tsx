@@ -314,7 +314,7 @@ export const ActividadFormFields = ({
       {/* 4. Fechas del Padre y Estado */}
       <div className="col-span-2 border-t border-gray-200 dark:border-gray-700 mt-2 pt-4">
         <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-          {isEditMode ? "Detalles de la Actividad Padre (Autocalculados)" : "Tiempos de la Actividad Padre"}
+          Tiempos de la Actividad Padre
         </h4>
       </div>
 
@@ -328,9 +328,8 @@ export const ActividadFormFields = ({
           render={({ field }) => (
             <DatePicker
               id="fecha_actividad"
-              placeholder={isEditMode ? "Autocalculado a partir de OTs" : "Selecciona fecha de inicio"}
+              placeholder="Selecciona fecha de inicio"
               defaultDate={field.value}
-              disabled={isEditMode}
               onChange={(dates: Date[] | Date) => {
                 const value = getDateFromPicker(dates);
                 field.onChange(toIsoDate(value));
@@ -357,9 +356,8 @@ export const ActividadFormFields = ({
           render={({ field }) => (
             <DatePicker
               id="fecha_fin_estimado"
-              placeholder={isEditMode ? "Autocalculado a partir de OTs" : "Selecciona fecha de fin"}
+              placeholder="Selecciona fecha de fin"
               defaultDate={toDateOrUndefined(field.value)}
-              disabled={isEditMode}
               onChange={(dates: Date[] | Date) => {
                 const value = getDateFromPicker(dates);
                 field.onChange(toIsoDate(value));
