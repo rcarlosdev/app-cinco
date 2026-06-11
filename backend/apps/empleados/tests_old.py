@@ -89,7 +89,6 @@ class EmpleadoServiceTests(TestCase):
         self.assertEqual(context["nombre_completo"], "ANA PEREZ")
         self.assertEqual(context["cargo"], "TECNICOS INSTALACIONES")
         self.assertEqual(context["document_type"], "CC")
-        self.assertEqual(context["document_type_label"], "CC")
         self.assertEqual(context["salario"], Decimal("1750905.00"))
         self.assertEqual(context["salario_texto"], "$1.750.905")
         self.assertEqual(context["fecha_ingreso"], date(2025, 2, 4))
@@ -114,7 +113,6 @@ class EmpleadoServiceTests(TestCase):
         context = EmpleadoService.construir_contexto_certificado_laboral(empleado=empleado)
 
         self.assertEqual(context["document_type"], "PT")
-        self.assertEqual(context["document_type_label"], "PT")
         self.assertTrue(context["document_flags"]["PT"])
 
     def test_normalize_contract_value_fixes_broken_accents(self):

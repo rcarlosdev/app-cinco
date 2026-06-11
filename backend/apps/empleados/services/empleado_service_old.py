@@ -324,7 +324,6 @@ class EmpleadoService:
             "nombre_completo": EmpleadoService._resolve_full_name(empleado=empleado, siigo_data=siigo_data),
             "cedula": str(getattr(empleado, "cedula", "") or "").strip(),
             "document_type": resolved_document_type,
-            "document_type_label": resolved_document_type,
             "document_flags": {
                 code: code == resolved_document_type for code in sorted(EmpleadoService.DOCUMENT_TYPES)
             },
@@ -689,11 +688,9 @@ class EmpleadoService:
             alignment=TA_LEFT,
         )
 
+        doc_flags = context["document_flags"]
         nombre_completo = EmpleadoService._escape_pdf_text(context["nombre_completo"])
         cedula = EmpleadoService._escape_pdf_text(context["cedula"])
-        document_type_label = EmpleadoService._escape_pdf_text(
-            context["document_type_label"]
-        )
         company_name = EmpleadoService._escape_pdf_text(context["company_name"])
         cargo = EmpleadoService._escape_pdf_text(context["cargo"])
         salario_texto = EmpleadoService._escape_pdf_text(context["salario_texto"])
@@ -706,9 +703,15 @@ class EmpleadoService:
         )
         firmante_nombre = EmpleadoService._escape_pdf_text(context["firmante_nombre"])
         firmante_cargo = EmpleadoService._escape_pdf_text(context["firmante_cargo"])
+        doc_selector = (
+            f"CC [{'X' if doc_flags['CC'] else '&nbsp;'}] "
+            f"PT [{'X' if doc_flags['PT'] else '&nbsp;'}] "
+            f"TI [{'X' if doc_flags['TI'] else '&nbsp;'}] "
+            f"CE [{'X' if doc_flags['CE'] else '&nbsp;'}]"
+        )
         intro = (
             f"Certifica que el se├▒or <b>{nombre_completo}</b>, identificado con documento de "
-            f"identificaci├│n <b>{document_type_label}</b> n├║mero <b>{cedula}</b>, ingres├│ a la "
+            f"identificaci├│n {doc_selector} n├║mero <b>{cedula}</b>, ingres├│ a la "
             f"<b>COMPA├æ├ìA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el d├¡a "
             f"<b>{fecha_ingreso_texto}</b> y se desempe├▒a como "
             f"<b>{cargo}</b>, con un salario b├ísico de <b>{salario_texto}</b> "

@@ -1,4 +1,4 @@
-from django.db import models
+﻿from django.db import models
 
 class Empleado(models.Model):
     ESTADO_CHOICES = [
@@ -8,14 +8,14 @@ class Empleado(models.Model):
     ]
     
     SEDE_CHOICES = [
-        ('BOGOTA', 'Bogotá'),
+        ('BOGOTA', 'Bogot├í'),
         ('CALI', 'Cali'),
         ('CAUCASIA', 'Caucasia'),
-        ('MEDELLIN', 'Medellín'),
-        ('MONTERIA', 'Montería'),
+        ('MEDELLIN', 'Medell├¡n'),
+        ('MONTERIA', 'Monter├¡a'),
         ('ORIENTE', 'Oriente'),
         ('SINCELEJO', 'Sincelejo'),
-        ('TARAZA', 'Tarazá'),
+        ('TARAZA', 'Taraz├í'),
         ('YARUMAL', 'Yarumal'),
     ]
     
@@ -79,13 +79,29 @@ class Empleado(models.Model):
     certificado_arl = models.CharField(max_length=100, blank=True, null=True)
     afp = models.CharField(max_length=100, blank=True, null=True)
     vacunacion = models.CharField(max_length=100, blank=True, null=True)
-    # datos -> información adicional en formato JSON
+    # datos -> informaci├│n adicional en formato JSON
     datos = models.JSONField(blank=True, null=True)
     email_personal = models.EmailField(max_length=255, blank=True, null=True)
     email_verificar = models.CharField(max_length=100, blank=True, null=True)
     grupo_comiciones = models.CharField(max_length=100, blank=True, null=True)
     
     class Meta:
-        managed = False  # 🔴 CRÍTICO
+        managed = False  # ­ƒö┤ CR├ìTICO
         db_table = "cinco_base_de_personal"
+        app_label = "empleados"
+
+
+class EmpleadoSiigo(models.Model):
+    id = models.AutoField(primary_key=True)
+    cedula = models.CharField(max_length=20)
+    estado = models.CharField(max_length=20)
+    centro_costo = models.CharField(max_length=20)
+    salario = models.CharField(max_length=20)
+    datos = models.JSONField(blank=True, null=True)
+    edit = models.CharField(max_length=20)
+    fecha_edit = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "cinco_base_de_personal_siigo"
         app_label = "empleados"

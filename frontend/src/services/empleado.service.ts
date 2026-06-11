@@ -1,11 +1,11 @@
-// src/services/empleado.service.ts
+﻿// src/services/empleado.service.ts
 import api from "@/lib/api";
 import { Empleado } from "@/types/empleado";
 import { cache } from "@/lib/cache";
 
 const CACHE_TTL = {
   ALL_EMPLOYEES: 10 * 60 * 1000, // 10 minutos para lista completa
-  SEARCH: 5 * 60 * 1000, // 5 minutos para búsquedas
+  SEARCH: 5 * 60 * 1000, // 5 minutos para b├║squedas
   SINGLE: 15 * 60 * 1000, // 15 minutos para empleado individual
 };
 
@@ -43,16 +43,16 @@ export const getEmpleadoByCedula = async (
   return cache.getOrFetch(
     cacheKey,
     async () => {
-      // Buscar empleado por cédula usando el endpoint de búsqueda
+      // Buscar empleado por c├®dula usando el endpoint de b├║squeda
       const res = await api.get("/empleados/empleados/", {
         params: { search: cedula },
       });
       
-      // Buscar el empleado que coincida exactamente con la cédula
+      // Buscar el empleado que coincida exactamente con la c├®dula
       const empleado = res.data.find((emp: Empleado) => emp.cedula === cedula);
       
       if (!empleado) {
-        throw new Error(`Empleado con cédula ${cedula} no encontrado`);
+        throw new Error(`Empleado con c├®dula ${cedula} no encontrado`);
       }
       
       return empleado;
@@ -74,12 +74,35 @@ export const getEmpleadoById = async (id: number): Promise<Empleado> => {
   );
 };
 
+export const downloadCertificadoLaboral = async (
+  id: number,
+  documentType?: "CC" | "PT" | "TI" | "CE",
+): Promise<{ blob: Blob; filename: string }> => {
+  const response = await api.get(
+    `/empleados/empleados/${id}/certificado-laboral/`,
+    {
+      params: documentType ? { document_type: documentType } : undefined,
+      responseType: "blob",
+    },
+  );
+
+  const contentDisposition = String(
+    response.headers["content-disposition"] || "",
+  );
+  const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+
+  return {
+    blob: response.data as Blob,
+    filename: filenameMatch?.[1] || `certificado_laboral_${id}.pdf`,
+  };
+};
+
 /**
- * Limpiar el caché de empleados
- * Útil cuando se actualiza, crea o elimina un empleado
+ * Limpiar el cach├® de empleados
+ * ├Ütil cuando se actualiza, crea o elimina un empleado
  */
 export const clearEmpleadosCache = (): void => {
-  // Obtener todas las claves del caché
+  // Obtener todas las claves del cach├®
   const stats = cache.getStats();
 
   // Eliminar todas las claves que comiencen con "empleados:"

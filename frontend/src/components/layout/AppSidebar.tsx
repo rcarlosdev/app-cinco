@@ -1,4 +1,4 @@
-// src/components/layout/AppSidebar.tsx
+﻿// src/components/layout/AppSidebar.tsx
 "use client";
 
 import Link from "next/link";
@@ -31,6 +31,15 @@ const defaultNavItems: NavItem[] = [
       {
         name: "Gestion de Actividades",
         path: "/operaciones/gestion-actividades",
+      },
+    ],
+  },
+  {
+    name: "RRHH",
+    subItems: [
+      {
+        name: "Certificados Laborales",
+        path: "/rrhh/certificados-laborales",
       },
     ],
   },
