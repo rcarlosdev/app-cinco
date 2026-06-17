@@ -85,7 +85,7 @@ export const ActividadSchema = z.object({
       area: z.string().min(1, "El área del responsable es requerida"),
       carpeta: z.string().min(1, "La carpeta del responsable es requerida"),
       cargo: z.string().min(1, "El cargo del responsable es requerido"),
-      movil: z.string().min(1, "El móvil del responsable es requerido"),
+      movil: z.string().optional(),
     })
     .optional(),
 

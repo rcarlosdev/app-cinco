@@ -50,7 +50,10 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 Write-Step "Verificando Django en .venv..."
 $djangoOk = $true
 try {
-    & $venvPython -c "import django; print(django.get_version())" | Out-Null
+    & $venvPython -c "import django; print(django.get_version())" 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $djangoOk = $false
+    }
 }
 catch {
     $djangoOk = $false

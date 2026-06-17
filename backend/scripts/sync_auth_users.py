@@ -25,6 +25,14 @@ def is_active_from_estado(estado: str) -> bool:
     return normalize_text(estado).upper() == "ACTIVO"
 
 
+def get_total_rows() -> int:
+    from django.db import connections
+    with connections["azul"].cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) FROM cinco_base_de_personal")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -78,9 +86,13 @@ def main() -> int:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    total_count = get_total_rows()
+    print(f"Total de registros a procesar: {total_count}")
+
     created_count = 0
     updated_count = 0
     skipped_count = 0
+    processed_count = 0
 
     csv_file = None
     csv_writer = None
@@ -91,6 +103,16 @@ def main() -> int:
 
     try:
         for source_id, cedula, email, nombre, apellido, estado in fetch_source_rows(args.batch_size):
+            processed_count += 1
+            if processed_count % 10 == 0 or processed_count == total_count:
+                percent = (processed_count / total_count) * 100 if total_count > 0 else 0
+                print(
+                    f"\rProgreso: {processed_count}/{total_count} ({percent:.1f}%) | "
+                    f"Creados: {created_count} | Saltados: {skipped_count}",
+                    end="",
+                    flush=True,
+                )
+
             username = normalize_text(cedula)
             if not username:
                 skipped_count += 1
@@ -102,38 +124,20 @@ def main() -> int:
             is_active = is_active_from_estado(estado)
 
             existing_by_id = User.objects.filter(pk=source_id).first()
+            existing_by_username = User.objects.filter(username=username).first()
+            already_synced = (existing_by_id is not None) or (existing_by_username is not None)
+
             if args.dry_run:
-                if existing_by_id:
-                    updated_count += 1
-                elif User.objects.filter(username=username).exists():
+                if already_synced:
                     skipped_count += 1
                 else:
                     created_count += 1
-                if csv_writer:
-                    csv_writer.writerow([username, "DRY_RUN", email_value])
+                    if csv_writer:
+                        csv_writer.writerow([username, "DRY_RUN", email_value])
                 continue
 
-            if existing_by_id:
-                updates = {}
-                if existing_by_id.username != username:
-                    updates["username"] = username
-                if existing_by_id.first_name != first_name:
-                    updates["first_name"] = first_name
-                if existing_by_id.last_name != last_name:
-                    updates["last_name"] = last_name
-                if existing_by_id.email != email_value:
-                    updates["email"] = email_value
-                if existing_by_id.is_active != is_active:
-                    updates["is_active"] = is_active
-                if updates:
-                    User.objects.filter(pk=existing_by_id.pk).update(**updates)
-                    updated_count += 1
-                continue
-
-            if User.objects.filter(username=username).exists():
+            if already_synced:
                 skipped_count += 1
-                if csv_writer:
-                    csv_writer.writerow([username, "USERNAME_CONFLICT", email_value])
                 continue
 
             user = User(
@@ -156,6 +160,7 @@ def main() -> int:
         if csv_file:
             csv_file.close()
 
+    print()  # Salto de línea para limpiar la barra de progreso
     print(
         "Import finalizado. "
         f"Creados: {created_count}. "

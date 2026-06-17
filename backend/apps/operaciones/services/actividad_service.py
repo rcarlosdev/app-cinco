@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Min, Max
 from django.utils import timezone
 
 from apps.empleados.services import EmpleadoService
@@ -73,7 +73,7 @@ class ActividadService:
         # Recalcular fechas generales de la Actividad principal a partir de sus OTs activas
         relaciones_activas = ActividadOT.objects.filter(actividad=actividad, is_active=True)
         if relaciones_activas.exists():
-            from django.db.models import Min, Max
+            
             fechas = relaciones_activas.aggregate(
                 min_inicio=Min('fecha_inicio'),
                 max_fin=Max('fecha_fin')
@@ -113,6 +113,8 @@ class ActividadService:
 
         with transaction.atomic():
             empleado = EmpleadoService().obtener_basico(payload['responsable_id'])
+            if not empleado:
+                raise ValueError("El empleado responsable no existe o está inactivo.")
             
             ot_codes = [item['ot'] for item in ots if item.get('ot')] if ots else []
             ActividadService.validar_ots_unicas(ot_codes)
@@ -127,10 +129,10 @@ class ActividadService:
                 actividad=actividad,
                 empleado_id=empleado['id'],
                 nombre=empleado['nombre'],
-                area=empleado['area'],
-                carpeta=empleado['carpeta'],
-                cargo=empleado['cargo'],
-                movil=empleado['movil'],
+                area=empleado.get('area') or "",
+                carpeta=empleado.get('carpeta') or "",
+                cargo=empleado.get('cargo') or "",
+                movil=empleado.get('movil') or "",
             )
 
             ActividadUbicacion.objects.create(
@@ -184,15 +186,17 @@ class ActividadService:
 
             if 'responsable_id' in validated_data:
                 empleado = EmpleadoService().obtener_basico(instance.responsable_id)
+                if not empleado:
+                    raise ValueError("El empleado responsable no existe o está inactivo.")
                 ActividadResponsableSnapshot.objects.update_or_create(
                     actividad=instance,
                     defaults={
                         'empleado_id': empleado['id'],
                         'nombre': empleado['nombre'],
-                        'area': empleado['area'],
-                        'carpeta': empleado['carpeta'],
-                        'cargo': empleado['cargo'],
-                        'movil': empleado['movil'],
+                        'area': empleado.get('area') or "",
+                        'carpeta': empleado.get('carpeta') or "",
+                        'cargo': empleado.get('cargo') or "",
+                        'movil': empleado.get('movil') or "",
                     },
                 )
 
