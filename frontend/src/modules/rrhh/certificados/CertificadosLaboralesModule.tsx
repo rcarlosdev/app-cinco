@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
@@ -51,7 +51,7 @@ const CertificadosLaboralesModule = () => {
       anchor.remove();
       window.URL.revokeObjectURL(url);
       setSuccessMessage(
-        `Se gener├│ el certificado de ${selectedEmployee.nombre} ${selectedEmployee.apellido}.`,
+        `Se generó el certificado de ${selectedEmployee.nombre} ${selectedEmployee.apellido}.`,
       );
     } catch (error) {
       const classified = classifyError(error);
@@ -66,8 +66,8 @@ const CertificadosLaboralesModule = () => {
       <PageBreadcrumb pageTitle={["RRHH", "Certificados Laborales"]} />
 
       <ComponentCard
-        title="Prueba de generaci├│n de certificado"
-        desc="Selecciona un empleado y descarga el PDF generado por el backend para validar contenido, dise├▒o y respuesta del endpoint."
+        title="Prueba de generación de certificado"
+        desc="Selecciona un empleado y descarga el PDF generado por el backend para validar contenido, diseño y respuesta del endpoint."
       >
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_320px]">
           <div className="space-y-6">
@@ -79,7 +79,7 @@ const CertificadosLaboralesModule = () => {
                 setErrorMessage("");
                 setSuccessMessage("");
               }}
-              placeholder="Busca por nombre, apellido o c├®dula"
+              placeholder="Busca por nombre, apellido o cédula"
               hint="El selector consume el endpoint de empleados del backend."
             />
 
@@ -110,15 +110,6 @@ const CertificadosLaboralesModule = () => {
               >
                 {isDownloading ? "Generando certificado..." : "Descargar certificado"}
               </Button>
-
-              {selectedEmployee && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Endpoint objetivo:{" "}
-                  <span className="font-medium text-gray-700 dark:text-white/80">
-                    /empleados/empleados/{selectedEmployee.id}/certificado-laboral/
-                  </span>
-                </p>
-              )}
             </div>
 
             {errorMessage ? (
@@ -145,10 +136,10 @@ const CertificadosLaboralesModule = () => {
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-gray-800 dark:text-white/90">
-                  Resumen de validaci├│n
+                  Resumen de validación
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  ├Ütil para verificar r├ípido la integraci├│n.
+                  Útil para verificar rápido la integración.
                 </p>
               </div>
             </div>
@@ -163,7 +154,7 @@ const CertificadosLaboralesModule = () => {
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-500 dark:text-gray-400">C├®dula</dt>
+                <dt className="text-gray-500 dark:text-gray-400">Cédula</dt>
                 <dd className="font-medium text-gray-800 dark:text-white/90">
                   {selectedEmployee?.cedula || "Sin seleccionar"}
                 </dd>

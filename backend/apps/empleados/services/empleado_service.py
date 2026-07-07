@@ -1,4 +1,5 @@
-import re
+﻿import re
+import uuid
 from html import escape
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -182,10 +183,10 @@ class EmpleadoService:
         return {
             "fecha_inicio": start_date.isoformat(),
             "fecha_fin": end_date.isoformat(),
-            "dias_periodo": int((end_date - start_date).days + 1),
+            "dias_periodo": (end_date - start_date).days + 1,
             "total_egresos": int(egresos_periodo),
             "total_ingresos": int(ingresos_periodo),
-            "planta_inicio": int(planta_inicio),
+            "planta_inicio": planta_inicio,
             "planta_fin": int(planta_fin),
             "planta_promedio": round(planta_promedio, 2),
             "rotacion_porcentaje": round(rotacion_porcentaje, 2),
@@ -248,9 +249,9 @@ class EmpleadoService:
         keys = set(egresos) | set(ingresos) | set(planta_fin)
         rows = []
         for key in keys:
-            total_egresos = int(egresos.get(key) or 0)
-            total_ingresos = int(ingresos.get(key) or 0)
-            fin = int(planta_fin.get(key) or 0)
+            total_egresos = egresos.get(key) or 0
+            total_ingresos = ingresos.get(key) or 0
+            fin = planta_fin.get(key) or 0
             inicio = max(fin - total_ingresos + total_egresos, 0)
             promedio = (float(inicio) + float(fin)) / 2.0
             porcentaje = (float(total_egresos) / promedio) * 100.0 if promedio > 0 else 0.0
@@ -296,7 +297,7 @@ class EmpleadoService:
         )
         pdf_content = EmpleadoService._render_certificado_laboral_pdf(context=context)
         return {
-            "filename": f"certificado_laboral_{context['cedula']}.pdf",
+            "filename": f"certificado_laboral_{uuid.uuid4()}.pdf",
             "content": pdf_content,
             "context": context,
         }
@@ -337,8 +338,10 @@ class EmpleadoService:
             "fecha_expedicion_texto": EmpleadoService._format_date(fecha_expedicion),
             "contrato": contrato,
             "company_name": "Compañía Integral Negocios de Colombia",
+            "company_name": "Compañía Integral Negocios de Colombia",
             "company_nit": "811042087-2",
             "firmante_nombre": "FARAY MONSALVE URREGO",
+            "firmante_cargo": "Dirección Gestión Humana",
             "firmante_cargo": "Dirección Gestión Humana",
         }
 
@@ -603,6 +606,8 @@ class EmpleadoService:
             "├ó┬Ç┬Ø": '"',
             "├é┬░": "°",
             "┬░": "°",
+            "├é┬░": "°",
+            "┬░": "°",
             "┬á": " ",
         }
         for source, target in replacements.items():
@@ -619,9 +624,16 @@ class EmpleadoService:
             "t?rmino indefinido": "Término indefinido",
             "termino indefinido": "Término indefinido",
             "término indefinido": "Término indefinido",
+            "t?rmino indefinido": "Término indefinido",
+            "termino indefinido": "Término indefinido",
+            "término indefinido": "Término indefinido",
             "obra y labor": "Obra y labor",
             "obra labor": "Obra y labor",
             "obra o labor": "Obra y labor",
+            "fijo": "Término fijo",
+            "termino fijo": "Término fijo",
+            "término fijo": "Término fijo",
+            "t?rmino fijo": "Término fijo",
             "fijo": "Término fijo",
             "termino fijo": "Término fijo",
             "término fijo": "Término fijo",
@@ -654,7 +666,7 @@ class EmpleadoService:
             from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
             from reportlab.lib.units import cm
             from reportlab.lib.utils import ImageReader
-            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+            from reportlab.platypus import Flowable, Paragraph, SimpleDocTemplate, Spacer
         except ImportError as exc:
             raise RuntimeError("reportlab_no_instalado") from exc
 
@@ -726,10 +738,17 @@ class EmpleadoService:
             f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
             f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
             f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
+            f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
+            f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
+            f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
+            f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
+            f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
+            f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
         )
         body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+        body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
 
-        story = [
+        story: list[Flowable] = [
             Spacer(1, 0.8 * cm),
             Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style),
             Paragraph(intro, body_style),

@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from apps.empleados.services.empleado_service import EmpleadoService
@@ -170,7 +171,7 @@ class EmpleadoViewSetTests(TestCase):
                 "document_type": "CC",
             },
         )
-        request.query_params = request.GET
+        request = Request(request)
         view = EmpleadoViewSet()
         empleado = MagicMock()
 
