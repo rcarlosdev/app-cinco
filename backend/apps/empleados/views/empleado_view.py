@@ -1,10 +1,12 @@
-from apps.empleados.models import Empleado
+﻿from apps.empleados.models import Empleado
 from rest_framework.viewsets import ModelViewSet
 from apps.empleados.serializers import EmpleadoSerializer
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import filters
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
+from rest_framework.decorators import action
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiTypes
+from django.http import HttpResponse
 from apps.empleados.services import EmpleadoService
 
 
@@ -213,3 +215,54 @@ class EmpleadoViewSet(ModelViewSet):
             )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        summary="Generar certificado laboral en PDF",
+        description="""
+        Genera un certificado laboral en PDF a partir de la información del empleado y
+        del complemento en `cinco_base_de_personal_siigo`.
+
+        **Fuente principal de datos:**
+        - `cinco_base_de_personal`: nombre, cédula, cargo base, fecha ingreso
+        - `cinco_base_de_personal_siigo`: salario, tipo contrato, cargo SIIGO y extras JSON
+
+        **Parámetros opcionales:**
+        - `document_type`: fuerza el tipo de documento (`CC`, `PT`, `TI`, `CE`)
+        """,
+        tags=["empleados"],
+        parameters=[
+            OpenApiParameter(
+                name="document_type",
+                description="Tipo de documento a marcar en el certificado",
+                required=False,
+                type=OpenApiTypes.STR,
+                enum=["CC", "PT", "TI", "CE"],
+            ),
+        ],
+        responses={
+            (200, "application/pdf"): OpenApiResponse(
+                response=OpenApiTypes.BINARY,
+                description="Archivo PDF del certificado laboral.",
+            ),
+        },
+    )
+    @action(detail=True, methods=["get"], url_path="certificado-laboral")
+    def certificado_laboral(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            result = EmpleadoService.generar_certificado_laboral(
+                empleado=instance,
+                document_type=request.query_params.get("document_type", ""),
+            )
+        except RuntimeError as exc:
+            detail = str(exc)
+            if detail == "reportlab_no_instalado":
+                return Response(
+                    {"detail": "El servidor no tiene instalada la dependencia para generar PDF."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+            raise
+
+        response = HttpResponse(result["content"], content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{result["filename"]}"'
+        return response

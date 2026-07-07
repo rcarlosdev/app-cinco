@@ -65,9 +65,9 @@ export const getActividadesColumns = (): ColumnDef<ActividadRecord>[] => [
   {
     id: "ots",
     header: "OTS",
-    accessorKey: "ots",
-    cell: ({ row }) => {
-      const ots = formatOts(row.original.ots);
+    accessorFn: (row) => formatOts(row.ots),
+    cell: ({ getValue }) => {
+      const ots = getValue<string>();
       return <span title={ots}>{truncateText(ots, 50)}</span>;
     },
   },

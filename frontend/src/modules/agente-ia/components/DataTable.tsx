@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -95,37 +95,40 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
       ? activeTab.table.exportRows
       : previewRows);
 
-  const loadCompleteRows = async (tab: DashboardTableTab) => {
-    const artifact = tab.table.exportArtifact;
-    if (!artifact?.available || !artifact.artifactId) return null;
-    if (loadedRowsByTab[tab.id]) return loadedRowsByTab[tab.id];
-    if (loadingRowsByTab[tab.id]) return null;
+  const loadCompleteRows = useCallback(
+    async (tab: DashboardTableTab) => {
+      const artifact = tab.table.exportArtifact;
+      if (!artifact?.available || !artifact.artifactId) return null;
+      if (loadedRowsByTab[tab.id]) return loadedRowsByTab[tab.id];
+      if (loadingRowsByTab[tab.id]) return null;
 
-    setLoadingRowsByTab((current) => ({ ...current, [tab.id]: true }));
-    try {
-      const blob = await downloadIADevProviderSerialArtifact({
-        artifactId: artifact.artifactId,
-      });
-      const XLSX = await import("xlsx");
-      const workbook = XLSX.read(await blob.arrayBuffer(), { type: "array" });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
-      const parsedRows = worksheet
-        ? (XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+      setLoadingRowsByTab((current) => ({ ...current, [tab.id]: true }));
+      try {
+        const blob = await downloadIADevProviderSerialArtifact({
+          artifactId: artifact.artifactId,
+        });
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.read(await blob.arrayBuffer(), { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+        const parsedRows = worksheet
+          ? (XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
             defval: "",
           }) as Array<Record<string, unknown>>)
-        : [];
-      setLoadedRowsByTab((current) => ({ ...current, [tab.id]: parsedRows }));
-      return parsedRows;
-    } finally {
-      setLoadingRowsByTab((current) => ({ ...current, [tab.id]: false }));
-    }
-  };
+          : [];
+        setLoadedRowsByTab((current) => ({ ...current, [tab.id]: parsedRows }));
+        return parsedRows;
+      } finally {
+        setLoadingRowsByTab((current) => ({ ...current, [tab.id]: false }));
+      }
+    },
+    [loadedRowsByTab, loadingRowsByTab],
+  );
 
   useEffect(() => {
     if (!activeTab?.table.truncated || !activeTab.table.exportArtifact?.available) return;
     void loadCompleteRows(activeTab);
-  }, [activeTab]);
+  }, [activeTab, loadCompleteRows]);
 
   const table = useReactTable({
     data: tableRows,
@@ -193,12 +196,12 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
     const rowsToExport =
       deferredGlobalFilter.trim().length > 0
         ? completeRows.filter((row) =>
-            rowMatchesGlobalFilter(
-              row,
-              activeTab.table.columns,
-              deferredGlobalFilter,
-            ),
-          )
+          rowMatchesGlobalFilter(
+            row,
+            activeTab.table.columns,
+            deferredGlobalFilter,
+          ),
+        )
         : completeRows;
 
     exportToCsv(rowsToExport, {
@@ -219,12 +222,12 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
     const rowsToExport =
       deferredGlobalFilter.trim().length > 0
         ? completeRows.filter((row) =>
-            rowMatchesGlobalFilter(
-              row,
-              activeTab.table.columns,
-              deferredGlobalFilter,
-            ),
-          )
+          rowMatchesGlobalFilter(
+            row,
+            activeTab.table.columns,
+            deferredGlobalFilter,
+          ),
+        )
         : completeRows;
     const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(rowsToExport, {
@@ -270,11 +273,10 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
               key={tab.id}
               type="button"
               onClick={() => handleTabChange(tab.id)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                tab.id === activeTab.id
-                  ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
-                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
-              }`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${tab.id === activeTab.id
+                ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
+                }`}
             >
               <span className="flex items-center gap-2">
                 <span>{tab.label}</span>
@@ -283,11 +285,10 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
                     {tab.badges.map((badge) => (
                       <span
                         key={`${tab.id}-${badge}`}
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.08em] uppercase ${
-                          tab.id === activeTab.id
-                            ? "bg-white/15 text-white dark:bg-slate-700 dark:text-white"
-                            : "bg-gray-100 text-gray-600 dark:bg-gray-900 dark:text-gray-300"
-                        }`}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-[0.08em] uppercase ${tab.id === activeTab.id
+                          ? "bg-white/15 text-white dark:bg-slate-700 dark:text-white"
+                          : "bg-gray-100 text-gray-600 dark:bg-gray-900 dark:text-gray-300"
+                          }`}
                       >
                         {badge}
                       </span>
@@ -389,7 +390,7 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
           )}
         </div>
 
-        <div className="max-h-[28rem] overflow-auto">
+        <div className="max-h-112 overflow-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900">
               {table.getHeaderGroups().map((headerGroup) => (
@@ -402,9 +403,9 @@ const DataTable = ({ mode = "user", tabs }: DataTableProps) => {
                       {header.isPlaceholder
                         ? null
                         : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext(),
-                          )}
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )}
                     </th>
                   ))}
                 </tr>

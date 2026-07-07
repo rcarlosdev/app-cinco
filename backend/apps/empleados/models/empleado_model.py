@@ -89,3 +89,19 @@ class Empleado(models.Model):
         managed = False  # 🔴 CRÍTICO
         db_table = "cinco_base_de_personal"
         app_label = "empleados"
+
+
+class EmpleadoSiigo(models.Model):
+    id = models.AutoField(primary_key=True)
+    cedula = models.CharField(max_length=20)
+    estado = models.CharField(max_length=20)
+    centro_costo = models.CharField(max_length=20)
+    salario = models.CharField(max_length=20)
+    datos = models.JSONField(blank=True, null=True)
+    edit = models.CharField(max_length=20)
+    fecha_edit = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "cinco_base_de_personal_siigo"
+        app_label = "empleados"

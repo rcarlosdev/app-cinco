@@ -1,10 +1,22 @@
-import re
-from apps.empleados.models import Empleado
+﻿import re
+import uuid
+from html import escape
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from io import BytesIO
+from pathlib import Path
+
+from apps.empleados.models import Empleado, EmpleadoSiigo
 from django.db.models import Count, Q, Value
 from django.db.models.functions import Replace, Upper
-from datetime import date
+from django.utils import timezone
 
 class EmpleadoService:
+    BACKEND_DIR = Path(__file__).resolve().parents[3]
+    SERVER_IMAGE_DIR = Path("/home/admcinco/public_html/images")
+    LOCAL_IMAGE_DIR = BACKEND_DIR / "static" / "images"
+    HEADER_FILENAME = "gghh_certificado_laboral_header.png"
+    FOOTER_FILENAME = "gghh_certificado_laboral_footer.png"
     ALLOWED_TEMPORAL_COLUMNS = {"fecha_ingreso", "fecha_egreso"}
     RESERVED_RUNTIME_PARAMS = {
         "estado",
@@ -16,63 +28,76 @@ class EmpleadoService:
         "birth_month",
         "month_of_birth",
     }
-    
+    DOCUMENT_TYPES = {"CC", "PT", "TI", "CE"}
+
     def existe(self, empleado_id):
-        return Empleado.objects.filter(id=empleado_id, estado='ACTIVO').exists()
-    
-    # @staticmethod
+        return Empleado.objects.filter(id=empleado_id, estado="ACTIVO").exists()
+
     def obtener_basico(self, empleado_id):
         if not str(empleado_id).isdigit():
             return None
-        
+
         empleado = (
-            Empleado.objects
-            .filter(id=empleado_id,estado='ACTIVO')
-            .values('id', 'cedula', 'nombre', 'apellido', 'area', 'carpeta', 'cargo', 'movil', 'supervisor', 'estado', 'link_foto')
+            Empleado.objects.filter(id=empleado_id, estado="ACTIVO")
+            .values(
+                "id",
+                "cedula",
+                "nombre",
+                "apellido",
+                "area",
+                "carpeta",
+                "cargo",
+                "movil",
+                "supervisor",
+                "estado",
+                "link_foto",
+            )
             .first()
         )
-        
+
         return empleado
 
     @staticmethod
     def listar(query_params):
-        queryset = EmpleadoService._build_base_queryset(estado=query_params.get('estado'))
+        queryset = EmpleadoService._build_base_queryset(estado=query_params.get("estado"))
 
         filtros_icontains = {
-            'cedula': 'cedula',
-            'nombre': 'nombre',
-            'apellido': 'apellido',
-            'area': 'area',
-            'carpeta': 'carpeta',
-            'cargo': 'cargo',
-            'tipo_labor': 'tipo_labor',
-            'movil': 'movil',
-            'supervisor': 'supervisor',
-            'sede': 'sede',
-            'codigo_sap': 'codigo_sap',
+            "cedula": "cedula",
+            "nombre": "nombre",
+            "apellido": "apellido",
+            "area": "area",
+            "carpeta": "carpeta",
+            "cargo": "cargo",
+            "tipo_labor": "tipo_labor",
+            "movil": "movil",
+            "supervisor": "supervisor",
+            "sede": "sede",
+            "codigo_sap": "codigo_sap",
         }
 
         for param, field in filtros_icontains.items():
             value = query_params.get(param)
             if value:
-                if field == 'movil':
+                if field == "movil":
                     queryset = EmpleadoService._filter_by_movil_value(queryset=queryset, value=value)
                 else:
-                    queryset = queryset.filter(**{f'{field}__icontains': value})
+                    queryset = queryset.filter(**{f"{field}__icontains": value})
 
-        search = query_params.get('search')
+        search = query_params.get("search")
         if search:
             search_filter = (
-                Q(cedula__icontains=search) |
-                Q(nombre__icontains=search) |
-                Q(apellido__icontains=search) |
-                Q(cargo__icontains=search) |
-                Q(tipo_labor__icontains=search) |
-                Q(movil__icontains=search)
+                Q(cedula__icontains=search)
+                | Q(nombre__icontains=search)
+                | Q(apellido__icontains=search)
+                | Q(cargo__icontains=search)
+                | Q(tipo_labor__icontains=search)
+                | Q(movil__icontains=search)
             )
             if EmpleadoService._looks_like_movil_lookup(search):
                 queryset = EmpleadoService._annotate_movil_normalized(queryset=queryset)
-                search_filter |= Q(movil_normalized__icontains=EmpleadoService._normalize_movil_lookup(search))
+                search_filter |= Q(
+                    movil_normalized__icontains=EmpleadoService._normalize_movil_lookup(search)
+                )
             queryset = queryset.filter(search_filter)
 
         birth_month = EmpleadoService._parse_month_number(
@@ -102,7 +127,9 @@ class EmpleadoService:
 
     @staticmethod
     def contar_agrupado_runtime(*, query_params, group_by_field, limit=100):
-        raw_group_fields = group_by_field if isinstance(group_by_field, (list, tuple, set)) else [group_by_field]
+        raw_group_fields = (
+            group_by_field if isinstance(group_by_field, (list, tuple, set)) else [group_by_field]
+        )
         group_fields = [
             EmpleadoService._resolve_model_field_name(item)
             for item in list(raw_group_fields or [])
@@ -156,10 +183,10 @@ class EmpleadoService:
         return {
             "fecha_inicio": start_date.isoformat(),
             "fecha_fin": end_date.isoformat(),
-            "dias_periodo": int((end_date - start_date).days + 1),
+            "dias_periodo": (end_date - start_date).days + 1,
             "total_egresos": int(egresos_periodo),
             "total_ingresos": int(ingresos_periodo),
-            "planta_inicio": int(planta_inicio),
+            "planta_inicio": planta_inicio,
             "planta_fin": int(planta_fin),
             "planta_promedio": round(planta_promedio, 2),
             "rotacion_porcentaje": round(rotacion_porcentaje, 2),
@@ -175,7 +202,9 @@ class EmpleadoService:
         if start_date > end_date:
             start_date, end_date = end_date, start_date
 
-        raw_group_fields = group_by_field if isinstance(group_by_field, (list, tuple, set)) else [group_by_field]
+        raw_group_fields = (
+            group_by_field if isinstance(group_by_field, (list, tuple, set)) else [group_by_field]
+        )
         group_fields = [
             EmpleadoService._resolve_model_field_name(item)
             for item in list(raw_group_fields or [])
@@ -220,9 +249,9 @@ class EmpleadoService:
         keys = set(egresos) | set(ingresos) | set(planta_fin)
         rows = []
         for key in keys:
-            total_egresos = int(egresos.get(key) or 0)
-            total_ingresos = int(ingresos.get(key) or 0)
-            fin = int(planta_fin.get(key) or 0)
+            total_egresos = egresos.get(key) or 0
+            total_ingresos = ingresos.get(key) or 0
+            fin = planta_fin.get(key) or 0
             inicio = max(fin - total_ingresos + total_egresos, 0)
             promedio = (float(inicio) + float(fin)) / 2.0
             porcentaje = (float(total_egresos) / promedio) * 100.0 if promedio > 0 else 0.0
@@ -238,7 +267,13 @@ class EmpleadoService:
                 }
             )
         safe_limit = max(1, min(int(limit), 500))
-        rows.sort(key=lambda item: (-float(item.get("rotacion_porcentaje") or 0.0), -int(item.get("total_egresos") or 0), str(item)))
+        rows.sort(
+            key=lambda item: (
+                -float(item.get("rotacion_porcentaje") or 0.0),
+                -int(item.get("total_egresos") or 0),
+                str(item),
+            )
+        )
         return rows[:safe_limit]
 
     @staticmethod
@@ -249,10 +284,78 @@ class EmpleadoService:
             instance.delete()
             return True
 
-        if instance.estado != 'INACTIVO':
-            instance.estado = 'INACTIVO'
-            instance.save(update_fields=['estado'])
+        if instance.estado != "INACTIVO":
+            instance.estado = "INACTIVO"
+            instance.save(update_fields=["estado"])
         return True
+
+    @staticmethod
+    def generar_certificado_laboral(*, empleado: Empleado, document_type=""):
+        context = EmpleadoService.construir_contexto_certificado_laboral(
+            empleado=empleado,
+            document_type=document_type,
+        )
+        pdf_content = EmpleadoService._render_certificado_laboral_pdf(context=context)
+        return {
+            "filename": f"certificado_laboral_{uuid.uuid4()}.pdf",
+            "content": pdf_content,
+            "context": context,
+        }
+
+    @staticmethod
+    def construir_contexto_certificado_laboral(*, empleado: Empleado, document_type=""):
+        siigo = EmpleadoService._obtener_registro_siigo_por_cedula(empleado.cedula)
+        siigo_data = EmpleadoService._normalize_siigo_data(getattr(siigo, "datos", None))
+        fecha_expedicion = timezone.localdate()
+        fecha_ingreso = (
+            getattr(empleado, "fecha_ingreso", None)
+            or EmpleadoService._parse_datetime_value(siigo_data.get("f_ingreso"))
+        )
+        cargo = EmpleadoService._clean_cargo_value(siigo_data.get("cargo") or getattr(empleado, "cargo", ""))
+        contrato = EmpleadoService._normalize_contract_value(
+            siigo_data.get("tipo_contrato") or "OBRA Y LABOR"
+        )
+        salario = EmpleadoService._parse_salary_value(getattr(siigo, "salario", ""))
+        resolved_document_type = EmpleadoService._infer_document_type(
+            empleado=empleado,
+            requested_type=document_type,
+        )
+        return {
+            "empleado_id": getattr(empleado, "id", None),
+            "nombre_completo": EmpleadoService._resolve_full_name(empleado=empleado, siigo_data=siigo_data),
+            "cedula": str(getattr(empleado, "cedula", "") or "").strip(),
+            "document_type": resolved_document_type,
+            "document_type_label": resolved_document_type,
+            "document_flags": {
+                code: code == resolved_document_type for code in sorted(EmpleadoService.DOCUMENT_TYPES)
+            },
+            "cargo": cargo or "COLABORADOR",
+            "salario": salario,
+            "salario_texto": EmpleadoService._format_currency(salario),
+            "fecha_ingreso": fecha_ingreso,
+            "fecha_ingreso_texto": EmpleadoService._format_date(fecha_ingreso),
+            "fecha_expedicion": fecha_expedicion,
+            "fecha_expedicion_texto": EmpleadoService._format_date(fecha_expedicion),
+            "contrato": contrato,
+            "company_name": "Compañía Integral Negocios de Colombia",
+            "company_name": "Compañía Integral Negocios de Colombia",
+            "company_nit": "811042087-2",
+            "firmante_nombre": "FARAY MONSALVE URREGO",
+            "firmante_cargo": "Dirección Gestión Humana",
+            "firmante_cargo": "Dirección Gestión Humana",
+        }
+
+    @staticmethod
+    def _obtener_registro_siigo_por_cedula(cedula):
+        clean_cedula = str(cedula or "").strip()
+        if not clean_cedula:
+            return None
+        return (
+            EmpleadoSiigo.objects.using("azul")
+            .filter(cedula=clean_cedula)
+            .order_by("-fecha_edit")
+            .first()
+        )
 
     @staticmethod
     def _parse_iso_date(value) -> date | None:
@@ -268,7 +371,7 @@ class EmpleadoService:
     def _build_base_queryset(*, estado):
         if estado:
             return Empleado.objects.filter(estado__iexact=estado)
-        return Empleado.objects.filter(estado='ACTIVO')
+        return Empleado.objects.filter(estado="ACTIVO")
 
     @staticmethod
     def _apply_runtime_filters(*, queryset, query_params):
@@ -395,7 +498,345 @@ class EmpleadoService:
         normalized_value = EmpleadoService._normalize_movil_lookup(raw_value)
         queryset = EmpleadoService._annotate_movil_normalized(queryset=queryset)
         return queryset.filter(
-            Q(movil__icontains=raw_value)
-            | Q(movil_normalized__icontains=normalized_value)
+            Q(movil__icontains=raw_value) | Q(movil_normalized__icontains=normalized_value)
         )
-    
+
+    @staticmethod
+    def _normalize_siigo_data(value):
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _parse_datetime_value(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(raw, fmt).date()
+                if parsed.year < 1901:
+                    return None
+                return parsed
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _parse_salary_value(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return Decimal("0")
+        normalized = raw.replace(",", "").replace("$", "").strip()
+        try:
+            return Decimal(normalized)
+        except (InvalidOperation, ValueError):
+            return Decimal("0")
+
+    @staticmethod
+    def _format_currency(value):
+        try:
+            amount = Decimal(value or 0)
+        except (InvalidOperation, ValueError):
+            amount = Decimal("0")
+        quantized = amount.quantize(Decimal("0.01"))
+        integer_part = f"{int(quantized):,}".replace(",", ".")
+        if quantized == quantized.to_integral():
+            return f"${integer_part}"
+        decimals = str(quantized).split(".")[-1]
+        return f"${integer_part},{decimals}"
+
+    @staticmethod
+    def _format_date(value):
+        if not value:
+            return ""
+        return value.strftime("%d/%m/%Y")
+
+    @staticmethod
+    def _clean_cargo_value(value):
+        raw = EmpleadoService._normalize_text_value(value)
+        if not raw:
+            return ""
+        if "-" in raw:
+            left, right = raw.split("-", 1)
+            if left.strip().isdigit() and right.strip():
+                return right.strip()
+        return raw
+
+    @staticmethod
+    def _resolve_full_name(*, empleado: Empleado, siigo_data):
+        local_name = " ".join(
+            EmpleadoService._normalize_text_value(part)
+            for part in [getattr(empleado, "nombre", ""), getattr(empleado, "apellido", "")]
+            if EmpleadoService._normalize_text_value(part)
+        ).strip()
+        siigo_name = EmpleadoService._normalize_text_value(siigo_data.get("nombre_empleado"))
+        return local_name or siigo_name or EmpleadoService._normalize_text_value(getattr(empleado, "cedula", ""))
+
+    @staticmethod
+    def _normalize_text_value(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        replacements = {
+            "├â┬í": "á",
+            "├í": "á",
+            "├â┬®": "é",
+            "├®": "é",
+            "├â┬¡": "í",
+            "├¡": "í",
+            "├â┬│": "ó",
+            "├│": "ó",
+            "├â┬║": "ú",
+            "├║": "ú",
+            "├â┬ü": "Á",
+            "├ü": "Á",
+            "├âÔÇ░": "É",
+            "├ë": "É",
+            "├â┬ì": "Í",
+            "├ì": "Í",
+            "├âÔÇ£": "Ó",
+            "├ô": "Ó",
+            "├â┼í": "Ú",
+            "├Ü": "Ú",
+            "├â┬▒": "ñ",
+            "├▒": "ñ",
+            "├âÔÇÿ": "Ñ",
+            "├æ": "Ñ",
+            "├ó┬Ç┬Ö": "'",
+            "├ó┬Ç┬£": '"',
+            "├ó┬Ç┬Ø": '"',
+            "├é┬░": "°",
+            "┬░": "°",
+            "├é┬░": "°",
+            "┬░": "°",
+            "┬á": " ",
+        }
+        for source, target in replacements.items():
+            raw = raw.replace(source, target)
+        return re.sub(r"\s+", " ", raw).strip()
+
+    @staticmethod
+    def _normalize_contract_value(value):
+        normalized = EmpleadoService._normalize_text_value(value)
+        if not normalized:
+            return "Obra y labor"
+        lowered = normalized.lower().replace(".", "")
+        canonical_map = {
+            "t?rmino indefinido": "Término indefinido",
+            "termino indefinido": "Término indefinido",
+            "término indefinido": "Término indefinido",
+            "t?rmino indefinido": "Término indefinido",
+            "termino indefinido": "Término indefinido",
+            "término indefinido": "Término indefinido",
+            "obra y labor": "Obra y labor",
+            "obra labor": "Obra y labor",
+            "obra o labor": "Obra y labor",
+            "fijo": "Término fijo",
+            "termino fijo": "Término fijo",
+            "término fijo": "Término fijo",
+            "t?rmino fijo": "Término fijo",
+            "fijo": "Término fijo",
+            "termino fijo": "Término fijo",
+            "término fijo": "Término fijo",
+            "t?rmino fijo": "Término fijo",
+        }
+        return canonical_map.get(lowered, normalized)
+
+    @staticmethod
+    def _escape_pdf_text(value):
+        return escape(EmpleadoService._normalize_text_value(value), quote=False)
+
+    @staticmethod
+    def _infer_document_type(*, empleado: Empleado, requested_type=""):
+        normalized = str(requested_type or "").strip().upper()
+        if normalized in EmpleadoService.DOCUMENT_TYPES:
+            return normalized
+        if str(getattr(empleado, "permiso", "") or "").strip():
+            return "PT"
+        pasaporte = str(getattr(empleado, "pasaporte", "") or "").strip()
+        cedula = str(getattr(empleado, "cedula", "") or "").strip()
+        if pasaporte and pasaporte != cedula:
+            return "CE"
+        return "CC"
+
+    @staticmethod
+    def _render_certificado_laboral_pdf(*, context):
+        try:
+            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            from reportlab.lib.units import cm
+            from reportlab.lib.utils import ImageReader
+            from reportlab.platypus import Flowable, Paragraph, SimpleDocTemplate, Spacer
+        except ImportError as exc:
+            raise RuntimeError("reportlab_no_instalado") from exc
+
+        buffer = BytesIO()
+        page_width, page_height = A4
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "CertTitle",
+            parent=styles["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=12.5,
+            leading=15,
+            alignment=TA_CENTER,
+            spaceAfter=0.8 * cm,
+        )
+        body_style = ParagraphStyle(
+            "CertBody",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=16,
+            alignment=TA_JUSTIFY,
+            spaceAfter=0.45 * cm,
+        )
+        body_center_style = ParagraphStyle(
+            "CertBodyCenter",
+            parent=body_style,
+            alignment=TA_LEFT,
+        )
+        signature_name_style = ParagraphStyle(
+            "CertSignatureName",
+            parent=styles["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            leading=12,
+            alignment=TA_LEFT,
+            spaceAfter=0.1 * cm,
+        )
+        signature_role_style = ParagraphStyle(
+            "CertSignatureRole",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=12,
+            alignment=TA_LEFT,
+        )
+
+        nombre_completo = EmpleadoService._escape_pdf_text(context["nombre_completo"])
+        cedula = EmpleadoService._escape_pdf_text(context["cedula"])
+        document_type_label = EmpleadoService._escape_pdf_text(
+            context["document_type_label"]
+        )
+        company_name = EmpleadoService._escape_pdf_text(context["company_name"])
+        cargo = EmpleadoService._escape_pdf_text(context["cargo"])
+        salario_texto = EmpleadoService._escape_pdf_text(context["salario_texto"])
+        contrato = EmpleadoService._escape_pdf_text(context["contrato"])
+        fecha_ingreso_texto = EmpleadoService._escape_pdf_text(
+            context["fecha_ingreso_texto"] or "sin registro"
+        )
+        fecha_expedicion_texto = EmpleadoService._escape_pdf_text(
+            context["fecha_expedicion_texto"]
+        )
+        firmante_nombre = EmpleadoService._escape_pdf_text(context["firmante_nombre"])
+        firmante_cargo = EmpleadoService._escape_pdf_text(context["firmante_cargo"])
+        intro = (
+            f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
+            f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
+            f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
+            f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
+            f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
+            f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
+            f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
+            f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
+            f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
+            f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
+            f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
+            f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
+        )
+        body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+        body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+
+        story: list[Flowable] = [
+            Spacer(1, 0.8 * cm),
+            Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style),
+            Paragraph(intro, body_style),
+            Spacer(1, 0.35 * cm),
+            Paragraph(body, body_style),
+            Spacer(1, 1.1 * cm),
+            Paragraph(company_name, body_center_style),
+            Paragraph(f"NIT. {context['company_nit']}", body_center_style),
+            Spacer(1, 2.7 * cm),
+            Paragraph(firmante_nombre, signature_name_style),
+            Paragraph(firmante_cargo, signature_role_style),
+        ]
+
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=2 * cm,
+            rightMargin=2 * cm,
+            topMargin=4 * cm,
+            bottomMargin=3.5 * cm,
+            title=f"Certificado laboral {context['cedula']}",
+        )
+        doc.build(
+            story,
+            onFirstPage=lambda canvas, pdf_doc: EmpleadoService._draw_certificado_header_footer(
+                canvas=canvas,
+                doc=pdf_doc,
+                page_width=page_width,
+                page_height=page_height,
+                cm_unit=cm,
+                image_reader=ImageReader,
+            ),
+            onLaterPages=lambda canvas, pdf_doc: EmpleadoService._draw_certificado_header_footer(
+                canvas=canvas,
+                doc=pdf_doc,
+                page_width=page_width,
+                page_height=page_height,
+                cm_unit=cm,
+                image_reader=ImageReader,
+            ),
+        )
+        return buffer.getvalue()
+
+    @staticmethod
+    def _draw_certificado_header_footer(*, canvas, doc, page_width, page_height, cm_unit, image_reader):
+        header_path = EmpleadoService._resolve_certificate_image_path(EmpleadoService.HEADER_FILENAME)
+        footer_path = EmpleadoService._resolve_certificate_image_path(EmpleadoService.FOOTER_FILENAME)
+
+        if header_path:
+            header = image_reader(str(header_path))
+            header_w, header_h = header.getSize()
+            header_draw_w = page_width
+            header_draw_h = header_draw_w * header_h / header_w
+            canvas.drawImage(
+                header,
+                x=0,
+                y=page_height - header_draw_h,
+                width=header_draw_w,
+                height=header_draw_h,
+                preserveAspectRatio=False,
+                mask="auto",
+            )
+
+        if footer_path:
+            footer = image_reader(str(footer_path))
+            footer_w, footer_h = footer.getSize()
+            footer_draw_w = page_width
+            footer_draw_h = footer_draw_w * footer_h / footer_w
+            canvas.drawImage(
+                footer,
+                x=0,
+                y=0,
+                width=footer_draw_w,
+                height=footer_draw_h,
+                preserveAspectRatio=False,
+                mask="auto",
+            )
+
+        canvas.setFont("Helvetica", 9)
+        canvas.drawRightString(page_width - 1.5 * cm_unit, 1 * cm_unit, f"Página {doc.page}")
+
+    @staticmethod
+    def _resolve_certificate_image_path(filename):
+        candidates = [
+            EmpleadoService.SERVER_IMAGE_DIR / filename,
+            EmpleadoService.LOCAL_IMAGE_DIR / filename,
+        ]
+        for path in candidates:
+            if path.exists():
+                return path
+        return None
