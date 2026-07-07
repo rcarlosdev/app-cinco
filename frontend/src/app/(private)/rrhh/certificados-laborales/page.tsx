@@ -3,7 +3,7 @@ import CertificadosLaboralesModule from "@/modules/rrhh/certificados/Certificado
 
 export const metadata: Metadata = {
   title: "Certificados Laborales - CINCO SAS",
-  description: "Prueba b├ísica para validar la generaci├│n de certificados laborales en PDF.",
+  description: "Prueba básica para validar la generación de certificados laborales en PDF.",
 };
 
 const CertificadosLaboralesPage = () => {

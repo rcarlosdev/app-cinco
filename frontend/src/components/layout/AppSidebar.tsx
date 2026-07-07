@@ -1,4 +1,4 @@
-﻿// src/components/layout/AppSidebar.tsx
+// src/components/layout/AppSidebar.tsx
 "use client";
 
 import Link from "next/link";
@@ -36,6 +36,7 @@ const defaultNavItems: NavItem[] = [
   },
   {
     name: "RRHH",
+    requiresSuperuser: true,
     subItems: [
       {
         name: "Certificados Laborales",
@@ -187,9 +188,8 @@ const AppSidebar: React.FC = () => {
                   )
                 }
                 onMouseLeave={() => handleCollapsedItemMouseLeave(collapsedItemKey)}
-                className={`menu-item group ${itemClassName} cursor-pointer ${
-                  !isSidebarOpen ? "lg:justify-center" : "lg:justify-start"
-                }`}
+                className={`menu-item group ${itemClassName} cursor-pointer ${!isSidebarOpen ? "lg:justify-center" : "lg:justify-start"
+                  }`}
               >
                 <span className={itemIconClassName}>
                   {nav.icon || collapsedItemPrefix}
@@ -197,9 +197,8 @@ const AppSidebar: React.FC = () => {
                 {isSidebarOpen && <span className="menu-item-text">{nav.name}</span>}
                 {isSidebarOpen && (
                   <ChevronDownIcon
-                    className={`ml-auto h-5 w-5 transition-transform duration-200 ${
-                      isItemActive ? "text-brand-500 rotate-180" : ""
-                    }`}
+                    className={`ml-auto h-5 w-5 transition-transform duration-200 ${isItemActive ? "text-brand-500 rotate-180" : ""
+                      }`}
                   />
                 )}
               </button>
@@ -236,7 +235,7 @@ const AppSidebar: React.FC = () => {
                 style={{
                   height:
                     openSubmenu?.type === menuType &&
-                    openSubmenu?.index === index
+                      openSubmenu?.index === index
                       ? `${subMenuHeight[`${menuType}-${index}`]}px`
                       : "0px",
                 }}
@@ -246,11 +245,10 @@ const AppSidebar: React.FC = () => {
                     <li key={subItem.name}>
                       <Link
                         href={subItem.path}
-                        className={`menu-dropdown-item ${
-                          isActive(subItem.path)
+                        className={`menu-dropdown-item ${isActive(subItem.path)
                             ? "menu-dropdown-item-active"
                             : "menu-dropdown-item-inactive"
-                        }`}
+                          }`}
                       >
                         {subItem.name}
                       </Link>
@@ -328,15 +326,13 @@ const AppSidebar: React.FC = () => {
   return (
     <aside
       ref={asideRef}
-      className={`fixed top-0 left-0 z-[100000] mt-16 flex h-screen flex-col border-r border-gray-200 bg-white px-5 text-gray-900 transition-all duration-300 ease-in-out lg:mt-0 dark:border-gray-800 dark:bg-gray-900 ${
-        isSidebarOpen ? "w-72.5" : "w-22.5"
-      } ${isMobileOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
+      className={`fixed top-0 left-0 z-100000 mt-16 flex h-screen flex-col border-r border-gray-200 bg-white px-5 text-gray-900 transition-all duration-300 ease-in-out lg:mt-0 dark:border-gray-800 dark:bg-gray-900 ${isSidebarOpen ? "w-72.5" : "w-22.5"
+        } ${isMobileOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
       onMouseLeave={() => setCollapsedPreview(null)}
     >
       <div
-        className={`flex items-center py-8 ${
-          !isSidebarOpen ? "lg:justify-center" : "justify-start"
-        }`}
+        className={`flex items-center py-8 ${!isSidebarOpen ? "lg:justify-center" : "justify-start"
+          }`}
       >
         <Link
           href="/"
@@ -348,9 +344,8 @@ const AppSidebar: React.FC = () => {
           }
           onMouseLeave={() => handleCollapsedItemMouseLeave("logo-home")}
           onClick={() => setCollapsedPreview(null)}
-          className={`relative block h-10 overflow-hidden transition-[width] duration-300 ease-in-out ${
-            isSidebarOpen ? "w-[150px]" : "w-8"
-          }`}
+          className={`relative block h-10 overflow-hidden transition-[width] duration-300 ease-in-out ${isSidebarOpen ? "w-[150px]" : "w-8"
+            }`}
         >
           <Image
             src="/images/logo/logo-cinco.svg"
@@ -358,9 +353,8 @@ const AppSidebar: React.FC = () => {
             width={150}
             height={40}
             priority
-            className={`absolute top-1/2 left-0 h-10 w-[150px] max-w-none -translate-y-1/2 transition-opacity duration-200 ${
-              isSidebarOpen ? "opacity-100" : "opacity-0"
-            }`}
+            className={`absolute top-1/2 left-0 h-10 w-[150px] max-w-none -translate-y-1/2 transition-opacity duration-200 ${isSidebarOpen ? "opacity-100" : "opacity-0"
+              }`}
           />
           <Image
             src="/images/logo/logo-cinco.svg"
@@ -368,9 +362,8 @@ const AppSidebar: React.FC = () => {
             width={32}
             height={32}
             priority
-            className={`absolute top-1/2 left-0 h-8 w-8 -translate-y-1/2 transition-opacity duration-200 ${
-              isSidebarOpen ? "opacity-0" : "opacity-100"
-            }`}
+            className={`absolute top-1/2 left-0 h-8 w-8 -translate-y-1/2 transition-opacity duration-200 ${isSidebarOpen ? "opacity-0" : "opacity-100"
+              }`}
           />
         </Link>
       </div>
@@ -380,9 +373,8 @@ const AppSidebar: React.FC = () => {
           <div className="flex flex-col gap-4">
             <div>
               <h2
-                className={`mb-4 flex text-xs leading-5 text-gray-400 uppercase ${
-                  !isSidebarOpen ? "lg:justify-center" : "justify-start"
-                }`}
+                className={`mb-4 flex text-xs leading-5 text-gray-400 uppercase ${!isSidebarOpen ? "lg:justify-center" : "justify-start"
+                  }`}
               >
                 {isSidebarOpen ? "Menu" : <HorizontaLDots />}
               </h2>
@@ -392,9 +384,8 @@ const AppSidebar: React.FC = () => {
             {othersItems.length > 0 && (
               <div>
                 <h2
-                  className={`mb-4 flex text-xs leading-5 text-gray-400 uppercase ${
-                    !isSidebarOpen ? "lg:justify-center" : "justify-start"
-                  }`}
+                  className={`mb-4 flex text-xs leading-5 text-gray-400 uppercase ${!isSidebarOpen ? "lg:justify-center" : "justify-start"
+                    }`}
                 >
                   {isSidebarOpen ? "Others" : <HorizontaLDots />}
                 </h2>
@@ -407,7 +398,7 @@ const AppSidebar: React.FC = () => {
 
       {!isSidebarOpen && collapsedPreview && (
         <div
-          className="pointer-events-none absolute z-[70]"
+          className="pointer-events-none absolute z-70"
           style={{
             left: collapsedPreview.left,
             top: collapsedPreview.top,
@@ -415,18 +406,16 @@ const AppSidebar: React.FC = () => {
           }}
         >
           <div
-            className={`menu-item !w-fit bg-gray-50/95 backdrop-blur-sm dark:bg-gray-800/95 ${
-              collapsedPreview.isActive
+            className={`menu-item w-fit! bg-gray-50/95 backdrop-blur-sm dark:bg-gray-800/95 ${collapsedPreview.isActive
                 ? "menu-item-active"
                 : "menu-item-inactive"
-            } shadow-theme-sm`}
+              } shadow-theme-sm`}
           >
             <span
-              className={`${
-                collapsedPreview.isActive
+              className={`${collapsedPreview.isActive
                   ? "menu-item-icon-active"
                   : "menu-item-icon-inactive"
-              }`}
+                }`}
             >
               {collapsedPreview.useHomeIcon ? (
                 <House className="h-4 w-4" />
@@ -437,11 +426,10 @@ const AppSidebar: React.FC = () => {
               )}
             </span>
             <span
-              className={`menu-item-text ${
-                collapsedPreview.forceActiveText
-                  ? "!text-brand-500 dark:!text-brand-400"
+              className={`menu-item-text ${collapsedPreview.forceActiveText
+                  ? "text-brand-500! dark:text-brand-400!"
                   : ""
-              }`}
+                }`}
             >
               {collapsedPreview.name}
             </span>

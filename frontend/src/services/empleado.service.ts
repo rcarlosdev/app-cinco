@@ -5,7 +5,7 @@ import { cache } from "@/lib/cache";
 
 const CACHE_TTL = {
   ALL_EMPLOYEES: 10 * 60 * 1000, // 10 minutos para lista completa
-  SEARCH: 5 * 60 * 1000, // 5 minutos para b├║squedas
+  SEARCH: 5 * 60 * 1000, // 5 minutos para búsquedas
   SINGLE: 15 * 60 * 1000, // 15 minutos para empleado individual
 };
 
@@ -43,16 +43,16 @@ export const getEmpleadoByCedula = async (
   return cache.getOrFetch(
     cacheKey,
     async () => {
-      // Buscar empleado por c├®dula usando el endpoint de b├║squeda
+      // Buscar empleado por cédula usando el endpoint de búsqueda
       const res = await api.get("/empleados/empleados/", {
         params: { search: cedula },
       });
       
-      // Buscar el empleado que coincida exactamente con la c├®dula
+      // Buscar el empleado que coincida exactamente con la cédula
       const empleado = res.data.find((emp: Empleado) => emp.cedula === cedula);
       
       if (!empleado) {
-        throw new Error(`Empleado con c├®dula ${cedula} no encontrado`);
+        throw new Error(`Empleado con cédula ${cedula} no encontrado`);
       }
       
       return empleado;
@@ -98,11 +98,11 @@ export const downloadCertificadoLaboral = async (
 };
 
 /**
- * Limpiar el cach├® de empleados
- * ├Ütil cuando se actualiza, crea o elimina un empleado
+ * Limpiar el caché de empleados
+ * Útil cuando se actualiza, crea o elimina un empleado
  */
 export const clearEmpleadosCache = (): void => {
-  // Obtener todas las claves del cach├®
+  // Obtener todas las claves del caché
   const stats = cache.getStats();
 
   // Eliminar todas las claves que comiencen con "empleados:"
