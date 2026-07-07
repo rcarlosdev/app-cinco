@@ -102,7 +102,7 @@ export const downloadCertificadoLaboral = async (
  * Útil cuando se actualiza, crea o elimina un empleado
  */
 export const clearEmpleadosCache = (): void => {
-  // Obtener todas las claves del cach├®
+  // Obtener todas las claves del caché
   const stats = cache.getStats();
 
   // Eliminar todas las claves que comiencen con "empleados:"

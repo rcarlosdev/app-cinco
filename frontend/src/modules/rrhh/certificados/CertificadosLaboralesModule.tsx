@@ -9,7 +9,9 @@ import { getErrorMessage, classifyError } from "@/lib/errorHandler";
 import { downloadCertificadoLaboral } from "@/services/empleado.service";
 import { Empleado } from "@/types/empleado";
 import { Download, FileText } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuthStore } from "@/store/auth.store";
+import { useRouter } from "next/navigation";
 
 type DocumentType = "CC" | "PT" | "TI" | "CE";
 
@@ -24,11 +26,25 @@ const selectClasses =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800";
 
 const CertificadosLaboralesModule = () => {
+  const user = useAuthStore((state) => state.user);
+  const isSuperuser = Boolean(user?.is_superuser);
+  const router = useRouter();
+
   const [selectedEmployee, setSelectedEmployee] = useState<Empleado | null>(null);
   const [documentType, setDocumentType] = useState<DocumentType>("CC");
   const [isDownloading, setIsDownloading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    if (!isSuperuser) {
+      router.replace("/");
+    }
+  }, [isSuperuser, router]);
+
+  if (!isSuperuser) {
+    return null;
+  }
 
   const handleDownload = async () => {
     if (!selectedEmployee || isDownloading) return;
