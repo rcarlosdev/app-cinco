@@ -74,12 +74,35 @@ export const getEmpleadoById = async (id: number): Promise<Empleado> => {
   );
 };
 
+export const downloadCertificadoLaboral = async (
+  id: number,
+  documentType?: "CC" | "PT" | "TI" | "CE",
+): Promise<{ blob: Blob; filename: string }> => {
+  const response = await api.get(
+    `/empleados/empleados/${id}/certificado-laboral/`,
+    {
+      params: documentType ? { document_type: documentType } : undefined,
+      responseType: "blob",
+    },
+  );
+
+  const contentDisposition = String(
+    response.headers["content-disposition"] || "",
+  );
+  const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+
+  return {
+    blob: response.data as Blob,
+    filename: filenameMatch?.[1] || `certificado_laboral_${id}.pdf`,
+  };
+};
+
 /**
  * Limpiar el caché de empleados
  * Útil cuando se actualiza, crea o elimina un empleado
  */
 export const clearEmpleadosCache = (): void => {
-  // Obtener todas las claves del caché
+  // Obtener todas las claves del cach├®
   const stats = cache.getStats();
 
   // Eliminar todas las claves que comiencen con "empleados:"

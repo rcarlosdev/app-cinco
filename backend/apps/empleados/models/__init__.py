@@ -1,1 +1,1 @@
-from .empleado_model import Empleado
+﻿from .empleado_model import Empleado, EmpleadoSiigo

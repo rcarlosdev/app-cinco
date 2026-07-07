@@ -336,7 +336,7 @@ export default function DatePicker({
         flatPickrInstance.destroy();
       }
     };
-  }, [mode, onChange, id, defaultDate, options, yearRange, isMobile]);
+  }, [mode, onChange, id, defaultDate, options, yearRange, isMobile, disabled]);
 
   const mobileValue = formatInputDateValue(defaultDate);
 
@@ -356,11 +356,11 @@ export default function DatePicker({
               const value = event.target.value;
               const selectedDate = value
                 ? new Date(
-                    Number(value.slice(0, 4)),
-                    Number(value.slice(5, 7)) - 1,
-                    Number(value.slice(8, 10)),
-                    12,
-                  )
+                  Number(value.slice(0, 4)),
+                  Number(value.slice(5, 7)) - 1,
+                  Number(value.slice(8, 10)),
+                  12,
+                )
                 : null;
 
               triggerOnChangeHooks(
@@ -374,13 +374,12 @@ export default function DatePicker({
           />
           {hint && (
             <p
-              className={`mt-1.5 text-xs ${
-                error
+              className={`mt-1.5 text-xs ${error
                   ? "text-error-400"
                   : success
                     ? "text-success-500"
                     : "text-gray-500"
-              }`}
+                }`}
             >
               {hint}
             </p>
@@ -406,13 +405,12 @@ export default function DatePicker({
         />
         {hint && (
           <p
-            className={`mt-1.5 text-xs ${
-              error
+            className={`mt-1.5 text-xs ${error
                 ? "text-error-400"
                 : success
                   ? "text-success-500"
                   : "text-gray-500"
-            }`}
+              }`}
           >
             {hint}
           </p>
