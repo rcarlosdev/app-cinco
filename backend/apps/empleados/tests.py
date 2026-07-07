@@ -1,4 +1,4 @@
-﻿from datetime import date
+from datetime import date
 from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -120,7 +120,40 @@ class EmpleadoServiceTests(TestCase):
     def test_normalize_contract_value_fixes_broken_accents(self):
         contract = EmpleadoService._normalize_contract_value("T?rmino Indefinido.")
 
-        self.assertEqual(contract, "T├®rmino indefinido")
+        self.assertEqual(contract, "Término indefinido")
+
+    @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
+    def test_generar_certificado_laboral_pdf_real(self, siigo_lookup):
+        empleado = MagicMock(
+            id=12,
+            cedula="123456789",
+            nombre="ANA",
+            apellido="PEREZ",
+            cargo="TECNICO",
+            fecha_ingreso=date(2025, 2, 4),
+            permiso="",
+            pasaporte="",
+        )
+        siigo_lookup.return_value = MagicMock(
+            salario="1750905.00",
+            datos={
+                "cargo": "009-TECNICOS INSTALACIONES",
+                "f_ingreso": "2025-02-04 00:00:00",
+                "tipo_contrato": "OBRA Y LABOR",
+                "nombre_empleado": "ANA PEREZ",
+            },
+        )
+
+        result = EmpleadoService.generar_certificado_laboral(
+            empleado=empleado,
+            document_type="CC",
+        )
+
+        self.assertEqual(result["filename"], "certificado_laboral_123456789.pdf")
+        self.assertTrue(result["content"].startswith(b"%PDF"))
+        self.assertEqual(result["context"]["nombre_completo"], "ANA PEREZ")
+        self.assertEqual(result["context"]["cargo"], "TECNICOS INSTALACIONES")
+        self.assertEqual(result["context"]["contrato"], "Obra y labor")
 
 
 class EmpleadoViewSetTests(TestCase):

@@ -1,4 +1,4 @@
-﻿import re
+import re
 from html import escape
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -336,10 +336,10 @@ class EmpleadoService:
             "fecha_expedicion": fecha_expedicion,
             "fecha_expedicion_texto": EmpleadoService._format_date(fecha_expedicion),
             "contrato": contrato,
-            "company_name": "Compa├▒├¡a Integral Negocios de Colombia",
+            "company_name": "Compañía Integral Negocios de Colombia",
             "company_nit": "811042087-2",
             "firmante_nombre": "FARAY MONSALVE URREGO",
-            "firmante_cargo": "Direcci├│n Gesti├│n Humana",
+            "firmante_cargo": "Dirección Gestión Humana",
         }
 
     @staticmethod
@@ -574,22 +574,35 @@ class EmpleadoService:
         if not raw:
             return ""
         replacements = {
-            "├â┬í": "├í",
-            "├â┬®": "├®",
-            "├â┬¡": "├¡",
-            "├â┬│": "├│",
-            "├â┬║": "├║",
-            "├â┬ü": "├ü",
-            "├âÔÇ░": "├ë",
-            "├â┬ì": "├ì",
-            "├âÔÇ£": "├ô",
-            "├â┼í": "├Ü",
-            "├â┬▒": "├▒",
-            "├âÔÇÿ": "├æ",
+            "├â┬í": "á",
+            "├í": "á",
+            "├â┬®": "é",
+            "├®": "é",
+            "├â┬¡": "í",
+            "├¡": "í",
+            "├â┬│": "ó",
+            "├│": "ó",
+            "├â┬║": "ú",
+            "├║": "ú",
+            "├â┬ü": "Á",
+            "├ü": "Á",
+            "├âÔÇ░": "É",
+            "├ë": "É",
+            "├â┬ì": "Í",
+            "├ì": "Í",
+            "├âÔÇ£": "Ó",
+            "├ô": "Ó",
+            "├â┼í": "Ú",
+            "├Ü": "Ú",
+            "├â┬▒": "ñ",
+            "├▒": "ñ",
+            "├âÔÇÿ": "Ñ",
+            "├æ": "Ñ",
             "├ó┬Ç┬Ö": "'",
             "├ó┬Ç┬£": '"',
             "├ó┬Ç┬Ø": '"',
-            "├é┬░": "┬░",
+            "├é┬░": "°",
+            "┬░": "°",
             "┬á": " ",
         }
         for source, target in replacements.items():
@@ -603,16 +616,16 @@ class EmpleadoService:
             return "Obra y labor"
         lowered = normalized.lower().replace(".", "")
         canonical_map = {
-            "t?rmino indefinido": "T├®rmino indefinido",
-            "termino indefinido": "T├®rmino indefinido",
-            "t├®rmino indefinido": "T├®rmino indefinido",
+            "t?rmino indefinido": "Término indefinido",
+            "termino indefinido": "Término indefinido",
+            "término indefinido": "Término indefinido",
             "obra y labor": "Obra y labor",
             "obra labor": "Obra y labor",
             "obra o labor": "Obra y labor",
-            "fijo": "T├®rmino fijo",
-            "termino fijo": "T├®rmino fijo",
-            "t├®rmino fijo": "T├®rmino fijo",
-            "t?rmino fijo": "T├®rmino fijo",
+            "fijo": "Término fijo",
+            "termino fijo": "Término fijo",
+            "término fijo": "Término fijo",
+            "t?rmino fijo": "Término fijo",
         }
         return canonical_map.get(lowered, normalized)
 
@@ -707,14 +720,14 @@ class EmpleadoService:
         firmante_nombre = EmpleadoService._escape_pdf_text(context["firmante_nombre"])
         firmante_cargo = EmpleadoService._escape_pdf_text(context["firmante_cargo"])
         intro = (
-            f"Certifica que el se├▒or <b>{nombre_completo}</b>, identificado con documento de "
-            f"identificaci├│n <b>{document_type_label}</b> n├║mero <b>{cedula}</b>, ingres├│ a la "
-            f"<b>COMPA├æ├ìA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el d├¡a "
-            f"<b>{fecha_ingreso_texto}</b> y se desempe├▒a como "
-            f"<b>{cargo}</b>, con un salario b├ísico de <b>{salario_texto}</b> "
-            f"m├ís auxilio de transporte y su contrato es por <b>{contrato}</b>."
+            f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
+            f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
+            f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
+            f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
+            f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
+            f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
         )
-        body = f"Esta certificaci├│n fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+        body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
 
         story = [
             Spacer(1, 0.8 * cm),
@@ -796,7 +809,7 @@ class EmpleadoService:
             )
 
         canvas.setFont("Helvetica", 9)
-        canvas.drawRightString(page_width - 1.5 * cm_unit, 1 * cm_unit, f"P├ígina {doc.page}")
+        canvas.drawRightString(page_width - 1.5 * cm_unit, 1 * cm_unit, f"Página {doc.page}")
 
     @staticmethod
     def _resolve_certificate_image_path(filename):

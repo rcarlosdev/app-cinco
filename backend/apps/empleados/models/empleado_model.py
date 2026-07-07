@@ -1,4 +1,4 @@
-﻿from django.db import models
+from django.db import models
 
 class Empleado(models.Model):
     ESTADO_CHOICES = [
@@ -8,14 +8,14 @@ class Empleado(models.Model):
     ]
     
     SEDE_CHOICES = [
-        ('BOGOTA', 'Bogot├í'),
+        ('BOGOTA', 'Bogotá'),
         ('CALI', 'Cali'),
         ('CAUCASIA', 'Caucasia'),
-        ('MEDELLIN', 'Medell├¡n'),
-        ('MONTERIA', 'Monter├¡a'),
+        ('MEDELLIN', 'Medellín'),
+        ('MONTERIA', 'Montería'),
         ('ORIENTE', 'Oriente'),
         ('SINCELEJO', 'Sincelejo'),
-        ('TARAZA', 'Taraz├í'),
+        ('TARAZA', 'Tarazá'),
         ('YARUMAL', 'Yarumal'),
     ]
     
@@ -79,14 +79,14 @@ class Empleado(models.Model):
     certificado_arl = models.CharField(max_length=100, blank=True, null=True)
     afp = models.CharField(max_length=100, blank=True, null=True)
     vacunacion = models.CharField(max_length=100, blank=True, null=True)
-    # datos -> informaci├│n adicional en formato JSON
+    # datos -> información adicional en formato JSON
     datos = models.JSONField(blank=True, null=True)
     email_personal = models.EmailField(max_length=255, blank=True, null=True)
     email_verificar = models.CharField(max_length=100, blank=True, null=True)
     grupo_comiciones = models.CharField(max_length=100, blank=True, null=True)
     
     class Meta:
-        managed = False  # ­ƒö┤ CR├ìTICO
+        managed = False  # 🔴 CRÍTICO
         db_table = "cinco_base_de_personal"
         app_label = "empleados"
 
