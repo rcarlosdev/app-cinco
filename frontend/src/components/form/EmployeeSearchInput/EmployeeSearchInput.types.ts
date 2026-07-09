@@ -10,6 +10,7 @@ export interface EmployeeSearchInputProps {
   disabled?: boolean;
   required?: boolean;
   name?: string;
+  includeInactive?: boolean;
 }
 
 export interface EmployeeSearchState {

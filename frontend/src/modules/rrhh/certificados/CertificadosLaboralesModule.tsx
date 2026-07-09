@@ -97,6 +97,7 @@ const CertificadosLaboralesModule = () => {
               }}
               placeholder="Busca por nombre, apellido o cédula"
               hint="El selector consume el endpoint de empleados del backend."
+              includeInactive={true}
             />
 
             <div>

@@ -1,4 +1,4 @@
-﻿import re
+import re
 import uuid
 from html import escape
 from datetime import date, datetime
@@ -17,6 +17,7 @@ class EmpleadoService:
     LOCAL_IMAGE_DIR = BACKEND_DIR / "static" / "images"
     HEADER_FILENAME = "gghh_certificado_laboral_header.png"
     FOOTER_FILENAME = "gghh_certificado_laboral_footer.png"
+    SELLO_FILENAME = "sello_cinco.png"
     ALLOWED_TEMPORAL_COLUMNS = {"fecha_ingreso", "fecha_egreso"}
     RESERVED_RUNTIME_PARAMS = {
         "estado",
@@ -291,13 +292,45 @@ class EmpleadoService:
 
     @staticmethod
     def generar_certificado_laboral(*, empleado: Empleado, document_type=""):
+        siigo = EmpleadoService._obtener_registro_siigo_por_cedula(empleado.cedula)
+        if not siigo:
+            raise ValueError(
+                "No se encontró información del empleado en la base de datos de SIIGO. "
+                "No es posible generar el certificado laboral sin información de contrato o salario."
+            )
+            
+        siigo_data = EmpleadoService._normalize_siigo_data(getattr(siigo, "datos", None))
+        contrato_raw = siigo_data.get("tipo_contrato") if siigo_data else None
+        salario_raw = getattr(siigo, "salario", None)
+        
+        if not contrato_raw:
+            raise ValueError(
+                "No se encontró información sobre el tipo de contrato del empleado en SIIGO. "
+                "No es posible generar el certificado laboral."
+            )
+            
+        if salario_raw is None or str(salario_raw).strip() == "":
+            raise ValueError(
+                "No se encontró información sobre el salario del empleado en SIIGO. "
+                "No es posible generar el certificado laboral."
+            )
+            
+        salario = EmpleadoService._parse_salary_value(salario_raw)
+        if salario <= 0:
+            raise ValueError(
+                "El salario registrado para el empleado en SIIGO debe ser mayor a cero para generar el certificado."
+            )
+
         context = EmpleadoService.construir_contexto_certificado_laboral(
             empleado=empleado,
             document_type=document_type,
         )
         pdf_content = EmpleadoService._render_certificado_laboral_pdf(context=context)
+        
+        filename = f"certificado_laboral_{uuid.uuid4()}.pdf"
+        
         return {
-            "filename": f"certificado_laboral_{uuid.uuid4()}.pdf",
+            "filename": filename,
             "content": pdf_content,
             "context": context,
         }
@@ -370,6 +403,8 @@ class EmpleadoService:
     @staticmethod
     def _build_base_queryset(*, estado):
         if estado:
+            if estado.lower() in ("all", "todos", "any"):
+                return Empleado.objects.all()
             return Empleado.objects.filter(estado__iexact=estado)
         return Empleado.objects.filter(estado="ACTIVO")
 
@@ -731,26 +766,30 @@ class EmpleadoService:
         )
         firmante_nombre = EmpleadoService._escape_pdf_text(context["firmante_nombre"])
         firmante_cargo = EmpleadoService._escape_pdf_text(context["firmante_cargo"])
+        if contrato.strip().lower() in ("término indefinido", "término fijo"):
+            contrato_phrase = f"y su contrato es a <b>{contrato}</b>."
+        else:
+            contrato_phrase = f"y su contrato es por <b>{contrato}</b>."
+
         intro = (
             f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
             f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
             f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
             f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
             f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
-            f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
-            f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
-            f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
-            f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
-            f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
-            f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
-            f"más auxilio de transporte y su contrato es por <b>{contrato}</b>."
+            f"más auxilio de transporte {contrato_phrase}"
         )
         body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
-        body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+
+        has_header_image = EmpleadoService._resolve_certificate_image_path(EmpleadoService.HEADER_FILENAME) is not None
 
         story: list[Flowable] = [
             Spacer(1, 0.8 * cm),
-            Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style),
+        ]
+        if not has_header_image:
+            story.append(Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style))
+
+        story.extend([
             Paragraph(intro, body_style),
             Spacer(1, 0.35 * cm),
             Paragraph(body, body_style),
@@ -760,7 +799,7 @@ class EmpleadoService:
             Spacer(1, 2.7 * cm),
             Paragraph(firmante_nombre, signature_name_style),
             Paragraph(firmante_cargo, signature_role_style),
-        ]
+        ])
 
         doc = SimpleDocTemplate(
             buffer,
@@ -796,6 +835,7 @@ class EmpleadoService:
     def _draw_certificado_header_footer(*, canvas, doc, page_width, page_height, cm_unit, image_reader):
         header_path = EmpleadoService._resolve_certificate_image_path(EmpleadoService.HEADER_FILENAME)
         footer_path = EmpleadoService._resolve_certificate_image_path(EmpleadoService.FOOTER_FILENAME)
+        sello_path = EmpleadoService._resolve_certificate_image_path(EmpleadoService.SELLO_FILENAME)
 
         if header_path:
             header = image_reader(str(header_path))
@@ -827,16 +867,52 @@ class EmpleadoService:
                 mask="auto",
             )
 
+        if sello_path:
+            sello = image_reader(str(sello_path))
+            sello_w, sello_h = sello.getSize()
+            sello_draw_w = 6.0 * cm_unit
+            sello_draw_h = sello_draw_w * sello_h / sello_w
+            canvas.drawImage(
+                sello,
+                x=7.5 * cm_unit,
+                y=6.5 * cm_unit,
+                width=sello_draw_w,
+                height=sello_draw_h,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+
         canvas.setFont("Helvetica", 9)
         canvas.drawRightString(page_width - 1.5 * cm_unit, 1 * cm_unit, f"Página {doc.page}")
 
     @staticmethod
     def _resolve_certificate_image_path(filename):
-        candidates = [
-            EmpleadoService.SERVER_IMAGE_DIR / filename,
-            EmpleadoService.LOCAL_IMAGE_DIR / filename,
-        ]
-        for path in candidates:
-            if path.exists():
-                return path
+        # 1. Comprobar si existe en el directorio del servidor
+        server_path = EmpleadoService.SERVER_IMAGE_DIR / filename
+        if server_path.exists():
+            return server_path
+
+        # 2. Comprobar si existe localmente
+        local_path = EmpleadoService.LOCAL_IMAGE_DIR / filename
+        if local_path.exists():
+            return local_path
+
+        # 3. Intentar descargar desde la ruta remota en etapa de desarrollo/fallback
+        try:
+            import urllib.request
+            remote_url = f"https://www.cincosas.com/images/{filename}"
+            # Asegurar que el directorio local existe
+            EmpleadoService.LOCAL_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+            
+            req = urllib.request.Request(
+                remote_url,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    local_path.write_bytes(response.read())
+                    return local_path
+        except Exception:
+            pass
+
         return None

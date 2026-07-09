@@ -7,9 +7,13 @@ import { logDevelopmentError } from "@/lib/environment";
 
 interface UseEmployeeSearchParams {
   value?: Empleado | null;
+  includeInactive?: boolean;
 }
 
-export const useEmployeeSearch = ({ value }: UseEmployeeSearchParams) => {
+export const useEmployeeSearch = ({
+  value,
+  includeInactive = false,
+}: UseEmployeeSearchParams) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [results, setResults] = useState<Empleado[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -50,7 +54,7 @@ export const useEmployeeSearch = ({ value }: UseEmployeeSearchParams) => {
       setIsLoading(true);
       searchTimeoutRef.current = setTimeout(async () => {
         try {
-          const data = await searchEmpleados(searchTerm);
+          const data = await searchEmpleados(searchTerm, includeInactive);
           setResults(data);
           setIsOpen(true);
 
@@ -80,7 +84,7 @@ export const useEmployeeSearch = ({ value }: UseEmployeeSearchParams) => {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchTerm]);
+  }, [searchTerm, includeInactive]);
 
   const handleSelect = (
     employee: Empleado,
