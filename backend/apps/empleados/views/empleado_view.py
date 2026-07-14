@@ -1,4 +1,4 @@
-﻿from apps.empleados.models import Empleado
+from apps.empleados.models import Empleado
 from rest_framework.viewsets import ModelViewSet
 from apps.empleados.serializers import EmpleadoSerializer
 from rest_framework.response import Response
@@ -27,7 +27,15 @@ class EmpleadoViewSet(ModelViewSet):
     search_fields = ['cedula', 'nombre', 'apellido', 'cargo', 'movil']
 
     def get_queryset(self):
-        return EmpleadoService.listar(self.request.query_params)
+        if self.action in ['retrieve', 'certificado_laboral', 'partial_update', 'update']:
+            return EmpleadoService.listar({'estado': 'all'})
+        
+        request = getattr(self, 'request', None)
+        if request is None:
+            return EmpleadoService.listar({})
+            
+        query_params = getattr(request, 'query_params', getattr(request, 'GET', {}))
+        return EmpleadoService.listar(query_params)
 
     @extend_schema(
         summary="Listar empleados activos",
@@ -253,6 +261,11 @@ class EmpleadoViewSet(ModelViewSet):
             result = EmpleadoService.generar_certificado_laboral(
                 empleado=instance,
                 document_type=request.query_params.get("document_type", ""),
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         except RuntimeError as exc:
             detail = str(exc)

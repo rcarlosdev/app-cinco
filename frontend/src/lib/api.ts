@@ -144,6 +144,15 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    if (error.response?.data instanceof Blob && error.response.data.type === "application/json") {
+      try {
+        const text = await error.response.data.text();
+        error.response.data = JSON.parse(text);
+      } catch (e) {
+        // Silently ignore parsing failure
+      }
+    }
+
     const original = error.config;
     const classified = classifyError(error);
     const isLoginRequest = original?.url?.includes("/auth/login");

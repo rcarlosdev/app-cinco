@@ -41,6 +41,7 @@ export const EmployeeSearchInput = React.forwardRef<
       disabled = false,
       required = false,
       name,
+      includeInactive = false,
     },
     ref,
   ) => {
@@ -54,7 +55,7 @@ export const EmployeeSearchInput = React.forwardRef<
       handleSelect,
       handleClear,
       handleInputChange,
-    } = useEmployeeSearch({ value });
+    } = useEmployeeSearch({ value, includeInactive });
 
     const inputClasses = getInputClasses(disabled, error);
 

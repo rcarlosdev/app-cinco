@@ -150,11 +150,34 @@ class EmpleadoServiceTests(TestCase):
             document_type="CC",
         )
 
-        self.assertEqual(result["filename"], "certificado_laboral_123456789.pdf")
+        self.assertTrue(result["filename"].startswith("certificado_laboral_"))
+        self.assertTrue(result["filename"].endswith(".pdf"))
+        self.assertEqual(len(result["filename"]), 60)
         self.assertTrue(result["content"].startswith(b"%PDF"))
         self.assertEqual(result["context"]["nombre_completo"], "ANA PEREZ")
         self.assertEqual(result["context"]["cargo"], "TECNICOS INSTALACIONES")
         self.assertEqual(result["context"]["contrato"], "Obra y labor")
+
+    @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
+    def test_generar_certificado_laboral_error_si_no_hay_datos_siigo(self, siigo_lookup):
+        empleado = MagicMock(
+            id=12,
+            cedula="123456789",
+            nombre="ANA",
+            apellido="PEREZ",
+            cargo="TECNICO",
+            fecha_ingreso=date(2025, 2, 4),
+            permiso="",
+            pasaporte="",
+        )
+        siigo_lookup.return_value = None
+
+        with self.assertRaises(ValueError) as context:
+            EmpleadoService.generar_certificado_laboral(
+                empleado=empleado,
+                document_type="CC",
+            )
+        self.assertIn("No se encontró información del empleado en la base de datos de SIIGO", str(context.exception))
 
 
 class EmpleadoViewSetTests(TestCase):
