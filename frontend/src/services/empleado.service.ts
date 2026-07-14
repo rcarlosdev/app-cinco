@@ -20,15 +20,20 @@ export const getEmpleados = async (): Promise<Empleado[]> => {
   );
 };
 
-export const searchEmpleados = async (query: string): Promise<Empleado[]> => {
-  const cacheKey = `empleados:search:${query.toLowerCase().trim()}`;
+export const searchEmpleados = async (
+  query: string,
+  includeInactive = false,
+): Promise<Empleado[]> => {
+  const cacheKey = `empleados:search:${query.toLowerCase().trim()}:${includeInactive}`;
 
   return cache.getOrFetch(
     cacheKey,
     async () => {
-      const res = await api.get("/empleados/empleados/", {
-        params: { search: query },
-      });
+      const params: any = { search: query };
+      if (includeInactive) {
+        params.estado = "all";
+      }
+      const res = await api.get("/empleados/empleados/", { params });
       return res.data;
     },
     CACHE_TTL.SEARCH,

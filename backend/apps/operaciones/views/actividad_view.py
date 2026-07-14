@@ -35,7 +35,10 @@ class ActividadViewSet(ModelViewSet):
     )
 
     def _get_filtros(self):
-        params = self.request.query_params
+        request = getattr(self, 'request', None)
+        if request is None:
+            return {}
+        params = getattr(request, 'query_params', getattr(request, 'GET', {}))
         return {
             key: params.get(key)
             for key in self.FILTER_PARAMS
@@ -49,7 +52,9 @@ class ActividadViewSet(ModelViewSet):
         return None
 
     def get_queryset(self):
-        usuario_id = self._get_authenticated_user_id(self.request.user)
+        request = getattr(self, 'request', None)
+        user = getattr(request, 'user', None) if request else None
+        usuario_id = self._get_authenticated_user_id(user)
         return ActividadService.listar(
             usuario_id=usuario_id,
             filtros=self._get_filtros(),
