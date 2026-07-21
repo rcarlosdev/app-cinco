@@ -86,6 +86,7 @@ export interface CertificadoLaboralManualData {
   fecha_ingreso?: string;
   fecha_egreso?: string;
   estado?: string;
+  genero?: string;
 }
 
 export const downloadCertificadoLaboral = async (

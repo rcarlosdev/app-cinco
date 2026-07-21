@@ -250,6 +250,32 @@ class EmpleadoServiceTests(TestCase):
         self.assertEqual(result["context"]["contrato"], "Término indefinido")
         self.assertEqual(result["context"]["cargo"], "DESARROLLADOR")
 
+    @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
+    def test_generar_certificado_laboral_pdf_femenino(self, siigo_lookup):
+        empleado = MagicMock(
+            id=15,
+            cedula="987654321",
+            nombre="MARIA",
+            apellido="GARCIA",
+            cargo="ANALISTA",
+            fecha_ingreso=date(2024, 5, 10),
+            genero="FEMENINO",
+            permiso="",
+            pasaporte="",
+        )
+        siigo_lookup.return_value = MagicMock(
+            salario="3000000",
+            datos={"tipo_contrato": "Término indefinido"},
+        )
+
+        result = EmpleadoService.generar_certificado_laboral(
+            empleado=empleado,
+            document_type="CC",
+        )
+
+        self.assertEqual(result["context"]["genero"], "F")
+        self.assertTrue(result["content"].startswith(b"%PDF"))
+
 
 class EmpleadoViewSetTests(TestCase):
     @patch("apps.empleados.views.empleado_view.EmpleadoService.generar_certificado_laboral")

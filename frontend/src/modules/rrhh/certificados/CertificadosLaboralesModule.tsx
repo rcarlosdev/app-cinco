@@ -53,6 +53,7 @@ const CertificadosLaboralesModule = () => {
   const [fechaIngreso, setFechaIngreso] = useState("");
   const [fechaEgreso, setFechaEgreso] = useState("");
   const [estado, setEstado] = useState("ACTIVO");
+  const [genero, setGenero] = useState("M");
 
   useEffect(() => {
     if (!isSuperuser) {
@@ -66,6 +67,8 @@ const CertificadosLaboralesModule = () => {
       setFechaIngreso(selectedEmployee.fecha_ingreso || "");
       setFechaEgreso(selectedEmployee.fecha_egreso || "");
       setEstado(selectedEmployee.estado || "ACTIVO");
+      const empGenero = (selectedEmployee as any)?.genero;
+      setGenero(typeof empGenero === "string" && empGenero.toUpperCase().startsWith("F") ? "F" : "M");
       setSalario("");
       setShowManualForm(false);
       setErrorMessage("");
@@ -128,6 +131,7 @@ const CertificadosLaboralesModule = () => {
       fecha_ingreso: fechaIngreso,
       fecha_egreso: fechaEgreso,
       estado,
+      genero,
     };
     void triggerDownload(manualData);
   };
@@ -292,8 +296,8 @@ const CertificadosLaboralesModule = () => {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                      Fecha de Egreso / Retiro
+                    <label className="mb-1.5 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                      Fecha de egreso (si aplica)
                     </label>
                     <input
                       type="date"
@@ -301,6 +305,19 @@ const CertificadosLaboralesModule = () => {
                       onChange={(e) => setFechaEgreso(e.target.value)}
                       className={inputClasses}
                     />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                      Género gramatical
+                    </label>
+                    <select
+                      value={genero}
+                      onChange={(e) => setGenero(e.target.value)}
+                      className={selectClasses}
+                    >
+                      <option value="M">Masculino (el señor / identificado)</option>
+                      <option value="F">Femenino (la señora / identificada)</option>
+                    </select>
                   </div>
                 </div>
 

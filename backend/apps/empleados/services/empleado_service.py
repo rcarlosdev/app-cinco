@@ -401,6 +401,19 @@ class EmpleadoService:
         )
         salario = EmpleadoService._parse_salary_value(salario_raw)
 
+        raw_genero = (
+            manual_data.get("genero")
+            or getattr(empleado, "genero", None)
+            or siigo_data.get("genero")
+            or siigo_data.get("sexo")
+            or ""
+        )
+        genero_str = str(raw_genero).strip().upper()
+        if genero_str.startswith("F") or genero_str in ("FEMENINO", "FEMALE", "MUJER", "SRA", "SEÑORA"):
+            genero = "F"
+        else:
+            genero = "M"
+
         resolved_document_type = EmpleadoService._infer_document_type(
             empleado=empleado,
             requested_type=document_type,
@@ -409,6 +422,7 @@ class EmpleadoService:
             "empleado_id": getattr(empleado, "id", None),
             "nombre_completo": EmpleadoService._resolve_full_name(empleado=empleado, siigo_data=siigo_data),
             "cedula": str(getattr(empleado, "cedula", "") or "").strip(),
+            "genero": genero,
             "document_type": resolved_document_type,
             "document_type_label": resolved_document_type,
             "document_flags": {
@@ -788,7 +802,7 @@ class EmpleadoService:
             "CertTitle",
             parent=styles["Heading1"],
             fontName="Helvetica-Bold",
-            fontSize=12.5,
+            fontSize=14,
             leading=15,
             alignment=TA_CENTER,
             spaceAfter=0.8 * cm,
@@ -850,6 +864,16 @@ class EmpleadoService:
         firmante_cargo = EmpleadoService._escape_pdf_text(context["firmante_cargo"])
 
         is_activo = context.get("is_activo", True)
+        genero = context.get("genero", "M")
+
+        if genero == "F":
+            prefijo_persona = "la señora"
+            art_identificado = "identificada"
+            art_interesado = "de la interesada"
+        else:
+            prefijo_persona = "el señor"
+            art_identificado = "identificado"
+            art_interesado = "del interesado"
 
         if is_activo:
             if contrato.strip().lower() in ("término indefinido", "término fijo"):
@@ -858,14 +882,14 @@ class EmpleadoService:
                 contrato_phrase = f"y su contrato es por <b>{contrato}</b>."
 
             intro = (
-                f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
+                f"Certifica que {prefijo_persona} <b>{nombre_completo}</b>, {art_identificado} con documento de "
                 f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
                 f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
                 f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
                 f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
                 f"más auxilio de transporte {contrato_phrase}"
             )
-            body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+            body = f"Esta certificación fue expedida a solicitud {art_interesado} el <b>{fecha_expedicion_texto}</b>."
         else:
             if contrato.strip().lower() in ("término indefinido", "término fijo"):
                 contrato_phrase = f"y su contrato fue a <b>{contrato}</b>."
@@ -873,32 +897,26 @@ class EmpleadoService:
                 contrato_phrase = f"y su contrato fue por <b>{contrato}</b>."
 
             intro = (
-                f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
+                f"Certifica que {prefijo_persona} <b>{nombre_completo}</b>, {art_identificado} con documento de "
                 f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
                 f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
                 f"<b>{fecha_ingreso_texto}</b>, hasta el día <b>{fecha_egreso_texto}</b> "
                 f"desempeñándose como <b>{cargo}</b>, con un salario básico de "
                 f"<b>{salario_texto}</b> más auxilio de transporte {contrato_phrase}"
             )
-            body = f"Esta certificación fue expedida a solicitud del interesado a partir del <b>{fecha_expedicion_texto_largo}</b>."
+            body = f"Esta certificación fue expedida a solicitud {art_interesado} a partir del <b>{fecha_expedicion_texto_largo}</b>."
 
         has_header_image = EmpleadoService._resolve_certificate_image_path(EmpleadoService.HEADER_FILENAME) is not None
 
         story: list[Flowable] = [
-            Spacer(1, 0.8 * cm),
-        ]
-        if not has_header_image:
-            story.append(Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style))
-
-        story.extend([
+            Spacer(1, 1.2 * cm),
+            Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style),
+            Spacer(1, 1.2 * cm),
             Paragraph(intro, body_style),
-            Spacer(1, 0.35 * cm),
+            Spacer(1, 0.9 * cm),
             Paragraph(body, body_style),
-            Spacer(1, 1.1 * cm),
-            Paragraph(company_name, body_center_style),
-            Paragraph(f"NIT. {context['company_nit']}", body_center_style),
-            Spacer(1, 0.8 * cm),
-        ])
+            Spacer(1, 2.5 * cm),
+        ]
 
         firma_path = (
             EmpleadoService._resolve_certificate_image_path(EmpleadoService.FIRMA_FILENAME)
@@ -910,11 +928,11 @@ class EmpleadoService:
                 firma_img = RLImage(str(firma_path), width=4.5 * cm, height=2.2 * cm)
                 firma_img.hAlign = "LEFT"
                 story.append(firma_img)
-                story.append(Spacer(1, 0.2 * cm))
+                story.append(Spacer(1, 0.05 * cm))
             except Exception:
-                story.append(Spacer(1, 1.8 * cm))
+                story.append(Spacer(1, 2.2 * cm))
         else:
-            story.append(Spacer(1, 1.8 * cm))
+            story.append(Spacer(1, 2.2 * cm))
 
         story.extend([
             Paragraph(firmante_nombre, signature_name_style),
@@ -990,49 +1008,57 @@ class EmpleadoService:
         if sello_path:
             sello = image_reader(str(sello_path))
             sello_w, sello_h = sello.getSize()
-            sello_draw_w = 6.0 * cm_unit
+            sello_draw_w = 6.8 * cm_unit
             sello_draw_h = sello_draw_w * sello_h / sello_w
+
+            center_x = 11.5 * cm_unit
+            center_y = 10.0 * cm_unit
+
+            canvas.saveState()
+            canvas.translate(center_x, center_y)
+            canvas.rotate(30)
             canvas.drawImage(
                 sello,
-                x=7.5 * cm_unit,
-                y=6.5 * cm_unit,
+                x=-sello_draw_w / 2,
+                y=-sello_draw_h / 2,
                 width=sello_draw_w,
                 height=sello_draw_h,
                 preserveAspectRatio=True,
                 mask="auto",
             )
+            canvas.restoreState()
 
         canvas.setFont("Helvetica", 9)
         canvas.drawRightString(page_width - 1.5 * cm_unit, 1 * cm_unit, f"Página {doc.page}")
 
     @staticmethod
-    def _resolve_certificate_image_path(filename):
-        # 1. Comprobar si existe en el directorio del servidor
+    def _resolve_certificate_image_path(filename, refresh_remote=False):
+        # 1. Comprobar si existe en el directorio del servidor de producción
         server_path = EmpleadoService.SERVER_IMAGE_DIR / filename
         if server_path.exists():
             return server_path
 
-        # 2. Comprobar si existe localmente
         local_path = EmpleadoService.LOCAL_IMAGE_DIR / filename
+
+        # 2. Si no existe localmente o se solicita actualizar, intentar descargar la versión remota
+        if not local_path.exists() or refresh_remote:
+            try:
+                import urllib.request
+                remote_url = f"https://www.cincosas.com/images/{filename}"
+                EmpleadoService.LOCAL_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                
+                req = urllib.request.Request(
+                    remote_url,
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        local_path.write_bytes(response.read())
+                        return local_path
+            except Exception:
+                pass
+
         if local_path.exists():
             return local_path
-
-        # 3. Intentar descargar desde la ruta remota en etapa de desarrollo/fallback
-        try:
-            import urllib.request
-            remote_url = f"https://www.cincosas.com/images/{filename}"
-            # Asegurar que el directorio local existe
-            EmpleadoService.LOCAL_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-            
-            req = urllib.request.Request(
-                remote_url,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    local_path.write_bytes(response.read())
-                    return local_path
-        except Exception:
-            pass
 
         return None
