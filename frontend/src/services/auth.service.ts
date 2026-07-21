@@ -8,6 +8,8 @@ export type AuthUser = {
   email?: string;
   is_superuser?: boolean;
   foto?: string;
+  area?: string;
+  carpeta?: string;
 };
 
 export type LoginPayload = {

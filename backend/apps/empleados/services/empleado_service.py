@@ -915,7 +915,7 @@ class EmpleadoService:
             Paragraph(intro, body_style),
             Spacer(1, 0.9 * cm),
             Paragraph(body, body_style),
-            Spacer(1, 2.5 * cm),
+            Spacer(1, 3.2 * cm),
         ]
 
         firma_path = (
@@ -928,11 +928,11 @@ class EmpleadoService:
                 firma_img = RLImage(str(firma_path), width=4.5 * cm, height=2.2 * cm)
                 firma_img.hAlign = "LEFT"
                 story.append(firma_img)
-                story.append(Spacer(1, 0.05 * cm))
+                story.append(Spacer(1, -0.7 * cm))
             except Exception:
-                story.append(Spacer(1, 2.2 * cm))
+                story.append(Spacer(1, 1.8 * cm))
         else:
-            story.append(Spacer(1, 2.2 * cm))
+            story.append(Spacer(1, 1.8 * cm))
 
         story.extend([
             Paragraph(firmante_nombre, signature_name_style),

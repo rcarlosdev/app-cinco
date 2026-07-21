@@ -11,6 +11,7 @@ import { Empleado } from "@/types/empleado";
 import { Download, FileText, Edit, UserX } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/auth.store";
+import { hasCertificadosPermission } from "@/utils/permission";
 import { useRouter } from "next/navigation";
 
 type DocumentType = "CC" | "PT" | "TI" | "CE";
@@ -36,7 +37,7 @@ const inputClasses =
 
 const CertificadosLaboralesModule = () => {
   const user = useAuthStore((state) => state.user);
-  const isSuperuser = Boolean(user?.is_superuser);
+  const hasPermission = hasCertificadosPermission(user);
   const router = useRouter();
 
   const [selectedEmployee, setSelectedEmployee] = useState<Empleado | null>(null);
@@ -56,10 +57,10 @@ const CertificadosLaboralesModule = () => {
   const [genero, setGenero] = useState("M");
 
   useEffect(() => {
-    if (!isSuperuser) {
+    if (user && !hasPermission) {
       router.replace("/");
     }
-  }, [isSuperuser, router]);
+  }, [user, hasPermission, router]);
 
   useEffect(() => {
     if (selectedEmployee) {
@@ -76,7 +77,7 @@ const CertificadosLaboralesModule = () => {
     }
   }, [selectedEmployee]);
 
-  if (!isSuperuser) {
+  if (!hasPermission) {
     return null;
   }
 
