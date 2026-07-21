@@ -10,6 +10,7 @@ import { House } from "lucide-react";
 import { ChevronDownIcon, HorizontaLDots } from "../../icons/index";
 import { IconMessageChatbot } from '@tabler/icons-react';
 import { useAuthStore } from "@/store/auth.store";
+import { hasCertificadosPermission } from "@/utils/permission";
 
 type NavItem = {
   name: string;
@@ -36,7 +37,6 @@ const defaultNavItems: NavItem[] = [
   },
   {
     name: "RRHH",
-    requiresSuperuser: true,
     subItems: [
       {
         name: "Certificados Laborales",
@@ -71,16 +71,28 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
   const isSuperuser = Boolean(user?.is_superuser);
+  const canAccessCertificados = useMemo(
+    () => hasCertificadosPermission(user),
+    [user],
+  );
+
   const navItems = useMemo(
     () =>
       defaultNavItems.reduce<NavItem[]>((allowedItems, nav) => {
+        if (nav.name === "RRHH" && !canAccessCertificados) {
+          return allowedItems;
+        }
+
         if (nav.requiresSuperuser && !isSuperuser) {
           return allowedItems;
         }
 
-        const allowedSubItems = nav.subItems?.filter(
-          (subItem) => !subItem.requiresSuperuser || isSuperuser,
-        );
+        const allowedSubItems = nav.subItems?.filter((subItem) => {
+          if (subItem.path === "/rrhh/certificados-laborales") {
+            return canAccessCertificados;
+          }
+          return !subItem.requiresSuperuser || isSuperuser;
+        });
 
         if (nav.subItems && (!allowedSubItems || allowedSubItems.length === 0)) {
           return allowedItems;
@@ -92,7 +104,7 @@ const AppSidebar: React.FC = () => {
         });
         return allowedItems;
       }, []),
-    [isSuperuser],
+    [isSuperuser, canAccessCertificados],
   );
   const isSidebarOpen = isExpanded || isMobileOpen;
   const asideRef = useRef<HTMLElement | null>(null);

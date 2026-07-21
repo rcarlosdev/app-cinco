@@ -33,6 +33,8 @@ class AuthUserSerializer(serializers.Serializer):
     apellido = serializers.CharField(allow_blank=True)
     email = serializers.EmailField(allow_blank=True)
     is_superuser = serializers.BooleanField()
+    area = serializers.CharField(allow_blank=True, required=False)
+    carpeta = serializers.CharField(allow_blank=True, required=False)
 
 
 class LoginResponseSerializer(serializers.Serializer):

@@ -81,6 +81,20 @@ class AuthenticationService:
         """
         Serializa datos públicos del usuario autenticado.
         """
+        area = ""
+        carpeta = ""
+        try:
+            from django.db.models import Q
+            from apps.empleados.models import Empleado
+            empleado = Empleado.objects.filter(
+                Q(cedula=user.username) | Q(id=user.id)
+            ).first()
+            if empleado:
+                area = empleado.area or ""
+                carpeta = empleado.carpeta or ""
+        except Exception:
+            pass
+
         return {
             "id": user.id,
             "username": user.username,
@@ -88,6 +102,8 @@ class AuthenticationService:
             "apellido": user.last_name,
             "email": user.email,
             "is_superuser": user.is_superuser,
+            "area": area,
+            "carpeta": carpeta,
         }
 
     @staticmethod

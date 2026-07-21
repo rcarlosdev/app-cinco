@@ -10,10 +10,11 @@ interface UseEmployeeSearchParams {
   includeInactive?: boolean;
 }
 
-export const useEmployeeSearch = ({
-  value,
-  includeInactive = false,
-}: UseEmployeeSearchParams) => {
+export const useEmployeeSearch = (
+  params: UseEmployeeSearchParams = {},
+) => {
+  const { value, includeInactive = false } = params;
+  const shouldIncludeInactive = Boolean(includeInactive);
   const [searchTerm, setSearchTerm] = useState("");
   const [results, setResults] = useState<Empleado[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -54,7 +55,7 @@ export const useEmployeeSearch = ({
       setIsLoading(true);
       searchTimeoutRef.current = setTimeout(async () => {
         try {
-          const data = await searchEmpleados(searchTerm, includeInactive);
+          const data = await searchEmpleados(searchTerm, shouldIncludeInactive);
           setResults(data);
           setIsOpen(true);
 
@@ -84,7 +85,7 @@ export const useEmployeeSearch = ({
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchTerm, includeInactive]);
+  }, [searchTerm, shouldIncludeInactive]);
 
   const handleSelect = (
     employee: Empleado,
