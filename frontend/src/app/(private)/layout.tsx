@@ -32,7 +32,7 @@ export default function AdminLayout({ children }: RootLayoutProps) {
 
   return (
     <RequireAuth>
-      <div className="min-h-screen overflow-x-hidden xl:flex">
+      <div className="flex h-screen w-full overflow-hidden bg-white dark:bg-gray-900">
         {/* Sidebar and Backdrop */}
         <AppSidebar />
         <Backdrop />
@@ -45,7 +45,7 @@ export default function AdminLayout({ children }: RootLayoutProps) {
                 } as React.CSSProperties)
               : undefined
           }
-          className={`min-w-0 flex-1 overflow-x-hidden transition-all duration-300 ease-in-out ${
+          className={`flex h-screen min-w-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-in-out ${
             isWideWorkspaceView
               ? "lg:ml-[var(--workspace-sidebar-width)] lg:w-[calc(100%-var(--workspace-sidebar-width))]"
               : mainContentMargin
@@ -54,15 +54,15 @@ export default function AdminLayout({ children }: RootLayoutProps) {
           {/* Header */}
           <AppHeader />
           {/* Page Content */}
-          <div
+          <main
             className={
               isWideWorkspaceView
-                ? "w-full min-w-0 max-w-none overflow-x-hidden p-0"
-                : "mx-auto w-full min-w-0 max-w-(--breakpoint-2xl) overflow-x-hidden p-4 md:p-6"
+                ? "flex-1 w-full min-w-0 max-w-none overflow-y-auto overflow-x-hidden p-0"
+                : "flex-1 w-full min-w-0 max-w-(--breakpoint-2xl) mx-auto overflow-y-auto overflow-x-hidden p-4 md:p-6"
             }
           >
             {children}
-          </div>
+          </main>
         </div>
       </div>
     </RequireAuth>

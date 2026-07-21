@@ -10,6 +10,9 @@ from django.http import HttpResponse
 from apps.empleados.services import EmpleadoService
 
 
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
+
+
 class EmpleadoViewSet(ModelViewSet):
     """
     ViewSet para gestionar empleados.
@@ -22,6 +25,7 @@ class EmpleadoViewSet(ModelViewSet):
     """
     queryset = Empleado.objects.all()
     serializer_class = EmpleadoSerializer
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
     # Usa permisos por defecto: IsAuthenticatedOrAPIKey
     filter_backends = [filters.SearchFilter]
     search_fields = ['cedula', 'nombre', 'apellido', 'cargo', 'movil']
@@ -254,17 +258,31 @@ class EmpleadoViewSet(ModelViewSet):
             ),
         },
     )
-    @action(detail=True, methods=["get"], url_path="certificado-laboral")
+    @action(detail=True, methods=["get", "post"], url_path="certificado-laboral")
     def certificado_laboral(self, request, *args, **kwargs):
         instance = self.get_object()
+        params = request.data if request.method == "POST" else request.query_params
+        document_type = params.get("document_type", "")
+        
+        manual_data = {
+            "salario": params.get("salario"),
+            "tipo_contrato": params.get("tipo_contrato"),
+            "cargo": params.get("cargo"),
+            "fecha_ingreso": params.get("fecha_ingreso"),
+            "fecha_egreso": params.get("fecha_egreso"),
+            "estado": params.get("estado"),
+        }
+        manual_data = {k: v for k, v in manual_data.items() if v not in (None, "")}
+
         try:
             result = EmpleadoService.generar_certificado_laboral(
                 empleado=instance,
-                document_type=request.query_params.get("document_type", ""),
+                document_type=document_type,
+                manual_data=manual_data,
             )
         except ValueError as exc:
             return Response(
-                {"detail": str(exc)},
+                {"detail": str(exc), "requires_manual_input": True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except RuntimeError as exc:

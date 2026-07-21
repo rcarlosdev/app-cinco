@@ -79,17 +79,40 @@ export const getEmpleadoById = async (id: number): Promise<Empleado> => {
   );
 };
 
+export interface CertificadoLaboralManualData {
+  salario?: string | number;
+  tipo_contrato?: string;
+  cargo?: string;
+  fecha_ingreso?: string;
+  fecha_egreso?: string;
+  estado?: string;
+  genero?: string;
+}
+
 export const downloadCertificadoLaboral = async (
   id: number,
   documentType?: "CC" | "PT" | "TI" | "CE",
+  manualData?: CertificadoLaboralManualData,
 ): Promise<{ blob: Blob; filename: string }> => {
-  const response = await api.get(
-    `/empleados/empleados/${id}/certificado-laboral/`,
-    {
-      params: documentType ? { document_type: documentType } : undefined,
-      responseType: "blob",
-    },
+  const hasManualData = Boolean(
+    manualData && Object.values(manualData).some((val) => val !== undefined && val !== ""),
   );
+
+  const response = hasManualData
+    ? await api.post(
+        `/empleados/empleados/${id}/certificado-laboral/`,
+        {
+          document_type: documentType,
+          ...manualData,
+        },
+        {
+          responseType: "blob",
+        },
+      )
+    : await api.get(`/empleados/empleados/${id}/certificado-laboral/`, {
+        params: documentType ? { document_type: documentType } : undefined,
+        responseType: "blob",
+      });
 
   const contentDisposition = String(
     response.headers["content-disposition"] || "",
