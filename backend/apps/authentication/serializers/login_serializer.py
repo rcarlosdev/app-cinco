@@ -6,10 +6,10 @@ class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
-    def validate(self, data):
+    def validate(self, attrs):
         user = authenticate(
-            username=data["username"],
-            password=data["password"]
+            username=attrs["username"],
+            password=attrs["password"]
         )
 
         if not user:
@@ -18,8 +18,8 @@ class LoginSerializer(serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError("Usuario inactivo")
 
-        data["user"] = user
-        return data
+        attrs["user"] = user
+        return attrs
     
 class LoginRequestSerializer(serializers.Serializer):
     username = serializers.CharField()
