@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from rest_framework.parsers import FormParser, JSONParser
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
@@ -157,6 +158,44 @@ class EmpleadoServiceTests(TestCase):
         self.assertEqual(result["context"]["nombre_completo"], "ANA PEREZ")
         self.assertEqual(result["context"]["cargo"], "TECNICOS INSTALACIONES")
         self.assertEqual(result["context"]["contrato"], "Obra y labor")
+        self.assertTrue(result["context"]["is_activo"])
+
+    @patch("apps.empleados.services.empleado_service.timezone.localdate")
+    @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
+    def test_generar_certificado_laboral_pdf_inactivo(self, siigo_lookup, mock_localdate):
+        mock_localdate.return_value = date(2026, 7, 2)
+        empleado = MagicMock(
+            id=15,
+            cedula="1038435140",
+            nombre="JHON HENRY",
+            apellido="RODRIGUEZ VILLA",
+            cargo="TECNICO INSTALACIONES",
+            estado="INACTIVO",
+            fecha_ingreso=date(2025, 9, 12),
+            fecha_egreso=date(2025, 10, 27),
+            permiso="",
+            pasaporte="",
+        )
+        siigo_lookup.return_value = MagicMock(
+            salario="1423500.00",
+            datos={
+                "cargo": "TECNICO INSTALACIONES",
+                "f_ingreso": "2025-09-12 00:00:00",
+                "f_egreso": "2025-10-27 00:00:00",
+                "tipo_contrato": "OBRA Y LABOR",
+                "nombre_empleado": "JHON HENRY RODRIGUEZ VILLA",
+            },
+        )
+
+        result = EmpleadoService.generar_certificado_laboral(
+            empleado=empleado,
+            document_type="CC",
+        )
+
+        self.assertFalse(result["context"]["is_activo"])
+        self.assertEqual(result["context"]["fecha_egreso_texto"], "27/10/2025")
+        self.assertEqual(result["context"]["fecha_expedicion_texto_largo"], "02 DE JULIO DE 2026")
+        self.assertTrue(result["content"].startswith(b"%PDF"))
 
     @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
     def test_generar_certificado_laboral_error_si_no_hay_datos_siigo(self, siigo_lookup):
@@ -177,7 +216,65 @@ class EmpleadoServiceTests(TestCase):
                 empleado=empleado,
                 document_type="CC",
             )
-        self.assertIn("No se encontró información del empleado en la base de datos de SIIGO", str(context.exception))
+        self.assertIn("No se encontró información del empleado en SIIGO", str(context.exception))
+
+    @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
+    def test_generar_certificado_laboral_con_datos_manuales_sin_siigo(self, siigo_lookup):
+        empleado = MagicMock(
+            id=12,
+            cedula="123456789",
+            nombre="MARIA",
+            apellido="LOPEZ",
+            cargo="",
+            fecha_ingreso=None,
+            permiso="",
+            pasaporte="",
+        )
+        siigo_lookup.return_value = None
+
+        manual_data = {
+            "salario": "2500000",
+            "tipo_contrato": "Término indefinido",
+            "cargo": "DESARROLLADOR",
+            "fecha_ingreso": "2024-01-10",
+        }
+
+        result = EmpleadoService.generar_certificado_laboral(
+            empleado=empleado,
+            document_type="CC",
+            manual_data=manual_data,
+        )
+
+        self.assertTrue(result["content"].startswith(b"%PDF"))
+        self.assertEqual(result["context"]["salario_texto"], "$2.500.000")
+        self.assertEqual(result["context"]["contrato"], "Término indefinido")
+        self.assertEqual(result["context"]["cargo"], "DESARROLLADOR")
+
+    @patch("apps.empleados.services.empleado_service.EmpleadoService._obtener_registro_siigo_por_cedula")
+    def test_generar_certificado_laboral_pdf_femenino(self, siigo_lookup):
+        empleado = MagicMock(
+            id=15,
+            cedula="987654321",
+            nombre="MARIA",
+            apellido="GARCIA",
+            cargo="ANALISTA",
+            fecha_ingreso=date(2024, 5, 10),
+            genero="FEMENINO",
+            permiso="",
+            pasaporte="",
+        )
+        siigo_lookup.return_value = MagicMock(
+            salario="3000000",
+            datos={"tipo_contrato": "Término indefinido"},
+        )
+
+        result = EmpleadoService.generar_certificado_laboral(
+            empleado=empleado,
+            document_type="CC",
+        )
+
+        self.assertEqual(result["context"]["genero"], "F")
+        self.assertTrue(result["content"].startswith(b"%PDF"))
 
 
 class EmpleadoViewSetTests(TestCase):
@@ -205,3 +302,34 @@ class EmpleadoViewSetTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertIn('attachment; filename="certificado_laboral_123.pdf"', response["Content-Disposition"])
         self.assertEqual(response.content, b"%PDF-1.4")
+
+    @patch("apps.empleados.views.empleado_view.EmpleadoService.generar_certificado_laboral")
+    def test_certificado_laboral_post_con_datos_manuales(self, generate_certificate):
+        generate_certificate.return_value = {
+            "filename": "certificado_laboral_456.pdf",
+            "content": b"%PDF-1.4",
+            "context": {"cedula": "456"},
+        }
+        payload = {
+            "document_type": "CC",
+            "salario": "1800000",
+            "tipo_contrato": "OBRA Y LABOR",
+        }
+        request = APIRequestFactory().post(
+            "/empleados/empleados/1/certificado-laboral/",
+            payload,
+            format="json",
+        )
+        request = Request(request, parsers=[JSONParser(), FormParser()])
+        view = EmpleadoViewSet()
+        empleado = MagicMock()
+
+        with patch.object(EmpleadoViewSet, "get_object", return_value=empleado):
+            response = view.certificado_laboral(request, pk="1")
+
+        self.assertEqual(response.status_code, 200)
+        generate_certificate.assert_called_once_with(
+            empleado=empleado,
+            document_type="CC",
+            manual_data={"salario": "1800000", "tipo_contrato": "OBRA Y LABOR"},
+        )

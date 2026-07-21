@@ -18,6 +18,7 @@ class EmpleadoService:
     HEADER_FILENAME = "gghh_certificado_laboral_header.png"
     FOOTER_FILENAME = "gghh_certificado_laboral_footer.png"
     SELLO_FILENAME = "sello_cinco.png"
+    FIRMA_FILENAME = "Firma-RRHH.png"
     ALLOWED_TEMPORAL_COLUMNS = {"fecha_ingreso", "fecha_egreso"}
     RESERVED_RUNTIME_PARAMS = {
         "estado",
@@ -291,39 +292,49 @@ class EmpleadoService:
         return True
 
     @staticmethod
-    def generar_certificado_laboral(*, empleado: Empleado, document_type=""):
+    def generar_certificado_laboral(*, empleado: Empleado, document_type="", manual_data=None):
+        manual_data = manual_data or {}
         siigo = EmpleadoService._obtener_registro_siigo_por_cedula(empleado.cedula)
-        if not siigo:
-            raise ValueError(
-                "No se encontró información del empleado en la base de datos de SIIGO. "
-                "No es posible generar el certificado laboral sin información de contrato o salario."
-            )
-            
         siigo_data = EmpleadoService._normalize_siigo_data(getattr(siigo, "datos", None))
-        contrato_raw = siigo_data.get("tipo_contrato") if siigo_data else None
-        salario_raw = getattr(siigo, "salario", None)
         
+        contrato_raw = (
+            manual_data.get("tipo_contrato")
+            or (siigo_data.get("tipo_contrato") if siigo_data else None)
+        )
+        salario_raw = (
+            manual_data.get("salario")
+            if manual_data.get("salario") is not None and str(manual_data.get("salario")).strip() != ""
+            else (getattr(siigo, "salario", None) if siigo else None)
+        )
+        
+        if not siigo and not manual_data.get("salario") and not manual_data.get("tipo_contrato"):
+            raise ValueError(
+                "No se encontró información del empleado en SIIGO. "
+                "Por favor ingrese los datos de contrato y salario manualmente para generar el certificado."
+            )
+
         if not contrato_raw:
             raise ValueError(
-                "No se encontró información sobre el tipo de contrato del empleado en SIIGO. "
-                "No es posible generar el certificado laboral."
+                "No se encontró información sobre el tipo de contrato del empleado. "
+                "Por favor ingrese el tipo de contrato manualmente."
             )
             
         if salario_raw is None or str(salario_raw).strip() == "":
             raise ValueError(
-                "No se encontró información sobre el salario del empleado en SIIGO. "
-                "No es posible generar el certificado laboral."
+                "No se encontró información sobre el salario del empleado. "
+                "Por favor ingrese el salario manualmente."
             )
             
         salario = EmpleadoService._parse_salary_value(salario_raw)
         if salario <= 0:
             raise ValueError(
-                "El salario registrado para el empleado en SIIGO debe ser mayor a cero para generar el certificado."
+                "El salario registrado para generar el certificado debe ser mayor a cero."
             )
 
         context = EmpleadoService.construir_contexto_certificado_laboral(
             empleado=empleado,
             document_type=document_type,
+            manual_data=manual_data,
         )
         pdf_content = EmpleadoService._render_certificado_laboral_pdf(context=context)
         
@@ -336,19 +347,73 @@ class EmpleadoService:
         }
 
     @staticmethod
-    def construir_contexto_certificado_laboral(*, empleado: Empleado, document_type=""):
+    def construir_contexto_certificado_laboral(*, empleado: Empleado, document_type="", manual_data=None):
+        manual_data = manual_data or {}
         siigo = EmpleadoService._obtener_registro_siigo_por_cedula(empleado.cedula)
         siigo_data = EmpleadoService._normalize_siigo_data(getattr(siigo, "datos", None))
         fecha_expedicion = timezone.localdate()
+
         fecha_ingreso = (
-            getattr(empleado, "fecha_ingreso", None)
+            EmpleadoService._parse_datetime_value(manual_data.get("fecha_ingreso"))
+            or getattr(empleado, "fecha_ingreso", None)
             or EmpleadoService._parse_datetime_value(siigo_data.get("f_ingreso"))
         )
-        cargo = EmpleadoService._clean_cargo_value(siigo_data.get("cargo") or getattr(empleado, "cargo", ""))
-        contrato = EmpleadoService._normalize_contract_value(
-            siigo_data.get("tipo_contrato") or "OBRA Y LABOR"
+        raw_fecha_egreso = manual_data.get("fecha_egreso") or getattr(empleado, "fecha_egreso", None)
+        if isinstance(raw_fecha_egreso, (date, datetime)):
+            fecha_egreso = raw_fecha_egreso
+        elif isinstance(raw_fecha_egreso, str) and raw_fecha_egreso.strip():
+            fecha_egreso = EmpleadoService._parse_datetime_value(raw_fecha_egreso)
+        else:
+            fecha_egreso = (
+                EmpleadoService._parse_datetime_value(siigo_data.get("f_egreso"))
+                or EmpleadoService._parse_datetime_value(siigo_data.get("fecha_egreso"))
+                or EmpleadoService._parse_datetime_value(siigo_data.get("f_retiro"))
+                or EmpleadoService._parse_datetime_value(siigo_data.get("fecha_retiro"))
+            )
+
+        manual_estado = manual_data.get("estado")
+        raw_estado = manual_estado if isinstance(manual_estado, str) and manual_estado.strip() else getattr(empleado, "estado", None)
+        if isinstance(raw_estado, str) and raw_estado.strip():
+            estado = raw_estado.strip().upper()
+        else:
+            estado = str(siigo_data.get("estado") or "ACTIVO").strip().upper()
+
+        is_activo = (estado != "INACTIVO") and not fecha_egreso
+
+        raw_cargo = (
+            manual_data.get("cargo")
+            or siigo_data.get("cargo")
+            or getattr(empleado, "cargo", "")
         )
-        salario = EmpleadoService._parse_salary_value(getattr(siigo, "salario", ""))
+        cargo = EmpleadoService._clean_cargo_value(raw_cargo)
+
+        raw_contrato = (
+            manual_data.get("tipo_contrato")
+            or siigo_data.get("tipo_contrato")
+            or "OBRA Y LABOR"
+        )
+        contrato = EmpleadoService._normalize_contract_value(raw_contrato)
+
+        salario_raw = (
+            manual_data.get("salario")
+            if manual_data.get("salario") is not None and str(manual_data.get("salario")).strip() != ""
+            else getattr(siigo, "salario", "")
+        )
+        salario = EmpleadoService._parse_salary_value(salario_raw)
+
+        raw_genero = (
+            manual_data.get("genero")
+            or getattr(empleado, "genero", None)
+            or siigo_data.get("genero")
+            or siigo_data.get("sexo")
+            or ""
+        )
+        genero_str = str(raw_genero).strip().upper()
+        if genero_str.startswith("F") or genero_str in ("FEMENINO", "FEMALE", "MUJER", "SRA", "SEÑORA"):
+            genero = "F"
+        else:
+            genero = "M"
+
         resolved_document_type = EmpleadoService._infer_document_type(
             empleado=empleado,
             requested_type=document_type,
@@ -357,24 +422,28 @@ class EmpleadoService:
             "empleado_id": getattr(empleado, "id", None),
             "nombre_completo": EmpleadoService._resolve_full_name(empleado=empleado, siigo_data=siigo_data),
             "cedula": str(getattr(empleado, "cedula", "") or "").strip(),
+            "genero": genero,
             "document_type": resolved_document_type,
             "document_type_label": resolved_document_type,
             "document_flags": {
                 code: code == resolved_document_type for code in sorted(EmpleadoService.DOCUMENT_TYPES)
             },
+            "estado": estado or "ACTIVO",
+            "is_activo": is_activo,
             "cargo": cargo or "COLABORADOR",
             "salario": salario,
             "salario_texto": EmpleadoService._format_currency(salario),
             "fecha_ingreso": fecha_ingreso,
             "fecha_ingreso_texto": EmpleadoService._format_date(fecha_ingreso),
+            "fecha_egreso": fecha_egreso,
+            "fecha_egreso_texto": EmpleadoService._format_date(fecha_egreso),
             "fecha_expedicion": fecha_expedicion,
             "fecha_expedicion_texto": EmpleadoService._format_date(fecha_expedicion),
+            "fecha_expedicion_texto_largo": EmpleadoService._format_date_long_es(fecha_expedicion),
             "contrato": contrato,
-            "company_name": "Compañía Integral Negocios de Colombia",
             "company_name": "Compañía Integral Negocios de Colombia",
             "company_nit": "811042087-2",
             "firmante_nombre": "FARAY MONSALVE URREGO",
-            "firmante_cargo": "Dirección Gestión Humana",
             "firmante_cargo": "Dirección Gestión Humana",
         }
 
@@ -586,6 +655,27 @@ class EmpleadoService:
         return value.strftime("%d/%m/%Y")
 
     @staticmethod
+    def _format_date_long_es(value):
+        if not value:
+            return ""
+        months = {
+            1: "ENERO",
+            2: "FEBRERO",
+            3: "MARZO",
+            4: "ABRIL",
+            5: "MAYO",
+            6: "JUNIO",
+            7: "JULIO",
+            8: "AGOSTO",
+            9: "SEPTIEMBRE",
+            10: "OCTUBRE",
+            11: "NOVIEMBRE",
+            12: "DICIEMBRE",
+        }
+        month_name = months.get(value.month, "")
+        return f"{value.day:02d} DE {month_name} DE {value.year}"
+
+    @staticmethod
     def _clean_cargo_value(value):
         raw = EmpleadoService._normalize_text_value(value)
         if not raw:
@@ -701,7 +791,7 @@ class EmpleadoService:
             from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
             from reportlab.lib.units import cm
             from reportlab.lib.utils import ImageReader
-            from reportlab.platypus import Flowable, Paragraph, SimpleDocTemplate, Spacer
+            from reportlab.platypus import Flowable, Image as RLImage, Paragraph, SimpleDocTemplate, Spacer
         except ImportError as exc:
             raise RuntimeError("reportlab_no_instalado") from exc
 
@@ -712,7 +802,7 @@ class EmpleadoService:
             "CertTitle",
             parent=styles["Heading1"],
             fontName="Helvetica-Bold",
-            fontSize=12.5,
+            fontSize=14,
             leading=15,
             alignment=TA_CENTER,
             spaceAfter=0.8 * cm,
@@ -764,39 +854,87 @@ class EmpleadoService:
         fecha_expedicion_texto = EmpleadoService._escape_pdf_text(
             context["fecha_expedicion_texto"]
         )
+        fecha_expedicion_texto_largo = EmpleadoService._escape_pdf_text(
+            context.get("fecha_expedicion_texto_largo") or context["fecha_expedicion_texto"]
+        )
+        fecha_egreso_texto = EmpleadoService._escape_pdf_text(
+            context.get("fecha_egreso_texto") or "sin registro"
+        )
         firmante_nombre = EmpleadoService._escape_pdf_text(context["firmante_nombre"])
         firmante_cargo = EmpleadoService._escape_pdf_text(context["firmante_cargo"])
-        if contrato.strip().lower() in ("término indefinido", "término fijo"):
-            contrato_phrase = f"y su contrato es a <b>{contrato}</b>."
-        else:
-            contrato_phrase = f"y su contrato es por <b>{contrato}</b>."
 
-        intro = (
-            f"Certifica que el señor <b>{nombre_completo}</b>, identificado con documento de "
-            f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
-            f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
-            f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
-            f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
-            f"más auxilio de transporte {contrato_phrase}"
-        )
-        body = f"Esta certificación fue expedida a solicitud del interesado el <b>{fecha_expedicion_texto}</b>."
+        is_activo = context.get("is_activo", True)
+        genero = context.get("genero", "M")
+
+        if genero == "F":
+            prefijo_persona = "la señora"
+            art_identificado = "identificada"
+            art_interesado = "de la interesada"
+        else:
+            prefijo_persona = "el señor"
+            art_identificado = "identificado"
+            art_interesado = "del interesado"
+
+        if is_activo:
+            if contrato.strip().lower() in ("término indefinido", "término fijo"):
+                contrato_phrase = f"y su contrato es a <b>{contrato}</b>."
+            else:
+                contrato_phrase = f"y su contrato es por <b>{contrato}</b>."
+
+            intro = (
+                f"Certifica que {prefijo_persona} <b>{nombre_completo}</b>, {art_identificado} con documento de "
+                f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
+                f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
+                f"<b>{fecha_ingreso_texto}</b> y se desempeña como "
+                f"<b>{cargo}</b>, con un salario básico de <b>{salario_texto}</b> "
+                f"más auxilio de transporte {contrato_phrase}"
+            )
+            body = f"Esta certificación fue expedida a solicitud {art_interesado} el <b>{fecha_expedicion_texto}</b>."
+        else:
+            if contrato.strip().lower() in ("término indefinido", "término fijo"):
+                contrato_phrase = f"y su contrato fue a <b>{contrato}</b>."
+            else:
+                contrato_phrase = f"y su contrato fue por <b>{contrato}</b>."
+
+            intro = (
+                f"Certifica que {prefijo_persona} <b>{nombre_completo}</b>, {art_identificado} con documento de "
+                f"identificación <b>{document_type_label}</b> número <b>{cedula}</b>, ingresó a la "
+                f"<b>COMPAÑÍA INTEGRAL NEGOCIOS DE COLOMBIA</b> desde el día "
+                f"<b>{fecha_ingreso_texto}</b>, hasta el día <b>{fecha_egreso_texto}</b> "
+                f"desempeñándose como <b>{cargo}</b>, con un salario básico de "
+                f"<b>{salario_texto}</b> más auxilio de transporte {contrato_phrase}"
+            )
+            body = f"Esta certificación fue expedida a solicitud {art_interesado} a partir del <b>{fecha_expedicion_texto_largo}</b>."
 
         has_header_image = EmpleadoService._resolve_certificate_image_path(EmpleadoService.HEADER_FILENAME) is not None
 
         story: list[Flowable] = [
-            Spacer(1, 0.8 * cm),
+            Spacer(1, 1.2 * cm),
+            Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style),
+            Spacer(1, 1.2 * cm),
+            Paragraph(intro, body_style),
+            Spacer(1, 0.9 * cm),
+            Paragraph(body, body_style),
+            Spacer(1, 2.5 * cm),
         ]
-        if not has_header_image:
-            story.append(Paragraph("EL DEPARTAMENTO DE RECURSOS HUMANOS", title_style))
+
+        firma_path = (
+            EmpleadoService._resolve_certificate_image_path(EmpleadoService.FIRMA_FILENAME)
+            or EmpleadoService._resolve_certificate_image_path("firma-rrhh.png")
+            or EmpleadoService._resolve_certificate_image_path("firma_rrhh.png")
+        )
+        if firma_path:
+            try:
+                firma_img = RLImage(str(firma_path), width=4.5 * cm, height=2.2 * cm)
+                firma_img.hAlign = "LEFT"
+                story.append(firma_img)
+                story.append(Spacer(1, 0.05 * cm))
+            except Exception:
+                story.append(Spacer(1, 2.2 * cm))
+        else:
+            story.append(Spacer(1, 2.2 * cm))
 
         story.extend([
-            Paragraph(intro, body_style),
-            Spacer(1, 0.35 * cm),
-            Paragraph(body, body_style),
-            Spacer(1, 1.1 * cm),
-            Paragraph(company_name, body_center_style),
-            Paragraph(f"NIT. {context['company_nit']}", body_center_style),
-            Spacer(1, 2.7 * cm),
             Paragraph(firmante_nombre, signature_name_style),
             Paragraph(firmante_cargo, signature_role_style),
         ])
@@ -870,49 +1008,57 @@ class EmpleadoService:
         if sello_path:
             sello = image_reader(str(sello_path))
             sello_w, sello_h = sello.getSize()
-            sello_draw_w = 6.0 * cm_unit
+            sello_draw_w = 6.8 * cm_unit
             sello_draw_h = sello_draw_w * sello_h / sello_w
+
+            center_x = 11.5 * cm_unit
+            center_y = 10.0 * cm_unit
+
+            canvas.saveState()
+            canvas.translate(center_x, center_y)
+            canvas.rotate(30)
             canvas.drawImage(
                 sello,
-                x=7.5 * cm_unit,
-                y=6.5 * cm_unit,
+                x=-sello_draw_w / 2,
+                y=-sello_draw_h / 2,
                 width=sello_draw_w,
                 height=sello_draw_h,
                 preserveAspectRatio=True,
                 mask="auto",
             )
+            canvas.restoreState()
 
         canvas.setFont("Helvetica", 9)
         canvas.drawRightString(page_width - 1.5 * cm_unit, 1 * cm_unit, f"Página {doc.page}")
 
     @staticmethod
-    def _resolve_certificate_image_path(filename):
-        # 1. Comprobar si existe en el directorio del servidor
+    def _resolve_certificate_image_path(filename, refresh_remote=False):
+        # 1. Comprobar si existe en el directorio del servidor de producción
         server_path = EmpleadoService.SERVER_IMAGE_DIR / filename
         if server_path.exists():
             return server_path
 
-        # 2. Comprobar si existe localmente
         local_path = EmpleadoService.LOCAL_IMAGE_DIR / filename
+
+        # 2. Si no existe localmente o se solicita actualizar, intentar descargar la versión remota
+        if not local_path.exists() or refresh_remote:
+            try:
+                import urllib.request
+                remote_url = f"https://www.cincosas.com/images/{filename}"
+                EmpleadoService.LOCAL_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                
+                req = urllib.request.Request(
+                    remote_url,
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        local_path.write_bytes(response.read())
+                        return local_path
+            except Exception:
+                pass
+
         if local_path.exists():
             return local_path
-
-        # 3. Intentar descargar desde la ruta remota en etapa de desarrollo/fallback
-        try:
-            import urllib.request
-            remote_url = f"https://www.cincosas.com/images/{filename}"
-            # Asegurar que el directorio local existe
-            EmpleadoService.LOCAL_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-            
-            req = urllib.request.Request(
-                remote_url,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    local_path.write_bytes(response.read())
-                    return local_path
-        except Exception:
-            pass
 
         return None
