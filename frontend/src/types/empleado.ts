@@ -11,6 +11,9 @@ export interface Empleado {
   supervisor?: string;
   estado: string;
   link_foto?: string;
+  fecha_ingreso?: string;
+  fecha_egreso?: string;
+  genero?: string;
 }
 
 export interface EmpleadoSearchResult {
