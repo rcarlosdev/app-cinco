@@ -67,7 +67,7 @@ const CertificadosLaboralesModule = () => {
       setFechaIngreso(selectedEmployee.fecha_ingreso || "");
       setFechaEgreso(selectedEmployee.fecha_egreso || "");
       setEstado(selectedEmployee.estado || "ACTIVO");
-      const empGenero = (selectedEmployee as any)?.genero;
+      const empGenero = selectedEmployee?.genero;
       setGenero(typeof empGenero === "string" && empGenero.toUpperCase().startsWith("F") ? "F" : "M");
       setSalario("");
       setShowManualForm(false);
