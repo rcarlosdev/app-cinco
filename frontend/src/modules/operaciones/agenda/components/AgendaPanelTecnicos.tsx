@@ -172,7 +172,7 @@ export const AgendaPanelTecnicos: React.FC<AgendaPanelTecnicosProps> = ({
 
   if (isCollapsed) {
     return (
-      <div className="w-10 border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col items-center py-4 space-y-4">
+      <div className="w-10 h-full border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col items-center py-4 space-y-4 flex-shrink-0">
         <button
           type="button"
           onClick={onToggleCollapse}
@@ -192,7 +192,7 @@ export const AgendaPanelTecnicos: React.FC<AgendaPanelTecnicosProps> = ({
   }
 
   return (
-    <div className="w-68 md:w-76 border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col h-full flex-shrink-0 select-none">
+    <div className="w-64 sm:w-68 md:w-76 max-w-[85vw] border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col h-full flex-shrink-0 select-none">
       {/* Encabezado del panel */}
       <div className="p-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
         <div className="flex items-center space-x-2">
