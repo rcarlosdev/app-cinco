@@ -597,24 +597,25 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
   }
 
   return (
-    <div className="flex-1 overflow-auto bg-white dark:bg-gray-900 relative min-w-0">
+    <div className="flex-1 h-[72vh] md:h-full overflow-auto bg-white dark:bg-gray-900 relative min-w-0">
       <table className="w-full border-collapse text-xs select-none table-fixed">
         {/* Encabezado del calendario con días */}
         <thead className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-xs">
           <tr>
-            <th className="p-2.5 text-left font-bold text-gray-700 dark:text-gray-300 w-64 min-w-[240px] max-w-[260px] border-r border-gray-200 dark:border-gray-700 sticky left-0 bg-gray-100 dark:bg-gray-800 z-30">
-              Técnico / Responsable
+            <th className="p-1.5 md:p-2.5 text-left font-bold text-gray-700 dark:text-gray-300 w-28 min-w-[110px] max-w-[110px] md:w-64 md:min-w-[240px] md:max-w-[260px] border-r border-gray-200 dark:border-gray-700 sticky top-0 left-0 bg-gray-100 dark:bg-gray-800 z-30">
+              <span className="hidden md:inline">Técnico / Responsable</span>
+              <span className="inline md:hidden text-[11px]">Técnico</span>
             </th>
             {diasMes.map((dia) => (
               <th
                 key={dia.numero}
                 title={dia.esFestivo ? `Festivo: ${dia.nombreFestivo}` : dia.esFinDeSemana ? "Domingo (No hábil)" : undefined}
-                className={`p-1 text-center font-semibold w-12 min-w-[48px] max-w-[48px] border-r border-gray-200/70 dark:border-gray-700/70 transition-colors ${
+                className={`sticky top-0 z-20 p-1 text-center font-semibold w-12 min-w-[48px] max-w-[48px] border-r border-gray-200/70 dark:border-gray-700/70 transition-colors ${
                   dia.esHoy
                     ? "bg-brand-100 text-brand-900 dark:bg-brand-950 dark:text-brand-200 font-bold"
                     : dia.esNoHabil
-                    ? "bg-gray-100/70 text-gray-400 dark:bg-gray-800/40 dark:text-gray-500"
-                    : "text-gray-700 dark:text-gray-300"
+                    ? "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500"
+                    : "bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
                 }`}
               >
                 <div className="text-[10px] leading-tight opacity-75">{dia.diaSemana}</div>
@@ -679,13 +680,13 @@ export const AgendaCalendarioGrid: React.FC<AgendaCalendarioGridProps> = ({
             return (
               <tr key={tec.cedula || tec.id} className="hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors">
                 {/* Columna fija: Nombre del técnico */}
-                <td className="p-2.5 border-r border-gray-200 dark:border-gray-800 sticky left-0 bg-white dark:bg-gray-900 z-10 w-64 min-w-[240px] max-w-[260px] align-middle">
-                  <div className="font-bold text-gray-900 dark:text-gray-100 truncate max-w-[200px]" title={tec.nombre}>
+                <td className="p-1.5 md:p-2.5 border-r border-gray-200 dark:border-gray-800 sticky left-0 bg-white dark:bg-gray-900 z-10 w-28 min-w-[110px] max-w-[110px] md:w-64 md:min-w-[240px] md:max-w-[260px] align-middle">
+                  <div className="font-bold text-gray-900 dark:text-gray-100 truncate text-[11px] md:text-xs max-w-[95px] md:max-w-[200px]" title={tec.nombre}>
                     {tec.nombre || `Técnico ${tec.cedula}`}
                   </div>
-                  <div className="text-[11px] text-gray-500 flex items-center justify-between mt-0.5">
-                    <span>CC: {tec.cedula}</span>
-                    <span className="truncate max-w-[90px]">{tec.area || tec.sede}</span>
+                  <div className="text-[10px] md:text-[11px] text-gray-500 flex flex-col md:flex-row md:items-center md:justify-between mt-0.5">
+                    <span className="truncate">CC: {tec.cedula}</span>
+                    <span className="hidden md:inline truncate max-w-[90px]">{tec.area || tec.sede}</span>
                   </div>
                 </td>
 
