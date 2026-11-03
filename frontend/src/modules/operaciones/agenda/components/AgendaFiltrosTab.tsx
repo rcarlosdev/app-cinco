@@ -209,9 +209,9 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
         </div>
 
         {/* Fila 2: Inputs de Búsqueda */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-2.5 items-start">
+        <div className="grid grid-cols-2 md:grid-cols-12 gap-2.5 items-start">
           {/* Técnico / Líder Buscador con EmployeeSearchInput */}
-          <div className="md:col-span-4">
+          <div className="col-span-2 md:col-span-4">
             <EmployeeSearchInput
               label="Técnico / Líder"
               placeholder="Buscar técnico por nombre, cédula o móvil..."
@@ -221,7 +221,7 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
           </div>
 
           {/* OT / Actividad */}
-          <div className="md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
               <Briefcase className="h-3.5 w-3.5 inline mr-1 text-gray-500" /> OT / Actividad
             </label>
@@ -235,7 +235,7 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
           </div>
 
           {/* Nombre Actividad */}
-          <div className="md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Nombre en Agenda
             </label>
@@ -249,7 +249,7 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
           </div>
 
           {/* Área */}
-          <div className="md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
               <Folder className="h-3.5 w-3.5 inline mr-1 text-gray-500" /> Área
             </label>
@@ -271,7 +271,7 @@ export const AgendaFiltrosTab: React.FC<AgendaFiltrosTabProps> = ({
           </div>
 
           {/* Carpeta */}
-          <div className="md:col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Carpeta
             </label>

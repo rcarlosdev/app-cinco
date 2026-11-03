@@ -15,5 +15,5 @@ export const getInputClasses = (disabled: boolean, error: boolean): string => {
 export const EMPLOYEE_SEARCH_CONFIG = {
   debounceDelay: 300,
   minSearchLength: 2,
-  maxDropdownHeight: "max-h-80",
+  maxDropdownHeight: "max-h-60 sm:max-h-80",
 } as const;

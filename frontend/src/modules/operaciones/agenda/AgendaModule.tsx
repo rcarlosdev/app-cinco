@@ -27,6 +27,13 @@ export const AgendaModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AgendaActiveTab>("filtro");
   const [panelTecnicosCollapsed, setPanelTecnicosCollapsed] = useState<boolean>(false);
 
+  // Colapsar panel lateral por defecto en pantallas móviles
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setPanelTecnicosCollapsed(true);
+    }
+  }, []);
+
   // Estado de Filtros (inicializado con el área del usuario autenticado si existe)
   const [filtros, setFiltros] = useState<FiltrosAgendaState>(() => ({
     sede: "",
@@ -308,7 +315,7 @@ export const AgendaModule: React.FC = () => {
       {/* Indicador de navegación y título estándar */}
       <PageBreadcrumb pageTitle={["Operaciones", "Agenda de Trabajos"]} />
 
-      <div className="flex flex-col h-[calc(100vh-145px)] w-full overflow-hidden bg-gray-100 dark:bg-gray-950 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs">
+      <div className="flex flex-col min-h-0 h-auto md:h-[calc(100vh-145px)] w-full overflow-visible md:overflow-hidden bg-gray-100 dark:bg-gray-950 rounded-xl border border-gray-200 dark:border-gray-800 shadow-xs">
         {/* Pestañas Superiores */}
         <AgendaHeaderTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
@@ -341,7 +348,7 @@ export const AgendaModule: React.FC = () => {
         )}
 
         {/* Área Principal: Panel Lateral de Técnicos + Calendario Grid */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-row flex-1 h-[72vh] md:h-auto overflow-hidden bg-white dark:bg-gray-900 rounded-b-xl">
           <AgendaPanelTecnicos
             tecnicos={tecnicosPanelLateral}
             filtroArea={filtros.area}
