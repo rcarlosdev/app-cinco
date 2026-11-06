@@ -13,6 +13,7 @@ idna==3.20
 inflection==0.5.1
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
+msal==1.39.0
 mysqlclient==2.2.7
 openai==2.30.0
 PyJWT==2.15.1
@@ -28,3 +29,4 @@ typing_extensions==4.16.0
 tzdata==2025.3
 uritemplate==4.2.0
 urllib3==2.8.0
+openpyxl==3.1.5

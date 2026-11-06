@@ -171,5 +171,5 @@ class AuthenticationServiceTestCase(TestCase):
             settings = AuthenticationService.get_secure_cookie_settings()
 
             self.assertTrue(settings["httponly"])
-            self.assertEqual(settings["samesite"], "Strict")
+            self.assertEqual(settings["samesite"], "Lax")
             self.assertIn("secure", settings)

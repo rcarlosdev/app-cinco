@@ -1,4 +1,5 @@
 import logging
+from typing import Literal, TypedDict
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -13,6 +14,12 @@ from .fingerprint_service import get_device_fingerprint
 
 # Logger de seguridad
 security_logger = logging.getLogger('security')
+
+
+class CookieSettings(TypedDict):
+    httponly: bool
+    secure: bool
+    samesite: Literal['Lax', 'None', 'Strict', False]
 
 
 class AuthenticationService:
@@ -334,14 +341,25 @@ class AuthenticationService:
         return refresh_token
 
     @staticmethod
-    def get_secure_cookie_settings():
+    def get_secure_cookie_settings(request=None) -> CookieSettings:
         """
         Retorna settings para cookies httpOnly.
-        Útil para views que establecen cookies.
+        Detecta si el request viene vía HTTPS (incluso tras túneles Cloudflare/proxies)
+        y usa 'Lax' para permitir navegación fluida entre vistas.
         """
-        secure_cookie = getattr(settings, 'SECURE_COOKIE', not settings.DEBUG)
+        is_https = False
+        if request:
+            is_https = (
+                request.is_secure()
+                or request.META.get('HTTP_X_FORWARDED_PROTO') == 'https'
+                or 'trycloudflare.com' in request.META.get('HTTP_X_FORWARDED_HOST', '')
+                or 'trycloudflare.com' in request.META.get('HTTP_HOST', '')
+            )
+
+        secure_cookie = is_https or getattr(settings, 'SECURE_COOKIE', not settings.DEBUG)
         return {
             "httponly": True,
             "secure": secure_cookie,
-            "samesite": "Strict",
+            "samesite": "Lax",
         }
+
