@@ -15,7 +15,7 @@ reviews:
 
   # Reglas globales para todo el repositorio basadas en los estándares del proyecto
   instructions: |
-    - Idioma obligatorio: Todo el código, documentación, comentarios y nombres de identificadores deben estar en español según los estándares del proyecto.
+    - Idioma: El código fuente (nombres de variables, funciones, clases, métodos) debe escribirse en inglés. Sin embargo, todos los comentarios, la documentación interna y las explicaciones de la lógica deben redactarse estrictamente en español.
     - Regla de Oro: Prohibido modificar o alterar rutas de controladores o endpoints preexistentes (ej. controller_cinco.php -> /../controller_cinco.php).
     - Limpieza: Verifica que no haya `console.log`, `print` de depuración o bloques de código comentado olvidado.
     - Legibilidad y calidad: Prioriza la claridad y modularidad por encima de optimizaciones prematuras o excesivamente complejas.
