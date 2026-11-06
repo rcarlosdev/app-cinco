@@ -46,7 +46,7 @@ class RefreshTokenView(APIView):
         response = Response({"detail": "Tokens refreshed successfully"}, status=status.HTTP_200_OK)
 
         # Establecer nuevos tokens en cookies
-        cookie_settings = AuthenticationService.get_secure_cookie_settings()
+        cookie_settings = AuthenticationService.get_secure_cookie_settings(request)
 
         response.set_cookie(
             key='access_token',

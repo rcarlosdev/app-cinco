@@ -1,6 +1,6 @@
 import axios from "axios";
 import { classifyError, ApiErrorType } from "@/lib/errorHandler";
-import { API_BASE_URL } from "@/lib/apiConfig";
+import { API_BASE_URL, getApiBaseUrl } from "@/lib/apiConfig";
 import {
   clearProtectedSessionState,
   isUnauthorizedDeviceMessage,
@@ -68,7 +68,7 @@ const ensureCsrfToken = async (): Promise<void> => {
 
   if (!csrfPromise) {
     csrfPromise = csrfApi
-      .get("/auth/csrf/")
+      .get(normalizeUrl("auth/csrf/"))
       .then(() => undefined)
       .finally(() => {
         csrfPromise = null;
@@ -81,12 +81,15 @@ const ensureCsrfToken = async (): Promise<void> => {
 const normalizeUrl = (url: string): string => {
   if (!url) return url;
 
-  if (url.includes("?")) {
-    const [path, query] = url.split("?");
+  // Quitar el slash inicial para que Axios respete el subpath del baseURL (ej: /api/)
+  const stripped = url.startsWith("/") ? url.slice(1) : url;
+
+  if (stripped.includes("?")) {
+    const [path, query] = stripped.split("?");
     return `${path.endsWith("/") ? path : `${path}/`}?${query}`;
   }
 
-  return url.endsWith("/") ? url : `${url}/`;
+  return stripped.endsWith("/") ? stripped : `${stripped}/`;
 };
 
 const revokeBrowserSession = async (): Promise<void> => {
@@ -95,7 +98,7 @@ const revokeBrowserSession = async (): Promise<void> => {
   const csrfToken = getCookieValue("csrftoken");
   const headers = csrfToken ? { "X-CSRFToken": csrfToken } : undefined;
 
-  await csrfApi.post("/auth/logout/", {}, { headers });
+  await csrfApi.post(normalizeUrl("auth/logout/"), {}, { headers });
 };
 
 const redirectToLogin = () => {
@@ -120,6 +123,8 @@ const enforceProtectedSession = async (classified: any) => {
 
 api.interceptors.request.use(
   async (config) => {
+    config.baseURL = getApiBaseUrl();
+
     if (config.url) {
       config.url = normalizeUrl(config.url);
     }
@@ -140,6 +145,16 @@ api.interceptors.request.use(
   },
   (error) => Promise.reject(error),
 );
+
+refreshApi.interceptors.request.use((config) => {
+  config.baseURL = getApiBaseUrl();
+  return config;
+});
+
+csrfApi.interceptors.request.use((config) => {
+  config.baseURL = getApiBaseUrl();
+  return config;
+});
 
 api.interceptors.response.use(
   (response) => response,
@@ -192,7 +207,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        await refreshApi.post("/auth/refresh/");
+        await refreshApi.post(normalizeUrl("auth/refresh/"));
         processQueue(null);
         return api(original);
       } catch (refreshError: any) {

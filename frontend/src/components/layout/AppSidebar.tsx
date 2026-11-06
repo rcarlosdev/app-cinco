@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../../context/SidebarContext";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { House, Settings } from "lucide-react";
+import { House, Settings, Network } from "lucide-react";
 import { ChevronDownIcon, HorizontaLDots } from "../../icons/index";
 import { IconMessageChatbot } from '@tabler/icons-react';
 import { useAuthStore } from "@/store/auth.store";
@@ -36,6 +36,16 @@ const defaultNavItems: NavItem[] = [
       {
         name: "Agenda de Trabajos",
         path: "/operaciones/agenda",
+      },
+    ],
+  },
+  {
+    name: "Implementación FO",
+    icon: <Network className="h-5 w-5" />,
+    subItems: [
+      {
+        name: "Mapping de Predios",
+        path: "/implementacion-fo/mapping",
       },
     ],
   },
