@@ -48,6 +48,8 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 ALLOWED_HOSTS = [
     'api.cincosas.com', 
     'www.api.cincosas.com', 
+    'frontend.cincosas.com',
+    'www.frontend.cincosas.com',
     '192.168.79.11', 
     '127.0.0.1', 
     'localhost',
