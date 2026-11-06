@@ -13,6 +13,7 @@ import {
   Sparkles,
   RefreshCw,
   Cloud,
+  UploadCloud,
 } from "lucide-react";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import { MappingPredio, MappingPredioFiltros } from "./types";
@@ -73,110 +74,74 @@ export const MappingPrediosView: React.FC = () => {
     <div className="space-y-6">
       <PageBreadcrumb pageTitle={["Implementación FO", "Mapping de Predios"]} />
 
-      {/* Header Principal del Módulo */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">
-            Levantamiento y Mapping de Predios
-          </h1>
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            Censo cartográfico predial sin fricciones para despliegue de red de fibra óptica.
-          </p>
-        </div>
-
-        {/* Pestañas de Navegación Rápida */}
-        <div className="inline-flex rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-800 dark:bg-gray-800">
+      {/* Pestañas de Navegación estilo Agenda */}
+      <div className="flex border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 rounded-xl px-4 pt-2 shadow-xs">
+        <nav className="-mb-px flex space-x-2" aria-label="Tabs">
           <button
             type="button"
             onClick={() => setActiveTab("formulario")}
-            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+            className={`group inline-flex items-center px-4 py-2.5 font-medium text-xs md:text-sm rounded-t-lg border-b-2 transition-all duration-150 ${
               activeTab === "formulario"
-                ? "bg-white text-brand-600 shadow-xs dark:bg-gray-900 dark:text-brand-400"
-                : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                ? "bg-brand-50 text-brand-700 border-brand-600 dark:bg-brand-950/50 dark:text-brand-300 dark:border-brand-400 font-semibold shadow-xs"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200"
             }`}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus
+              className={`-ml-0.5 mr-2 h-4 w-4 ${
+                activeTab === "formulario"
+                  ? "text-brand-600 dark:text-brand-400"
+                  : "text-gray-400 group-hover:text-gray-500 dark:text-gray-500"
+              }`}
+            />
             {predioEditando ? "Editando Predio" : "Registrar Predio"}
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab("listado")}
-            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+            className={`group inline-flex items-center px-4 py-2.5 font-medium text-xs md:text-sm rounded-t-lg border-b-2 transition-all duration-150 ${
               activeTab === "listado"
-                ? "bg-white text-brand-600 shadow-xs dark:bg-gray-900 dark:text-brand-400"
-                : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                ? "bg-brand-50 text-brand-700 border-brand-600 dark:bg-brand-950/50 dark:text-brand-300 dark:border-brand-400 font-semibold shadow-xs"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200"
             }`}
           >
-            <ListFilter className="h-3.5 w-3.5" />
+            <ListFilter
+              className={`-ml-0.5 mr-2 h-4 w-4 ${
+                activeTab === "listado"
+                  ? "text-brand-600 dark:text-brand-400"
+                  : "text-gray-400 group-hover:text-gray-500 dark:text-gray-500"
+              }`}
+            />
             Predios Levantados
-            <span className="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700 dark:bg-brand-950/60 dark:text-brand-300">
+            <span
+              className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                activeTab === "listado"
+                  ? "bg-brand-200/80 text-brand-800 dark:bg-brand-900/60 dark:text-brand-200"
+                  : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+              }`}
+            >
               {predios.length}
             </span>
           </button>
-        </div>
-      </div>
 
-      {/* Tarjetas de Resumen en Vivo */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">Predios Levantados</span>
-            <Building className="h-4 w-4 text-brand-600 dark:text-brand-400" />
-          </div>
-          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{predios.length}</p>
-          <span className="text-[11px] text-gray-400">{barriosUnicos} barrios cubiertos</span>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">Total Unidades</span>
-            <Sparkles className="h-4 w-4 text-green-600 dark:text-green-400" />
-          </div>
-          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalUnidades}</p>
-          <span className="text-[11px] text-gray-400">
-            {totalAptos} aptos • {totalCasas} casas • {totalLocales} loc.
-          </span>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">Planchas / AMPs</span>
-            <Layers className="h-4 w-4 text-brand-700 dark:text-brand-300" />
-          </div>
-          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{planchasUnicas}</p>
-          <span className="text-[11px] text-gray-400">Lotes de cartografía</span>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">SharePoint (Listas)</span>
-            <Cloud className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
-            {totalSincronizados}
-            <span className="text-xs font-normal text-gray-400"> / {predios.length}</span>
-          </p>
-          <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-            {predios.length > 0 && totalSincronizados === predios.length
-              ? "100% Sincronizado"
-              : `${predios.length - totalSincronizados} pendientes`}
-          </span>
-        </div>
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="group inline-flex items-center px-4 py-2.5 font-medium text-xs md:text-sm rounded-t-lg border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 transition-all duration-150"
+          >
+            <UploadCloud className="-ml-0.5 mr-2 h-4 w-4 text-gray-400 group-hover:text-gray-500 dark:text-gray-500" />
+            Importar CSV
+          </button>
+        </nav>
       </div>
 
       {/* Renderizado condicional según la pestaña activa */}
       {activeTab === "formulario" ? (
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs dark:border-gray-800 dark:bg-gray-900">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">
-                {predioEditando ? "Modificar Datos del Predio" : "Formulario de Mapping"}
-              </h2>
-              <p className="text-xs text-gray-500">
-                Registra la información del mapping.
-              </p>
-            </div>
+          <div className="mb-5 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-800">
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">
+              {predioEditando ? "Modificar Datos del Predio" : "Formulario de Mapping"}
+            </h2>
             {predioEditando && (
               <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 dark:bg-brand-950 dark:text-brand-300">
                 Editando ID #{predioEditando.id}
@@ -193,15 +158,65 @@ export const MappingPrediosView: React.FC = () => {
           />
         </div>
       ) : (
-        <MappingPrediosTable
-          predios={predios}
-          isLoading={isLoading}
-          filtros={filtros}
-          onFiltrosChange={setFiltros}
-          onRefrescar={cargarPredios}
-          onEditarPredio={handleEditarPredio}
-          onAbrirImportModal={() => setIsImportModalOpen(true)}
-        />
+        <div className="space-y-6">
+          {/* Tarjetas de Resumen en Vivo (KPIs visibles solo en Predios Levantados) */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Predios Levantados</span>
+                <Building className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{predios.length}</p>
+              <span className="text-[11px] text-gray-400">{barriosUnicos} barrios cubiertos</span>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Total Unidades</span>
+                <Sparkles className="h-4 w-4 text-green-600 dark:text-green-400" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalUnidades}</p>
+              <span className="text-[11px] text-gray-400">
+                {totalAptos} aptos • {totalCasas} casas • {totalLocales} loc.
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Planchas / AMPs</span>
+                <Layers className="h-4 w-4 text-brand-700 dark:text-brand-300" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{planchasUnicas}</p>
+              <span className="text-[11px] text-gray-400">Lotes de cartografía</span>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">SharePoint (Listas)</span>
+                <Cloud className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
+                {totalSincronizados}
+                <span className="text-xs font-normal text-gray-400"> / {predios.length}</span>
+              </p>
+              <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                {predios.length > 0 && totalSincronizados === predios.length
+                  ? "100% Sincronizado"
+                  : `${predios.length - totalSincronizados} pendientes`}
+              </span>
+            </div>
+          </div>
+
+          <MappingPrediosTable
+            predios={predios}
+            isLoading={isLoading}
+            filtros={filtros}
+            onFiltrosChange={setFiltros}
+            onRefrescar={cargarPredios}
+            onEditarPredio={handleEditarPredio}
+            onAbrirImportModal={() => setIsImportModalOpen(true)}
+          />
+        </div>
       )}
 
       {/* Modal de Carga Masiva de Excel */}

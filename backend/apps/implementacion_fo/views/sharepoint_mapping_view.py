@@ -20,6 +20,16 @@ class SharePointMappingConfigViewSet(ModelViewSet):
     serializer_class = SharePointMappingConfigSerializer
     permission_classes = [AllowAny]
 
+    def get_queryset(self):
+        qs = SharePointMappingConfig.objects.all().order_by("barrio")
+        request = getattr(self, "request", None)
+        if request:
+            params = getattr(request, "query_params", getattr(request, "GET", {}))
+            tipo = params.get("tipo_destino")
+            if tipo:
+                qs = qs.filter(tipo_destino=tipo)
+        return qs
+
     def perform_create(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(created_by=user, updated_by=user)
@@ -121,24 +131,19 @@ class SharePointMappingConfigViewSet(ModelViewSet):
             return Response({"success": False, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(
-        summary="Auto-descubrir y sincronizar barrios desde SharePoint",
-        description="Escanea tanto listas de SharePoint como archivos .xlsx y crea/actualiza configuraciones por barrio.",
+        summary="Auto-descubrir y sincronizar barrios desde Listas de SharePoint",
+        description="Escanea exclusivamente listas personalizadas de SharePoint (Microsoft Lists) y crea/actualiza configuraciones por barrio.",
     )
     @action(detail=False, methods=["post"], url_path="auto-descubrir")
     def auto_descubrir(self, request):
         try:
-            # 1. Prioridad: Descubrir Listas de SharePoint
+            # Descubrir ÚNICAMENTE Listas de SharePoint (Microsoft Lists)
             res_listas = SharePointMappingService.auto_descubrir_listas()
-
-            # 2. Descubrir también archivos Excel existentes
-            drive_id = request.data.get("drive_id")
-            res_archivos = SharePointMappingService.auto_descubrir_barrios(drive_id)
 
             return Response(
                 {
                     "success": True,
                     "listas": res_listas,
-                    "archivos": res_archivos,
                 },
                 status=status.HTTP_200_OK,
             )

@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { mappingPredioService } from "../services/mappingPredio.service";
@@ -24,6 +25,7 @@ import {
   DireccionCamposGroup,
   parsearCalle,
   componerCalle,
+  normalizarDireccionTexto,
 } from "./DireccionCamposGroup";
 import { obtenerGeolocalizacionPrecisa } from "@/utils/geolocation";
 
@@ -75,16 +77,24 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
   const [longitud, setLongitud] = useState<string>("");
   const [observaciones, setObservaciones] = useState("");
 
-  // Sugerencias de Barrios y Planchas
-  const [sugerenciasBarrios, setSugerenciasBarrios] = useState<string[]>([]);
-  const [mostrarSugerenciasBarrio, setMostrarSugerenciasBarrio] = useState(false);
+  // Barrios existentes en la tabla
   const [barriosSharePoint, setBarriosSharePoint] = useState<Array<{ barrio: string; descripcion?: string }>>([]);
-  const [modoManualBarrio, setModoManualBarrio] = useState(false);
+  const [isRefreshingBarrios, setIsRefreshingBarrios] = useState(false);
 
-  // Alertas tempranas
+  // Alertas tempranas y validaciones
   const [cuadraCheck, setCuadraCheck] = useState<CuadraCheckResult | null>(null);
   const [isLoadingCuadraCheck, setIsLoadingCuadraCheck] = useState(false);
   const [direccionCheck, setDireccionCheck] = useState<DireccionCheckResult | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const clearError = (field: string) => {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
 
   // Estado de carga y GPS
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -134,16 +144,12 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
       if (predioEditando.calle_alterna_2 || predioEditando.calle_alterna_3) {
         setMostrarAlternas(true);
       }
+      setErrors({});
     }
   }, [predioEditando]);
 
-  // Cargar barrios sugeridos iniciales y barrios enlazados a SharePoint
+  // Cargar barrios existentes en la tabla de SharePoint
   useEffect(() => {
-    mappingPredioService
-      .getBarriosSugeridos()
-      .then((barrios) => setSugerenciasBarrios(barrios))
-      .catch(() => { });
-
     mappingPredioService
       .getBarriosSharePoint()
       .then((items) => setBarriosSharePoint(items))
@@ -176,9 +182,10 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
     return () => clearTimeout(timer);
   }, [barrio, loteAmp, calleCalculada, predioEditando]);
 
-  // Alerta no bloqueante: Detección en vivo de dirección similar
+  // Alerta de dirección duplicada
   useEffect(() => {
-    if (!calleCalculada || !placaUnidad.trim()) {
+    const placaNorm = normalizarDireccionTexto(placaUnidad);
+    if (!calleCalculada || !placaNorm) {
       setDireccionCheck(null);
       return;
     }
@@ -187,7 +194,7 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
       try {
         const res = await mappingPredioService.verificarDireccion(
           calleCalculada,
-          placaUnidad.trim(),
+          placaNorm,
           interior.trim() || undefined,
           predioEditando?.id,
         );
@@ -229,6 +236,8 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
       const lng = res.longitud.toFixed(6);
       setLatitud(lat);
       setLongitud(lng);
+      clearError("latitud");
+      clearError("longitud");
 
       if (res.esOptima) {
         toast.success(`GPS capturado con precisión óptima de ±${res.precision}m`, {
@@ -245,6 +254,42 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
       toast.error(error.message || "No se pudo obtener la ubicación GPS.", { id: toastId });
     } finally {
       setIsGettingGps(false);
+    }
+  };
+
+  const handleActualizarBarrios = async () => {
+    setIsRefreshingBarrios(true);
+    const toastId = toast.loading("Actualizando barrios desde SharePoint...");
+    try {
+      const res = await mappingPredioService.autoDescubrirBarriosSharePoint();
+      if (res.success) {
+        const items = await mappingPredioService.getBarriosSharePoint();
+        setBarriosSharePoint(items);
+
+        const nuevasListas = res.listas?.creadas || 0;
+        if (nuevasListas > 0) {
+          toast.success(`Se encontraron ${nuevasListas} nueva(s) lista(s) en SharePoint`, {
+            id: toastId,
+            description: `${items.length} listas de barrios disponibles`,
+          });
+        } else {
+          toast.success("Listas de SharePoint actualizadas", {
+            id: toastId,
+            description: `${items.length} listas disponibles`,
+          });
+        }
+      } else {
+        toast.error(res.error || "No se pudieron actualizar los barrios", { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.error ||
+        err?.message ||
+        "Error al conectar con SharePoint para actualizar barrios",
+        { id: toastId }
+      );
+    } finally {
+      setIsRefreshingBarrios(false);
     }
   };
 
@@ -275,17 +320,75 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
     setObservaciones("");
     setCuadraCheck(null);
     setDireccionCheck(null);
+    setErrors({});
   };
 
-  const handleSubmit = async () => {
-    // Validaciones mínimas no bloqueantes
-    if (!calleCalculada && !nombreConjunto.trim()) {
-      toast.error("Ingresa al menos la vía principal o el nombre del conjunto/edificio.");
-      return;
+  const validateForm = (): Record<string, string> => {
+    const newErrors: Record<string, string> = {};
+
+    if (!barrio.trim()) {
+      newErrors.barrio = "El barrio es obligatorio.";
+    }
+
+    if (!loteAmp.trim()) {
+      newErrors.loteAmp = "El AMP / lote de plancha es obligatorio.";
+    }
+
+    if (tipoVia === "OTRO") {
+      if (!nombreCalleLibre.trim()) {
+        newErrors.via = "Ingresa la vía o dirección completa.";
+      }
+    } else {
+      if (!numeroVia.trim()) {
+        newErrors.via = "Ingresa el número o letra de la vía.";
+      }
     }
 
     if (!placaUnidad.trim() && !nombreConjunto.trim()) {
-      toast.error("Ingresa la placa del predio o el nombre del conjunto.");
+      newErrors.placa = "Ingresa la placa del predio o el nombre del conjunto.";
+    }
+
+    if (direccionCheck?.existe_exacta) {
+      newErrors.placa = "Dirección duplicada";
+    }
+
+    // Coordenadas GPS obligatorias
+    if (!latitud.trim()) {
+      newErrors.latitud = "La latitud es obligatoria. Puedes tomarla con el GPS.";
+    } else {
+      const latNum = Number(latitud.replace(",", "."));
+      if (isNaN(latNum) || latNum < -90 || latNum > 90) {
+        newErrors.latitud = "Ingresa una latitud válida (ej: 6.308625).";
+      }
+    }
+
+    if (!longitud.trim()) {
+      newErrors.longitud = "La longitud es obligatoria. Puedes tomarla con el GPS.";
+    } else {
+      const lngNum = Number(longitud.replace(",", "."));
+      if (isNaN(lngNum) || lngNum < -180 || lngNum > 180) {
+        newErrors.longitud = "Ingresa una longitud válida (ej: -75.545410).";
+      }
+    }
+
+    return newErrors;
+  };
+
+  const handleSubmit = async () => {
+    // Validar campos obligatorios al estilo del módulo de actividades
+    const formErrors = validateForm();
+    if (Object.keys(formErrors).length > 0) {
+      setErrors(formErrors);
+      const firstMessage = Object.values(formErrors)[0];
+      toast.error(
+        firstMessage || "Completa los campos obligatorios antes de guardar."
+      );
+      return;
+    }
+
+    // Bloqueo adicional por dirección duplicada
+    if (direccionCheck?.existe_exacta) {
+      toast.error("Dirección duplicada");
       return;
     }
 
@@ -293,13 +396,14 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
 
     const calleAlt2 = componerCalle(tipoViaAlt2, numeroViaAlt2, nombreCalleLibreAlt2);
     const calleAlt3 = componerCalle(tipoViaAlt3, numeroViaAlt3, nombreCalleLibreAlt3);
-    const placaAlt2 = placaAlterna2.trim().toUpperCase();
-    const placaAlt3 = placaAlterna3.trim().toUpperCase();
+    const placaPrincipal = normalizarDireccionTexto(placaUnidad);
+    const placaAlt2 = normalizarDireccionTexto(placaAlterna2);
+    const placaAlt3 = normalizarDireccionTexto(placaAlterna3);
 
     const payload: Partial<MappingPredio> = {
       nombre_conjunto: nombreConjunto.trim().toUpperCase(),
       nombre_calle: calleCalculada,
-      placa_unidad: placaUnidad.trim().toUpperCase(),
+      placa_unidad: placaPrincipal,
       interior: interior.trim().toUpperCase(),
       barrio: barrio.trim().toUpperCase(),
       lote_amp: loteAmp.trim().toUpperCase(),
@@ -349,6 +453,7 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
 
   return (
     <form
+      noValidate
       onSubmit={(e) => {
         e.preventDefault();
         handleSubmit();
@@ -373,87 +478,85 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
         </h3>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {/* Barrio con selector de SharePoint o autocompletado */}
-          <div className="relative">
+          {/* Selector de Barrio existente en la tabla */}
+          <div>
             <div className="flex items-center justify-between">
               <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Barrio <span className="text-red-500">*</span>
+                Barrio <strong className="text-red-400">*</strong>
               </label>
-              {barriosSharePoint.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setModoManualBarrio(!modoManualBarrio)}
-                  className="text-[10px] text-brand-600 hover:underline dark:text-brand-400 font-medium"
-                >
-                  {modoManualBarrio ? "Ver selector" : "Escribir manual"}
-                </button>
-              )}
-            </div>
-
-            {barriosSharePoint.length > 0 && !modoManualBarrio ? (
-              <select
-                value={barrio}
-                onChange={(e) => setBarrio(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              <button
+                type="button"
+                onClick={handleActualizarBarrios}
+                disabled={isRefreshingBarrios}
+                title="Sincronizar y escanear nuevas listas o archivos en SharePoint"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 hover:text-brand-700 hover:underline disabled:opacity-50 dark:text-brand-400 dark:hover:text-brand-300 transition-colors"
               >
-                <option value="">-- Selecciona el barrio --</option>
-                {barriosSharePoint.map((b) => (
-                  <option key={b.barrio} value={b.barrio}>
-                    {b.barrio}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="relative">
-                <input
-                  type="text"
-                  value={barrio}
-                  onChange={(e) => {
-                    setBarrio(e.target.value.toUpperCase());
-                    setMostrarSugerenciasBarrio(true);
-                  }}
-                  onFocus={() => setMostrarSugerenciasBarrio(true)}
-                  placeholder="Ej: BELEN, LAURELES, ROBLEDO"
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
-                {/* Lista desplegable de sugerencias de barrio */}
-                {mostrarSugerenciasBarrio && sugerenciasBarrios.length > 0 && barrio && (
-                  <ul className="absolute z-30 mt-1 max-h-40 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 text-xs shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                    {sugerenciasBarrios
-                      .filter((b) => b.toUpperCase().includes(barrio.toUpperCase()))
-                      .slice(0, 8)
-                      .map((sug) => (
-                        <li
-                          key={sug}
-                          onClick={() => {
-                            setBarrio(sug);
-                            setMostrarSugerenciasBarrio(false);
-                          }}
-                          className="cursor-pointer px-3 py-1.5 hover:bg-brand-50 text-gray-800 dark:text-gray-200 dark:hover:bg-brand-950/40"
-                        >
-                          {sug}
-                        </li>
-                      ))}
-                  </ul>
-                )}
-              </div>
+                <RefreshCw className={`h-3 w-3 ${isRefreshingBarrios ? "animate-spin" : ""}`} />
+                {isRefreshingBarrios ? "Actualizando..." : "Actualizar barrios"}
+              </button>
+            </div>
+            <select
+              value={barrio}
+              onChange={(e) => {
+                setBarrio(e.target.value);
+                clearError("barrio");
+              }}
+              className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm font-medium focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+                errors.barrio
+                  ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                  : "border-gray-300 text-gray-800 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+              }`}
+            >
+              <option value="">
+                {isRefreshingBarrios
+                  ? "Escaneando SharePoint..."
+                  : barriosSharePoint.length === 0
+                  ? "Cargando barrios..."
+                  : "-- Selecciona el barrio --"}
+              </option>
+              {barriosSharePoint.map((b) => (
+                <option key={b.barrio} value={b.barrio}>
+                  {b.barrio}
+                </option>
+              ))}
+              {/* Preservar opción si se está editando un registro con un barrio no presente */}
+              {barrio && !barriosSharePoint.some((b) => b.barrio === barrio) && (
+                <option value={barrio}>{barrio}</option>
+              )}
+            </select>
+            {errors.barrio && (
+              <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                {errors.barrio}
+              </p>
             )}
           </div>
 
           {/* Lote / Plancha AMP */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              AMP <span className="text-red-500">*</span>
+              AMP <strong className="text-red-400">*</strong>
             </label>
             <input
               type="text"
               value={loteAmp}
-              onChange={(e) => setLoteAmp(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setLoteAmp(e.target.value.toUpperCase());
+                clearError("loteAmp");
+              }}
               placeholder="Ej: 1, 102A, MZ-4"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+                errors.loteAmp
+                  ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                  : "border-gray-300 text-gray-900 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+              }`}
             />
-            <span className="text-[11px] text-gray-500">Lote marcado en la plancha de campo</span>
+            {errors.loteAmp ? (
+              <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                {errors.loteAmp}
+              </p>
+            ) : (
+              <span className="text-[11px] text-gray-500">Lote marcado en la plancha de campo</span>
+            )}
           </div>
 
           {/* Nombre Conjunto / Edificio */}
@@ -464,7 +567,10 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
             <input
               type="text"
               value={nombreConjunto}
-              onChange={(e) => setNombreConjunto(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setNombreConjunto(e.target.value.toUpperCase());
+                clearError("placa");
+              }}
               placeholder="Ej: EDIFICIO NUEVO MILENIUM"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
             />
@@ -483,15 +589,28 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
           tipoVia={tipoVia}
           onTipoViaChange={setTipoVia}
           numeroVia={numeroVia}
-          onNumeroViaChange={setNumeroVia}
+          onNumeroViaChange={(val) => {
+            setNumeroVia(val);
+            clearError("via");
+          }}
           nombreCalleLibre={nombreCalleLibre}
-          onNombreCalleLibreChange={setNombreCalleLibre}
+          onNombreCalleLibreChange={(val) => {
+            setNombreCalleLibre(val);
+            clearError("via");
+          }}
           placa={placaUnidad}
-          onPlacaChange={setPlacaUnidad}
+          onPlacaChange={(val) => {
+            setPlacaUnidad(val);
+            clearError("placa");
+          }}
           interior={interior}
           onInteriorChange={setInterior}
           mostrarInterior={true}
           esObligatoria={true}
+          errorVia={!!errors.via}
+          hintVia={errors.via}
+          errorPlaca={!!errors.placa}
+          hintPlaca={errors.placa}
           labelVia="Número / Letra de la Vía"
           labelPlaca="Placa / Número (PLACAUNIDA)"
         />
@@ -664,29 +783,53 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
           {/* Latitud (CORDX) */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Latitud (CORDX)
+              Latitud (CORDX) <strong className="text-red-400">*</strong>
             </label>
             <input
               type="text"
               value={latitud}
-              onChange={(e) => setLatitud(e.target.value)}
+              onChange={(e) => {
+                setLatitud(e.target.value);
+                clearError("latitud");
+              }}
               placeholder="Ej: 6.308625"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm font-mono focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+                errors.latitud
+                  ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                  : "border-gray-300 text-gray-900 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+              }`}
             />
+            {errors.latitud && (
+              <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                {errors.latitud}
+              </p>
+            )}
           </div>
 
           {/* Longitud (CORDY) */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Longitud (CORDY)
+              Longitud (CORDY) <strong className="text-red-400">*</strong>
             </label>
             <input
               type="text"
               value={longitud}
-              onChange={(e) => setLongitud(e.target.value)}
+              onChange={(e) => {
+                setLongitud(e.target.value);
+                clearError("longitud");
+              }}
               placeholder="Ej: -75.545410"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm font-mono focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+                errors.longitud
+                  ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                  : "border-gray-300 text-gray-900 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+              }`}
             />
+            {errors.longitud && (
+              <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                {errors.longitud}
+              </p>
+            )}
           </div>
         </div>
 
@@ -808,8 +951,9 @@ export const MappingPredioForm: React.FC<MappingPredioFormProps> = ({
         <div className="flex items-center gap-2.5">
           <button
             type="submit"
-            disabled={isSubmitting}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-brand-600 active:scale-95 disabled:opacity-50 transition-all"
+            disabled={isSubmitting || Boolean(direccionCheck?.existe_exacta)}
+            title={direccionCheck?.existe_exacta ? "Dirección duplicada" : undefined}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-brand-600 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {isSubmitting ? (
               <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />

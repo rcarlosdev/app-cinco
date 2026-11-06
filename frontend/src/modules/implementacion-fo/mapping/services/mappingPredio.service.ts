@@ -118,11 +118,21 @@ export const mappingPredioService = {
     return res.data;
   },
 
-  async getBarriosSharePoint(): Promise<Array<{ barrio: string; descripcion?: string; sp_item_id?: string }>> {
+  async autoDescubrirBarriosSharePoint(): Promise<{
+    success: boolean;
+    listas?: { creadas?: number; actualizadas?: number; total_listas_encontradas?: number };
+    archivos?: { creados?: number; actualizados?: number; total_archivos_encontrados?: number };
+    error?: string;
+  }> {
+    const res = await api.post("/implementacion-fo/sharepoint-mapping/auto-descubrir/");
+    return res.data;
+  },
+
+  async getBarriosSharePoint(): Promise<Array<{ barrio: string; descripcion?: string; sp_item_id?: string; tipo_destino?: string }>> {
     try {
-      const res = await api.get("/implementacion-fo/sharepoint-mapping/");
+      const res = await api.get("/implementacion-fo/sharepoint-mapping/?tipo_destino=LISTA");
       const data = res.data?.results || res.data || [];
-      return data.filter((c: any) => c.activo !== false);
+      return data.filter((c: any) => c.activo !== false && (c.tipo_destino === "LISTA" || !c.tipo_destino));
     } catch {
       return [];
     }

@@ -11,6 +11,26 @@ def clean_uppercase(value):
     return value
 
 
+def normalizar_direccion_texto(value):
+    """
+    Normaliza texto de direcciones y placas:
+    - Limpia espacios extras y convierte a mayúsculas.
+    - Une números con su letra adjunta (ej: '21 C' -> '21C', '40 A' -> '40A').
+    - Elimina espacios alrededor del guión (ej: '40 - 5' -> '40-5').
+    - Elimina prefijo '#' sobrante si fue ingresado en la placa.
+    """
+    if not isinstance(value, str):
+        return value
+    cleaned = clean_uppercase(value)
+    # 1. Unir dígitos con letra adjunta: 21 C -> 21C, 40 A -> 40A
+    cleaned = re.sub(r"(\d+)\s+([A-Z])\b", r"\1\2", cleaned)
+    # 2. Eliminar espacios alrededor del guión de placa: 40 - 5 -> 40-5
+    cleaned = re.sub(r"\s*-\s*", "-", cleaned)
+    # 3. Eliminar '#' inicial si lo escribieron en el campo
+    cleaned = re.sub(r"^#\s*", "", cleaned)
+    return cleaned.strip()
+
+
 def parse_coordenada(value):
     """
     Convierte coordenada en string (soporta comas o puntos, ej: '6,308625' o '6.308625')
@@ -112,10 +132,10 @@ class MappingPredioWriteSerializer(serializers.ModelSerializer):
         return clean_uppercase(value)
 
     def validate_nombre_calle(self, value):
-        return clean_uppercase(value)
+        return normalizar_direccion_texto(value)
 
     def validate_placa_unidad(self, value):
-        return clean_uppercase(value)
+        return normalizar_direccion_texto(value)
 
     def validate_barrio(self, value):
         return clean_uppercase(value)
@@ -124,16 +144,16 @@ class MappingPredioWriteSerializer(serializers.ModelSerializer):
         return clean_uppercase(value)
 
     def validate_calle_alterna_2(self, value):
-        return clean_uppercase(value)
+        return normalizar_direccion_texto(value)
 
     def validate_placa_alterna_2(self, value):
-        return clean_uppercase(value)
+        return normalizar_direccion_texto(value)
 
     def validate_calle_alterna_3(self, value):
-        return clean_uppercase(value)
+        return normalizar_direccion_texto(value)
 
     def validate_placa_alterna_3(self, value):
-        return clean_uppercase(value)
+        return normalizar_direccion_texto(value)
 
     def validate_lote_amp(self, value):
         return clean_uppercase(value)
@@ -154,6 +174,46 @@ class MappingPredioWriteSerializer(serializers.ModelSerializer):
         if "CORDY" in data_copy and not data_copy.get("longitud"):
             data_copy["longitud"] = parse_coordenada(data_copy.get("CORDY"))
         return super().to_internal_value(data_copy)
+
+    def validate(self, attrs):
+        nombre_calle = attrs.get("nombre_calle")
+        if not nombre_calle and self.instance:
+            nombre_calle = self.instance.nombre_calle
+
+        placa_unidad = attrs.get("placa_unidad")
+        if not placa_unidad and self.instance:
+            placa_unidad = self.instance.placa_unidad
+
+        if nombre_calle and placa_unidad:
+            calle_limpia = normalizar_direccion_texto(nombre_calle)
+            placa_limpia = normalizar_direccion_texto(placa_unidad)
+
+            qs = MappingPredio.objects.filter(
+                is_deleted=False,
+                nombre_calle__iexact=calle_limpia,
+                placa_unidad__iexact=placa_limpia,
+            )
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+
+            if qs.exists():
+                raise serializers.ValidationError({"detail": "Dirección duplicada"})
+
+        latitud = attrs.get("latitud")
+        if latitud is None and self.instance:
+            latitud = self.instance.latitud
+
+        longitud = attrs.get("longitud")
+        if longitud is None and self.instance:
+            longitud = self.instance.longitud
+
+        if not self.instance:
+            if latitud is None:
+                raise serializers.ValidationError({"latitud": "La latitud es obligatoria."})
+            if longitud is None:
+                raise serializers.ValidationError({"longitud": "La longitud es obligatoria."})
+
+        return super().validate(attrs)
 
 
 class CuadraCheckResponseSerializer(serializers.Serializer):

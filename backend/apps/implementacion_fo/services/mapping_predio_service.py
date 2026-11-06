@@ -8,6 +8,7 @@ from django.utils import timezone
 from apps.implementacion_fo.models import MappingPredio
 from apps.implementacion_fo.serializers.mapping_predio_serializer import (
     clean_uppercase,
+    normalizar_direccion_texto,
     parse_coordenada,
 )
 
@@ -35,7 +36,7 @@ class MappingPredioService:
 
         nombre_calle = filtros.get("nombre_calle")
         if nombre_calle:
-            qs = qs.filter(nombre_calle__icontains=nombre_calle.strip())
+            qs = qs.filter(nombre_calle__icontains=normalizar_direccion_texto(nombre_calle))
 
         buscar = filtros.get("buscar")
         if buscar:
@@ -115,7 +116,7 @@ class MappingPredioService:
         ).select_related("created_by")
 
         if nombre_calle:
-            qs = qs.filter(nombre_calle__icontains=nombre_calle.strip())
+            qs = qs.filter(nombre_calle__icontains=normalizar_direccion_texto(nombre_calle))
 
         total = qs.count()
         if total == 0:
@@ -166,8 +167,8 @@ class MappingPredioService:
                 "mensaje": None,
             }
 
-        calle_limpia = clean_uppercase(nombre_calle)
-        placa_limpia = clean_uppercase(placa_unidad)
+        calle_limpia = normalizar_direccion_texto(nombre_calle)
+        placa_limpia = normalizar_direccion_texto(placa_unidad)
 
         qs = MappingPredio.objects.filter(
             is_deleted=False,
@@ -280,8 +281,8 @@ class MappingPredioService:
                     datos_predio[campo_modelo] = val
 
             # Validar que al menos tenga calle o placa o conjunto
-            nombre_calle = clean_uppercase(str(datos_predio.get("nombre_calle") or ""))
-            placa_unidad = clean_uppercase(str(datos_predio.get("placa_unidad") or ""))
+            nombre_calle = normalizar_direccion_texto(str(datos_predio.get("nombre_calle") or ""))
+            placa_unidad = normalizar_direccion_texto(str(datos_predio.get("placa_unidad") or ""))
             conjunto = clean_uppercase(str(datos_predio.get("nombre_conjunto") or ""))
 
             if not (nombre_calle or placa_unidad or conjunto):
@@ -304,10 +305,10 @@ class MappingPredioService:
                 num_apartamentos=to_int(datos_predio.get("num_apartamentos"), 0),
                 num_locales=to_int(datos_predio.get("num_locales"), 0),
                 num_pisos=max(1, to_int(datos_predio.get("num_pisos"), 1)),
-                calle_alterna_2=clean_uppercase(str(datos_predio.get("calle_alterna_2") or "")),
-                placa_alterna_2=clean_uppercase(str(datos_predio.get("placa_alterna_2") or "")),
-                calle_alterna_3=clean_uppercase(str(datos_predio.get("calle_alterna_3") or "")),
-                placa_alterna_3=clean_uppercase(str(datos_predio.get("placa_alterna_3") or "")),
+                calle_alterna_2=normalizar_direccion_texto(str(datos_predio.get("calle_alterna_2") or "")),
+                placa_alterna_2=normalizar_direccion_texto(str(datos_predio.get("placa_alterna_2") or "")),
+                calle_alterna_3=normalizar_direccion_texto(str(datos_predio.get("calle_alterna_3") or "")),
+                placa_alterna_3=normalizar_direccion_texto(str(datos_predio.get("placa_alterna_3") or "")),
                 distribucion=clean_uppercase(str(datos_predio.get("distribucion") or "")),
                 lote_amp=clean_uppercase(str(datos_predio.get("lote_amp") or "")),
                 latitud=parse_coordenada(datos_predio.get("latitud")),

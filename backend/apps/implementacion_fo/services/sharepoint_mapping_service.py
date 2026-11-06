@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -253,16 +254,9 @@ class SharePointMappingService:
             if name.lower() in excluded_names or is_hidden or template == "documentLibrary":
                 continue
 
-            barrio_sug = (
-                d_name.replace("Mapping_", "")
-                .replace("MAPPING_", "")
-                .replace("mapping_", "")
-                .replace("Predios_", "")
-                .replace("PREDIOS_", "")
-                .replace("_", " ")
-                .strip()
-                .upper()
-            )
+            # Extraer el nombre del barrio limpiando prefijos (mapping_, mapping-, mapping , predios_, etc.)
+            limpio = re.sub(r"^(mapping|predios)[_\s\-]+", "", d_name, flags=re.IGNORECASE)
+            barrio_sug = limpio.replace("_", " ").strip().upper()
 
             custom_lists.append({
                 "id": l.get("id"),
@@ -280,11 +274,14 @@ class SharePointMappingService:
         """
         Descubre las listas creadas en el sitio de SharePoint y registra o actualiza
         sus configuraciones por barrio en la base de datos.
+        - Si una lista cambia de nombre en SharePoint, actualiza el barrio en la base de datos.
+        - Si una lista es eliminada de SharePoint, desactiva la configuración para no mostrarla en el selector.
         """
         sid = site_id or cls.resolve_site_id()
         listas = cls.list_sharepoint_lists(sid)
         creadas = 0
         actualizadas = 0
+        list_ids_encontrados = set()
 
         for l in listas:
             barrio = l["barrio_sugerido"]
@@ -292,23 +289,44 @@ class SharePointMappingService:
             if not barrio or not list_id:
                 continue
 
-            config, created = SharePointMappingConfig.objects.get_or_create(
-                barrio=barrio,
-                defaults={
-                    "descripcion": f"Lista SharePoint: {l['displayName']}",
-                    "tipo_destino": "LISTA",
-                    "sp_list_id": list_id,
-                    "activo": True,
-                },
-            )
-            if created:
-                creadas += 1
-            else:
-                config.tipo_destino = "LISTA"
-                config.sp_list_id = list_id
+            list_ids_encontrados.add(list_id)
+
+            # 1. Buscar si ya existe por el ID único e inmutable de la lista en SharePoint
+            config = SharePointMappingConfig.objects.filter(
+                sp_list_id=list_id, tipo_destino="LISTA"
+            ).first()
+
+            if config:
+                # La lista ya existía: si le cambiaron el nombre en SharePoint, actualizamos el barrio
+                if config.barrio != barrio:
+                    # Limpiar cualquier colisión previa con el nuevo nombre
+                    SharePointMappingConfig.objects.filter(barrio=barrio).exclude(id=config.id).delete()
+                    config.barrio = barrio
+                config.descripcion = f"Lista SharePoint: {l['displayName']}"
                 config.activo = True
-                config.save(update_fields=["tipo_destino", "sp_list_id", "activo"])
+                config.save()
                 actualizadas += 1
+            else:
+                # 2. No existía por ID: crear o actualizar por nombre de barrio
+                config, created = SharePointMappingConfig.objects.update_or_create(
+                    barrio=barrio,
+                    defaults={
+                        "descripcion": f"Lista SharePoint: {l['displayName']}",
+                        "tipo_destino": "LISTA",
+                        "sp_list_id": list_id,
+                        "activo": True,
+                    },
+                )
+                if created:
+                    creadas += 1
+                else:
+                    actualizadas += 1
+
+        # 3. Si alguna lista ya no existe en SharePoint, desactivarla en la base de datos
+        if list_ids_encontrados:
+            SharePointMappingConfig.objects.filter(
+                tipo_destino="LISTA"
+            ).exclude(sp_list_id__in=list_ids_encontrados).update(activo=False)
 
         return {
             "success": True,

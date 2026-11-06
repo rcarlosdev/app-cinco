@@ -39,6 +39,24 @@ export const parsearCalle = (calle: string) => {
 };
 
 /**
+ * Normaliza textos de direcciones y placas:
+ * - Convierte a mayúsculas y colapsa espacios repetidos.
+ * - Une dígitos con su letra adyacente (ej: "21 C" -> "21C", "40 A" -> "40A").
+ * - Elimina espacios alrededor del guión de la placa (ej: "40 - 5" -> "40-5").
+ * - Remueve prefijo '#' sobrante si fue escrito en el input.
+ */
+export const normalizarDireccionTexto = (texto: string): string => {
+  if (!texto) return "";
+  return texto
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .replace(/(\d+)\s+([A-Z])\b/g, "$1$2")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/^#\s*/g, "")
+    .trim();
+};
+
+/**
  * Compone el texto unificado de la calle a partir del tipo de vía y su número.
  * Si es tipo estándar pero no hay número escrito, devuelve vacío "" para evitar datos basura como "CL".
  */
@@ -48,9 +66,9 @@ export const componerCalle = (
   nombreCalleLibre: string
 ): string => {
   if (tipoVia === "OTRO") {
-    return nombreCalleLibre.trim().toUpperCase();
+    return normalizarDireccionTexto(nombreCalleLibre);
   }
-  const num = numeroVia.trim().toUpperCase();
+  const num = normalizarDireccionTexto(numeroVia);
   return num ? `${tipoVia} ${num}` : "";
 };
 
@@ -70,6 +88,10 @@ export interface DireccionCamposGroupProps {
   mostrarVistaPrevia?: boolean;
   labelVia?: string;
   labelPlaca?: string;
+  errorVia?: boolean;
+  hintVia?: string;
+  errorPlaca?: boolean;
+  hintPlaca?: string;
 }
 
 export const DireccionCamposGroup: React.FC<DireccionCamposGroupProps> = ({
@@ -88,6 +110,10 @@ export const DireccionCamposGroup: React.FC<DireccionCamposGroupProps> = ({
   mostrarVistaPrevia = true,
   labelVia,
   labelPlaca,
+  errorVia = false,
+  hintVia,
+  errorPlaca = false,
+  hintPlaca,
 }) => {
   const placaLimpia = placa.trim();
   const tieneDatos = Boolean(
@@ -97,15 +123,17 @@ export const DireccionCamposGroup: React.FC<DireccionCamposGroupProps> = ({
   );
 
   // Formateo de la vía para vista previa
+  const numViaNormalizado = normalizarDireccionTexto(numeroVia);
   const viaPreview =
     tipoVia === "OTRO"
-      ? nombreCalleLibre.trim().toUpperCase() || "(vía libre)"
-      : numeroVia.trim()
-      ? `${tipoVia} ${numeroVia.trim().toUpperCase()}`
+      ? normalizarDireccionTexto(nombreCalleLibre) || "(vía libre)"
+      : numViaNormalizado
+      ? `${tipoVia} ${numViaNormalizado}`
       : `${tipoVia} (vía)`;
 
   // Formateo de la placa para vista previa
-  const placaPreview = placaLimpia ? `#${placaLimpia}` : "#(placa)";
+  const placaNormalizada = normalizarDireccionTexto(placa);
+  const placaPreview = placaNormalizada ? `#${placaNormalizada}` : "#(placa)";
 
   // Interior opcional
   const interiorPreview =
@@ -136,39 +164,64 @@ export const DireccionCamposGroup: React.FC<DireccionCamposGroupProps> = ({
         <div className={mostrarInterior ? "sm:col-span-4" : "sm:col-span-4"}>
           <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
             {labelVia || (tipoVia === "OTRO" ? "Dirección / Vía Completa" : "Número / Letra de la Vía")}{" "}
-            {esObligatoria && <span className="text-red-500">*</span>}
+            {esObligatoria && <strong className="text-red-400">*</strong>}
           </label>
           {tipoVia === "OTRO" ? (
             <input
               type="text"
               value={nombreCalleLibre}
               onChange={(e) => onNombreCalleLibreChange(e.target.value.toUpperCase())}
+              onBlur={() => onNombreCalleLibreChange(normalizarDireccionTexto(nombreCalleLibre))}
               placeholder="Ej: CALLE 21C, VEREDA EL SALADO"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+                errorVia
+                  ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                  : "border-gray-300 text-gray-900 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+              }`}
             />
           ) : (
             <input
               type="text"
               value={numeroVia}
               onChange={(e) => onNumeroViaChange(e.target.value.toUpperCase())}
+              onBlur={() => onNumeroViaChange(normalizarDireccionTexto(numeroVia))}
               placeholder="Ej: 21C, 45B, 80"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm uppercase placeholder:normal-case focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+                errorVia
+                  ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                  : "border-gray-300 text-gray-900 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+              }`}
             />
+          )}
+          {hintVia && (
+            <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+              {hintVia}
+            </p>
           )}
         </div>
 
         {/* Placa Puerta (PLACAUNIDA) */}
         <div className={mostrarInterior ? "sm:col-span-3" : "sm:col-span-4"}>
           <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-            {labelPlaca || "Placa / Número"} {esObligatoria && <span className="text-red-500">*</span>}
+            {labelPlaca || "Placa / Número"} {esObligatoria && <strong className="text-red-400">*</strong>}
           </label>
           <input
             type="text"
             value={placa}
             onChange={(e) => onPlacaChange(e.target.value.toUpperCase())}
+            onBlur={() => onPlacaChange(normalizarDireccionTexto(placa))}
             placeholder="Ej: 40A-15, 12-34"
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold uppercase placeholder:normal-case focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+            className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm font-semibold uppercase placeholder:normal-case focus:ring-2 focus:outline-hidden dark:bg-gray-800 dark:text-white ${
+              errorPlaca
+                ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-red-500/20 dark:border-red-500 dark:text-red-200"
+                : "border-gray-300 text-gray-900 focus:border-brand-500 focus:ring-brand-500/20 dark:border-gray-700"
+            }`}
           />
+          {hintPlaca && (
+            <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+              {hintPlaca}
+            </p>
+          )}
         </div>
 
         {/* Interior / Torre */}
