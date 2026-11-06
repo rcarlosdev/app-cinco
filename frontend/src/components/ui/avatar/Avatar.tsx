@@ -71,6 +71,7 @@ const Avatar: React.FC<AvatarProps> = ({
       {/* Avatar Image */}
       <Image
         fill
+        unoptimized
         sizes={imageSizes[size]}
         src={displaySrc}
         alt={alt}
