@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "es-ES"
+tone_instructions: "Sé directo y conciso. Explica el razonamiento técnico detrás de cada sugerencia sin formalismos innecesarios."
+
+reviews:
+  # 'chill' proporciona retroalimentación balanceada; 'assertive' para revisiones más estrictas.
+  profile: "chill"
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "develop"
+      - "main"
+
+  # Reglas globales para todo el repositorio basadas en los estándares del proyecto
+  instructions: |
+    - Idioma obligatorio: Todo el código, documentación, comentarios y nombres de identificadores deben estar en español según los estándares del proyecto.
+    - Regla de Oro: Prohibido modificar o alterar rutas de controladores o endpoints preexistentes (ej. controller_cinco.php -> /../controller_cinco.php).
+    - Limpieza: Verifica que no haya `console.log`, `print` de depuración o bloques de código comentado olvidado.
+    - Legibilidad y calidad: Prioriza la claridad y modularidad por encima de optimizaciones prematuras o excesivamente complejas.
+    - Seguridad: Prohibido exponer credenciales, tokens o datos sensibles en el código.
+    - Codificación: Asegura compatibilidad UTF-8 en archivos nuevos o modificados para prevenir mojibake.
+
+  # Reglas específicas adaptadas a la estructura monorepo (frontend en Next.js y backend en Django)
+  path_instructions:
+    - path: "frontend/**"
+      instructions: |
+        - Verifica que todos los componentes y hooks de React/Next.js estén estrictamente tipados con TypeScript.
+        - Asegura el uso correcto de directivas de Next.js ('use client' / 'use server' según corresponda).
+        - Verifica que la UI respete la consistencia con TailwindCSS, componentes modulares y diseño responsivo.
+        - Para tablas o listados de gran volumen, asegurar procesamiento/paginación en servidor o virtualización.
+
+    - path: "backend/**"
+      instructions: |
+        - Django / DRF: Uso obligatorio del ORM o consultas parametrizadas para evitar inyección SQL. Prohibido concatenar SQL crudo.
+        - Manejo estricto de excepciones y respuestas estructuradas en las APIs.
+        - Prohibido incluir cambios de base de datos no autorizados (DML/DDL invasivo como INSERT/UPDATE/DELETE/ALTER o migraciones no supervisadas).
+        - Gobernanza de IA: Cualquier modelo o tabla `ia_dev_*` debe residir y operar únicamente en el esquema `ai_dictionary` (nunca en `db_cincosas`).
+        - Selección explícita de campos en consultas para optimizar rendimiento.
+
+    - path: "**/tests/**"
+      instructions: |
+        - Cada prueba unitaria o de integración debe tener aserciones (asserts) claras y descriptivas.
+        - Validar tanto casos de éxito como manejo de errores y caminos alternativos.
